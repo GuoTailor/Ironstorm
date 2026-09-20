@@ -1,0 +1,225 @@
+buildscript {
+
+
+    repositories {
+        mavenLocal()
+        mavenCentral()
+        gradlePluginPortal()
+        maven { url "https://oss.sonatype.org/content/repositories/snapshots/" }
+        google()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.1.2'
+        classpath 'com.mobidevelop.robovm:robovm-gradle-plugin:2.3.21'
+        classpath "com.badlogicgames.gdx:gdx-tools:1.12.1"
+
+    }
+}
+
+allprojects {
+    apply plugin: "eclipse"
+
+    version = '1.0'
+    ext {
+        appName = "phoenix"
+        gdxVersion = '1.12.1'
+        roboVMVersion = '2.3.21'
+        box2DLightsVersion = '1.5'
+        ashleyVersion = '1.7.4'
+        aiVersion = '1.8.2'
+        gdxControllersVersion = '2.2.1'
+    }
+
+    repositories {
+        mavenLocal()
+        mavenCentral()
+        google()
+        gradlePluginPortal()
+        maven { url "https://oss.sonatype.org/content/repositories/snapshots/" }
+        maven { url "https://oss.sonatype.org/content/repositories/releases/" }
+        maven { url "https://jitpack.io" }
+    }
+
+    tasks.withType(JavaCompile) {
+        targetCompatibility = JavaVersion.VERSION_21
+        sourceCompatibility = JavaVersion.VERSION_21
+        options.encoding = "UTF-8"
+        options.compilerArgs += ["-Xlint:deprecation"]
+
+        options.forkOptions.jvmArgs += [
+                '--add-opens=jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED',
+                '--add-opens=jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED',
+                '--add-opens=jdk.compiler/com.sun.tools.javac.model=ALL-UNNAMED',
+                '--add-opens=jdk.compiler/com.sun.tools.javac.processing=ALL-UNNAMED',
+                '--add-opens=jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED',
+                '--add-opens=jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED',
+                '--add-opens=jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED',
+                '--add-opens=java.base/sun.reflect.annotation=ALL-UNNAMED'
+        ]
+    }
+}
+
+configure(project(":annotations")) {
+    tasks.withType(JavaCompile) {
+        targetCompatibility = JavaVersion.VERSION_21
+        sourceCompatibility = 8
+        options.fork = true
+    }
+}
+//compile with java 8 compatibility for everything except the annotation project
+configure(subprojects - project(":annotations")) {
+    tasks.withType(JavaCompile) {
+        options.compilerArgs.addAll(['--release', '21'])
+    }
+
+    tasks.withType(Javadoc) {
+        options {
+            addStringOption('Xdoclint:none', '-quiet')
+            addStringOption('-release', '21')
+            encoding('UTF-8')
+        }
+    }
+}
+
+project(":desktop") {
+    apply plugin: "java-library"
+
+
+    dependencies {
+        implementation project(":core")
+        api "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-desktop"
+        api "com.badlogicgames.gdx:gdx-bullet-platform:$gdxVersion:natives-desktop"
+        api "com.badlogicgames.gdx:gdx-freetype-platform:$gdxVersion:natives-desktop"
+    }
+}
+
+project(":android") {
+    apply plugin: "com.android.application"
+
+    configurations { natives }
+
+    dependencies {
+        implementation project(":core")
+        api "com.badlogicgames.gdx:gdx-backend-android:$gdxVersion"
+        natives "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-armeabi-v7a"
+        natives "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-arm64-v8a"
+        natives "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-x86"
+        natives "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-x86_64"
+        api "com.badlogicgames.gdx:gdx-bullet:$gdxVersion"
+        natives "com.badlogicgames.gdx:gdx-bullet-platform:$gdxVersion:natives-armeabi-v7a"
+        natives "com.badlogicgames.gdx:gdx-bullet-platform:$gdxVersion:natives-arm64-v8a"
+        natives "com.badlogicgames.gdx:gdx-bullet-platform:$gdxVersion:natives-x86"
+        natives "com.badlogicgames.gdx:gdx-bullet-platform:$gdxVersion:natives-x86_64"
+        api "com.badlogicgames.gdx:gdx-ai:$aiVersion"
+
+    }
+}
+
+project(":ios") {
+    apply plugin: "java-library"
+    apply plugin: "robovm"
+
+
+    dependencies {
+        implementation project(":core")
+        api "com.mobidevelop.robovm:robovm-rt:$roboVMVersion"
+        api "com.mobidevelop.robovm:robovm-cocoatouch:$roboVMVersion"
+        api "com.badlogicgames.gdx:gdx-backend-robovm:$gdxVersion"
+        api "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-ios"
+        api "com.badlogicgames.gdx:gdx-bullet-platform:$gdxVersion:natives-ios"
+
+    }
+}
+
+project(":core") {
+    apply plugin: "java-library"
+
+    compileJava.options.fork = true
+    dependencies {
+        api "com.badlogicgames.gdx:gdx-backend-lwjgl3:$gdxVersion"
+        api "com.badlogicgames.gdx:gdx:$gdxVersion"
+        api "com.badlogicgames.gdx:gdx-bullet:$gdxVersion"
+        api "com.badlogicgames.gdx:gdx-ai:$aiVersion"
+        api "com.badlogicgames.gdx:gdx-freetype:$gdxVersion"
+        compileOnly project(":annotations")
+        annotationProcessor project(":annotations")
+    }
+}
+
+project(":annotations") {
+    apply plugin: "java-library"
+
+    dependencies {
+        implementation 'com.squareup:javapoet:1.12.1'
+        implementation files("${System.getProperty('java.home')}/../lib/tools.jar")
+    }
+}
+
+project(":tools"){
+    apply plugin: "java-library"
+
+    dependencies{
+        implementation project(":core")
+
+        //for render tests
+        api "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-desktop"
+        api "com.badlogicgames.gdx:gdx-freetype-platform:$gdxVersion:natives-desktop"
+        api "com.badlogicgames.gdx:gdx-bullet-platform:$gdxVersion:natives-desktop"
+        api "com.badlogicgames.gdx:gdx-backend-lwjgl3:$gdxVersion"
+    }
+}
+
+project(":server") {
+    apply plugin: "java"
+
+    sourceCompatibility = 21
+    sourceSets.main.java.srcDirs = [ "src/" ]
+    sourceSets.main.resources.srcDirs = ["../assets"]
+
+    project.ext.mainClassName = "com.phoenix.game.server.ServerLauncher"
+    project.ext.assetsDir = new File("../assets")
+
+    dependencies {
+        implementation project(":core")
+        implementation "com.badlogicgames.gdx:gdx-backend-headless:$gdxVersion"
+        implementation "com.badlogicgames.gdx:gdx:$gdxVersion"
+        implementation "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-desktop"
+    }
+
+    tasks.register('run', JavaExec) {
+        dependsOn classes
+        mainClass = project.mainClassName
+        classpath = sourceSets.main.runtimeClasspath
+        standardInput = System.in
+        workingDir = project.assetsDir
+        ignoreExitValue = true
+        //控制台中文输出（Windows 默认 GBK 会把 UTF-8 中文变 '?'）
+        jvmArgs "-Dfile.encoding=UTF-8", "-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8"
+    }
+
+    tasks.register('dist', Jar) {
+        duplicatesStrategy(DuplicatesStrategy.EXCLUDE)
+        manifest {
+            attributes 'Main-Class': project.mainClassName
+        }
+        dependsOn configurations.runtimeClasspath
+        from {
+            configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+        }
+        with jar
+    }
+
+    dist.dependsOn classes
+}
+
+import com.badlogic.gdx.tools.texturepacker.TexturePacker
+
+task texturePacker {
+    project.ext.texturePacker = ["core/assets-raw/sprites/", "core/assets/sprites/", "sprites"]
+    doLast {
+        if (project.ext.has('texturePacker')) {
+            logger.info "Calling TexturePacker: " + texturePacker
+            TexturePacker.process(texturePacker[0], texturePacker[1], texturePacker[2])
+        }
+    }
+}

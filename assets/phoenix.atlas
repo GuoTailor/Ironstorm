@@ -1,0 +1,11 @@
+phoenix.png
+size:256,256
+repeat:none
+banana
+bounds:128,128,128,128
+cherries
+bounds:0,0,128,128
+crate
+bounds:128,0,128,128
+orange
+bounds:0,128,128,128

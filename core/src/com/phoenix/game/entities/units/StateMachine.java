@@ -1,0 +1,27 @@
+package com.phoenix.game.entities.units;
+
+/**
+ * 参照 Mindustry mindustry.entities.units.StateMachine 移植。
+ */
+public class StateMachine{
+    private UnitState state;
+
+    public void update(){
+        if(state != null) state.update();
+    }
+
+    public void set(UnitState next){
+        if(next == state) return;
+        if(state != null) state.exited();
+        this.state = next;
+        if(next != null) next.entered();
+    }
+
+    public UnitState current(){
+        return state;
+    }
+
+    public boolean is(UnitState state){
+        return this.state == state;
+    }
+}
