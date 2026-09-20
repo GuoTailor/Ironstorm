@@ -62,6 +62,8 @@ public class Turret extends Block{
     public BulletType bullet;
     public Sound shootSound = Sounds.shoot;
     public Effects.Effect shootEffect = Fx.none;
+    /** 开火烟（对应原版 Turret.smokeEffect） */
+    public Effects.Effect smokeEffect = Fx.none;
 
     /** 炮管贴图（按角度旋转绘制） */
     public TextureRegion barrelRegion;
@@ -101,10 +103,16 @@ public class Turret extends Block{
         Draw.rect(barrelRegion, x, y, entity.rotation - 90f);
     }
 
-    /** 只接收对应弹药（对应原版 ItemTurret.acceptItem）。 */
+    /** 只接收消耗器声明过的弹药（对应原版 ItemTurret.acceptItem）。 */
     @Override
     public boolean acceptItem(Item item, Tile tile, Tile source){
-        if(ammoItem == null || item != ammoItem) return false;
+        //没声明物品消耗器的炮塔（纯耗电/激光类）不收物品
+        if(!consumes.has(com.phoenix.game.world.consumers.ConsumeType.item)) return false;
+
+        com.phoenix.game.world.consumers.ConsumeItems ci =
+            consumes.get(com.phoenix.game.world.consumers.ConsumeType.item);
+        if(!ci.hasItem(item)) return false;
+
         return super.acceptItem(item, tile, source);
     }
 
@@ -170,14 +178,14 @@ public class Turret extends Block{
             }
         }
 
+        /** @return 能否开火：弹药（或电力）由消耗器统一判定。 */
         public boolean hasAmmo(){
-            return ammoItem == null || items == null || items.has(ammoItem, ammoPerShot);
+            return cons.valid();
         }
 
+        /** 开火后扣料（ConsumeItems 扣物品，ConsumePower 的 trigger 是空实现）。 */
         protected void useAmmo(){
-            if(ammoItem != null && items != null){
-                items.remove(ammoItem, ammoPerShot);
-            }
+            cons.trigger();
         }
 
         protected void updateShooting(){
@@ -207,7 +215,32 @@ public class Turret extends Block{
             useAmmo();
 
             if(shootSound != null) shootSound.play(1f);
-            Effects.effect(shootEffect, cx() + ox, cy() + oy, rotation);
+            effects(cx() + ox, cy() + oy);
+        }
+
+        /** 播放炮口特效：炮塔自身为 {@link Fx#none} 时退回弹药自带的特效（对应原版 Turret.effects）。 */
+        protected void effects(float x, float y){
+            Effects.Effect shoot = Turret.this.shootEffect == Fx.none ? bullet.shootEffect : Turret.this.shootEffect;
+            Effects.Effect smoke = Turret.this.smokeEffect == Fx.none ? bullet.smokeEffect : Turret.this.smokeEffect;
+
+            Effects.effect(shoot, x, y, rotation);
+            Effects.effect(smoke, x, y, rotation);
+        }
+
+        @Override
+        public void write(java.io.DataOutputStream out) throws java.io.IOException{
+            super.write(out);
+            out.writeFloat(rotation);
+            out.writeFloat(reload);
+        }
+
+        @Override
+        public void read(java.io.DataInputStream in, byte revision) throws java.io.IOException{
+            super.read(in, revision);
+            rotation = in.readFloat();
+            reload = in.readFloat();
+            //目标不入档：读档后下一帧重新索敌（recoil/heat 是纯视觉量，不存）
+            target = null;
         }
     }
 }

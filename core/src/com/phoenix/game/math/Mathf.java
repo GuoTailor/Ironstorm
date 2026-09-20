@@ -74,6 +74,11 @@ public class Mathf {
         return MathUtils.clamp(value, min, max);
     }
 
+    /** 把 f 从 [min,max] 归一化到 [0,1]（超出范围夹住），对应 arc 的 Mathf.curve。 */
+    public static float curve(float f, float min, float max){
+        return clamp((f - min) / (max - min));
+    }
+
     public static float lerp(float from, float to, float progress){
         return MathUtils.lerp(from, to, progress);
     }
@@ -144,6 +149,16 @@ public class Mathf {
             seedr.nextInt();
         }
         return seedr.nextInt(Math.max(range, 1)) + min;
+    }
+
+    /** @return 由种子确定的 [-range, range] 随机数（对应 arc 的 {@code Mathf.randomSeedRange(long,float)}）。 */
+    public static float randomSeedRange(long seed, float range){
+        return (randomSeed(seed) - 0.5f) * 2f * range;
+    }
+
+    /** @return (x,y) 与 x 轴正方向的夹角（度，对应 arc 的 {@code Mathf.angle}）。 */
+    public static float angle(float x, float y){
+        return MathUtils.atan2(y, x) * radiansToDegrees;
     }
 
     /** @return sine wave that is always positive. */

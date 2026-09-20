@@ -43,6 +43,14 @@ public class Unloader extends Block{
         }
     }
 
+    /** 配置界面：物品选择表（对应原版 ItemSelection.buildTable）。 */
+    @Override
+    public void buildConfiguration(Tile tile, com.badlogic.gdx.scenes.scene2d.ui.Table table){
+        UnloaderEntity e = tile.entity instanceof UnloaderEntity ? (UnloaderEntity)tile.entity : null;
+        com.phoenix.game.ui.fragments.BlockConfigFragment.itemPicker(table, e == null ? null : e.sortItem,
+            item -> tile.configure(item == null ? -1 : item.id));
+    }
+
     @Override
     public void configured(Tile tile, Player player, int value){
         UnloaderEntity e = (UnloaderEntity)tile.entity;
@@ -77,6 +85,12 @@ public class Unloader extends Block{
     public class UnloaderEntity extends TileEntity{
         /** 配置只取的物品；null 表示取任意。 */
         public Item sortItem;
+
+        @Override
+        public int config(){
+            return sortItem == null ? -1 : sortItem.id;
+        }
+
         /** 取物计时（0~1，满 1 取一件）。 */
         public float unloadTimer;
 
@@ -114,6 +128,22 @@ public class Unloader extends Block{
             if(items.total() > 0){
                 tryDump(tile);
             }
+        }
+
+        @Override
+        public void write(java.io.DataOutputStream out) throws java.io.IOException{
+            super.write(out);
+            out.writeShort(sortItem == null ? -1 : com.phoenix.game.content.Items.all.indexOf(sortItem, true));
+            out.writeFloat(unloadTimer);
+        }
+
+        @Override
+        public void read(java.io.DataInputStream in, byte revision) throws java.io.IOException{
+            super.read(in, revision);
+            int index = in.readShort();
+            sortItem = index < 0 || index >= com.phoenix.game.content.Items.all.size
+                ? null : com.phoenix.game.content.Items.all.get(index);
+            unloadTimer = in.readFloat();
         }
     }
 }

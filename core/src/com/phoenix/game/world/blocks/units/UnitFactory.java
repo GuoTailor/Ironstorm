@@ -209,5 +209,17 @@ public class UnitFactory extends Block{
             unit.set(sx + Mathf.range(3f), sy + Mathf.range(3f));
             unit.health(unit.maxHealth());
         }
+
+        @Override
+        public void write(java.io.DataOutputStream out) throws java.io.IOException{
+            super.write(out);
+            out.writeFloat(buildTime);
+        }
+
+        @Override
+        public void read(java.io.DataInputStream in, byte revision) throws java.io.IOException{
+            super.read(in, revision);
+            buildTime = in.readFloat();
+        }
     }
 }

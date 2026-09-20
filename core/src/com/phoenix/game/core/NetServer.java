@@ -110,6 +110,10 @@ public class NetServer {
         if(!timer.get(syncInterval)) return;
         if(players.size == 0) return;
 
+        //在建/待拆方块：进度是逐帧变化的量，只在这个周期同步里发（不必每帧刷包）。
+        //客机据此画出"在建"方块与进度，不需要自己跑建造队列（避免双端分叉）。
+        broadcastBuildingBlocks();
+
         //单位快照：遍历**所有单位**（含波次敌人，不只玩家），按字节预算分片批量发送。
         //客户端据此创建/更新代理单位——这也是敌人能被看见、子弹不再"凭空出现"的前提。
         com.badlogic.gdx.utils.IntSet frameUnits = new com.badlogic.gdx.utils.IntSet();
@@ -244,22 +248,53 @@ public class NetServer {
         net.handleServer(Packets.BuildRequest.class, (con, p) -> {
             RemotePlayer rp = findByConnection(con);
             if(rp == null || Vars.world == null) return;
-            //服务端权威：校验后放置（扣材料），成功广播 BlockState 给所有人（含发起者确认）
+
+            com.phoenix.game.world.Tile tile = Vars.world.tile(p.x, p.y);
+            if(tile == null) return;
             com.phoenix.game.world.Block block = blockById(p.blockId);
             if(block == null) return;
-            com.phoenix.game.world.Tile tile = Vars.world.tile(p.x, p.y);
-            if(com.phoenix.game.world.Build.placeBlock(tile, block, rp.player.getTeam(), p.rotation & 3)){
-                broadcastBlockState(tile);
+
+            //交给该玩家的单位去建造：与单机**同一套队列逻辑**（先铺占位方块，再逐帧推进度）。
+            //进度由服务端权威推进，客机只从周期广播的 BlockState 里看到"在建"状态。
+            if(rp.unit != null && !rp.unit.isDead()){
+                rp.unit.addBuildRequest(new com.phoenix.game.world.BuildRequest(p.x, p.y, p.rotation & 3, block));
             }
         });
 
         net.handleServer(Packets.DeconstructRequest.class, (con, p) -> {
             RemotePlayer rp = findByConnection(con);
             if(rp == null || Vars.world == null) return;
+
             com.phoenix.game.world.Tile tile = Vars.world.tile(p.x, p.y);
-            if(com.phoenix.game.world.Build.deconstruct(tile, rp.player.getTeam())){
-                broadcastBlockRemove(tile);
+            if(tile == null) return;
+
+            //拆除同样走队列（先铺占位方块，进度退到 0 才真正移除）
+            if(rp.unit != null && !rp.unit.isDead()){
+                rp.unit.addBuildRequest(new com.phoenix.game.world.BuildRequest(p.x, p.y));
             }
+        });
+
+        //RTS 命令：校验队伍归属后权威应用，并转发给其他客户端做表现（对应原版 @Remote forward = true）
+        net.handleServer(Packets.UnitCommandPacket.class, (con, p) -> {
+            RemotePlayer rp = findByConnection(con);
+            if(rp == null || Vars.world == null || p.unitIds.length == 0) return;
+
+            BaseUnit unitTarget = p.targetUnitId >= 0 ? com.phoenix.game.input.InputHandler.findUnitById(p.targetUnitId) : null;
+
+            if(p.type == Packets.TYPE_ORDERS){
+                com.phoenix.game.input.InputHandler.applyCommand(rp.player.getTeam(), p.unitIds, unitTarget, p.x, p.y, p.queue);
+            }else if(p.type == Packets.TYPE_COMMAND && p.commandId >= 0 && p.commandId < com.phoenix.game.ai.UnitCommand.all.size){
+                com.phoenix.game.input.InputHandler.applySetCommand(rp.player.getTeam(), p.unitIds,
+                    com.phoenix.game.ai.UnitCommand.all.get(p.commandId));
+            }else if(p.type == Packets.TYPE_STANCE && p.commandId >= 0 && p.commandId < com.phoenix.game.ai.UnitStance.all.size){
+                com.phoenix.game.input.InputHandler.applySetStance(rp.player.getTeam(), p.unitIds,
+                    com.phoenix.game.ai.UnitStance.all.get(p.commandId));
+            }else{
+                return;
+            }
+
+            //转发给除发送者外的所有客户端（表现层：画线/特效）
+            Vars.net.sendExcept(con, p, Net.SendMode.tcp);
         });
     }
 
@@ -269,8 +304,20 @@ public class NetServer {
         return com.phoenix.game.content.Blocks.all.get(id);
     }
 
-    /** 广播一格建筑的当前状态。 */
-    private void broadcastBlockState(com.phoenix.game.world.Tile tile){
+    /** 周期广播全部"在建/待拆"方块的状态（建造队列的进度靠它同步给客机）。 */
+    private void broadcastBuildingBlocks(){
+        if(Vars.world == null || Vars.world.tiles == null) return;
+        for(com.phoenix.game.world.Tile tile : Vars.world.tiles){
+            if(tile == null) continue;
+            //只看中心格：多格在建方块的卫星格是 BlockPart，不重复发
+            if(tile.blockRaw() instanceof com.phoenix.game.world.blocks.BuildBlock){
+                broadcastBlockState(tile);
+            }
+        }
+    }
+
+    /** 广播一格建筑的当前状态（含实体内部状态：配置/进度/物品……）。 */
+    public void broadcastBlockState(com.phoenix.game.world.Tile tile){
         if(tile == null || tile.block() == null) return;
         Packets.BlockState st = new Packets.BlockState();
         st.x = tile.x;
@@ -279,6 +326,21 @@ public class NetServer {
         st.teamId = (byte)tile.getTeam().id;
         st.rotation = tile.rotation();
         st.health = tile.entity != null ? tile.entity.health() : tile.block().health;
+
+        //实体内部状态：与存档共用 TileEntity.write（配置值、建造进度、传送带物品、炮塔角度…）
+        if(tile.entity != null){
+            try{
+                java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+                java.io.DataOutputStream dos = new java.io.DataOutputStream(bos);
+                dos.writeByte(tile.entity.revision());
+                tile.entity.write(dos);
+                dos.flush();
+                st.entityData = bos.toByteArray();
+            }catch(java.io.IOException e){
+                System.err.println("序列化建筑状态失败: " + e);
+            }
+        }
+
         net.send(st, Net.SendMode.tcp);
     }
 

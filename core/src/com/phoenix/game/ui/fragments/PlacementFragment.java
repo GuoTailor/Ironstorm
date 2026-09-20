@@ -76,8 +76,22 @@ public class PlacementFragment extends Fragment{
     /** 网格面板（对应原版 blocksSelect）。 */
     private Table grid;
     private ScrollPane blockPane;
+    /** 蓝图按钮容器（横向滚动）。 */
+    private Table schematicList;
+    /** 上次构建蓝图列表时的蓝图数量，用于检测"新存了一张"。 */
+    private int schematicCount = -1;
     /** 分类按钮列（对应原版 categories），每帧刷新选中态。 */
     private Table categories;
+
+    // ---- RTS 命令面板（对应原版 commandTable：命令模式下替换建造网格显示） ----
+    /** 建造内容（网格 + 分类 + 蓝图行），命令模式下隐藏。 */
+    private Table mainContent;
+    /** 命令模式面板。 */
+    private Table commandTable;
+    /** 命令面板动态内容区（选中单位列表 + 命令按钮）。 */
+    private Table commandList;
+    /** 上次重建时的选择签名（类型计数 + 姿态位），变化才重建。 */
+    private String lastCommandSig = "";
 
     private boolean shown = true;
     /** 原版默认打开分配类。 */
@@ -141,7 +155,19 @@ public class PlacementFragment extends Fragment{
 
         body.add(gridFrame).width(Scl.scl(GRID_FRAME_WIDTH)).bottom();
         body.add(categories = buildCategories()).width(Scl.scl(CATEGORY_COLUMN_WIDTH)).bottom();
-        panel.add(body).growX().pad(Scl.scl(5f)).row();
+
+        // 3b) 命令面板：命令模式下与建造内容互斥显示（对应原版 mainStack 的 blockCatTable/commandTable 切换）
+        mainContent = new Table();
+        mainContent.add(body).growX().pad(Scl.scl(5f)).row();
+        mainContent.add(schematicRow()).growX().padLeft(Scl.scl(5f)).padRight(Scl.scl(5f)).row();
+
+        commandTable = buildCommandTable();
+        commandTable.setVisible(false);
+
+        Stack mainStack = new Stack();
+        mainStack.add(mainContent);
+        mainStack.add(commandTable);
+        panel.add(mainStack).growX().row();
 
         rebuildGrid();
         rebuildCategories();
@@ -239,6 +265,105 @@ public class PlacementFragment extends Fragment{
         return table;
     }
 
+    /** 复制选区半径（格）：以玩家脚下为中心取 (2r+1)² 的区域。原版是拖拽选区，这里简化为固定范围。 */
+    private static final int SCHEMATIC_COPY_RADIUS = 3;
+    /** 蓝图缩略图的显示边长（像素）。 */
+    private static final float SCHEMATIC_PREVIEW_SIZE = 56f;
+
+    /**
+     * 蓝图行：左边"复制选区"，右边蓝图列表（横向滚动）。
+     * <p>点蓝图按钮 → 进入粘贴模式（{@link InputHandler#pasteSchematic}），再点世界即可贴。
+     * <p>原版是拖拽框选 + 独立蓝图对话框，这里简化为固定范围复制 + 内嵌列表。
+     */
+    private Table schematicRow(){
+        Table table = new Table();
+        table.defaults().pad(Scl.scl(2f));
+
+        Button copy = new Button(Styles.defaultb);
+        copy.add(new Label("复制选区", Styles.defaultLabel)).pad(Scl.scl(4f));
+        copy.addListener(new ClickListener(){
+            @Override public void clicked(com.badlogic.gdx.scenes.scene2d.InputEvent event, float x, float y){
+                saveSelection();
+            }
+        });
+        table.add(copy).height(Scl.scl(30f)).width(Scl.scl(84f));
+
+        schematicList = new Table();
+        ScrollPane pane = new ScrollPane(schematicList, Styles.defaultPane);
+        pane.setScrollingDisabled(false, true);
+        //高度要能放下缩略图 + 名字（缩略图是懒生成的，没生成出来时这个高度也只是稍微宽松些）
+        table.add(pane).height(Scl.scl(SCHEMATIC_PREVIEW_SIZE + 26f)).growX();
+
+        rebuildSchematicList();
+        return table;
+    }
+
+    /** 把玩家脚下 (2r+1)² 的区域存成蓝图。 */
+    private void saveSelection(){
+        if(Vars.world == null || Vars.player == null || Vars.schematics == null) return;
+
+        int cx = Vars.world.toTile(Vars.player.getX());
+        int cy = Vars.world.toTile(Vars.player.getY());
+        com.phoenix.game.game.Schematic schem = Vars.schematics.create(
+            cx - SCHEMATIC_COPY_RADIUS, cy - SCHEMATIC_COPY_RADIUS,
+            cx + SCHEMATIC_COPY_RADIUS, cy + SCHEMATIC_COPY_RADIUS);
+
+        if(schem.tiles.size == 0){
+            System.err.println("DBG 复制选区为空，未保存蓝图");
+            return;
+        }
+        Vars.schematics.add(schem);
+        rebuildSchematicList();
+        System.err.println("DBG 已保存蓝图 " + schem.name() + " tiles=" + schem.tiles.size);
+    }
+
+    /** 重建蓝图按钮列表（点一下进入/退出粘贴模式）。 */
+    private void rebuildSchematicList(){
+        if(schematicList == null || Vars.schematics == null) return;
+        schematicList.clearChildren();
+        //记下当前数量，act() 靠它判断"有没有新蓝图需要重建列表"
+        schematicCount = Vars.schematics.all().size;
+
+        if(Vars.schematics.all().size == 0){
+            schematicList.add(new Label("无蓝图", Styles.defaultLabel)).pad(Scl.scl(4f));
+            return;
+        }
+
+        for(int i = 0; i < Vars.schematics.all().size; i++){
+            com.phoenix.game.game.Schematic schem = Vars.schematics.all().get(i);
+
+            //缩略图：懒生成（首次显示时才渲染到 FBO），GL 未就绪时退化成纯文字按钮
+            com.badlogic.gdx.graphics.Texture preview = Vars.schematics.getPreview(schem);
+
+            Table cell = new Table();
+            cell.setBackground(Styles.black6);
+
+            if(preview != null){
+                Image image = new Image(new TextureRegionDrawable(new TextureRegion(preview)));
+                cell.add(image).size(Scl.scl(SCHEMATIC_PREVIEW_SIZE)).pad(Scl.scl(2f)).row();
+            }
+
+            Label nameLabel = new Label(schem.name(), Styles.defaultLabel);
+            nameLabel.setEllipsis(true);
+            cell.add(nameLabel).width(Scl.scl(SCHEMATIC_PREVIEW_SIZE)).pad(Scl.scl(2f)).row();
+
+            cell.addListener(new ClickListener(){
+                @Override public void clicked(com.badlogic.gdx.scenes.scene2d.InputEvent event, float x, float y){
+                    InputHandler input = input();
+                    if(input == null) return;
+                    //再点同一个就取消粘贴
+                    input.pasteSchematic = input.pasteSchematic == schem ? null : schem;
+                    if(input.pasteSchematic != null){
+                        input.buildBlock = null;
+                        input.breaking = false;
+                    }
+                }
+            });
+
+            schematicList.add(cell).pad(Scl.scl(2f));
+        }
+    }
+
     /** 按当前分类重建 4 列方块网格。 */
     private void rebuildGrid(){
         if(grid == null) return;
@@ -256,7 +381,12 @@ public class PlacementFragment extends Fragment{
             button.addListener(new ClickListener(){
                 @Override public void clicked(com.badlogic.gdx.scenes.scene2d.InputEvent event, float x, float y){
                     InputHandler input = input();
-                    if(input != null){ input.buildBlock = input.buildBlock == block ? null : block; input.breaking = false; }
+                    if(input != null){
+                        input.buildBlock = input.buildBlock == block ? null : block;
+                        input.breaking = false;
+                        //选了方块就退出蓝图粘贴模式（两者互斥）
+                        input.pasteSchematic = null;
+                    }
                 }
             });
             buttons.add(button);
@@ -307,8 +437,188 @@ public class PlacementFragment extends Fragment{
             button.setColor(Build.canAfford(Team.sharded, block) ? Color.WHITE : Color.GRAY);
         }
 
+        //蓝图数量变了（新存了一张 / 重新扫描目录）就重建列表，否则新存的蓝图要重启才看得到
+        if(Vars.schematics != null && Vars.schematics.all().size != schematicCount){
+            schematicCount = Vars.schematics.all().size;
+            rebuildSchematicList();
+        }
+
         updateCategoryChecked();
         updateDetail();
+        updateCommandMode();
+    }
+
+    /** 命令面板骨架：标题 + 动态内容区（对应原版 commandTable 的构建）。 */
+    private Table buildCommandTable(){
+        Table table = new Table();
+        table.top().left().pad(Scl.scl(5f));
+        table.add(new Label("RTS 命令模式", Styles.defaultLabel)).left().padBottom(Scl.scl(4f)).row();
+        commandList = new Table();
+        table.add(commandList).growX().row();
+        return table;
+    }
+
+    /**
+     * 命令模式切换与面板刷新（对应原版 PlacementFragment 的 mainStack.update + u.update()）：
+     * commandMode 时隐藏建造网格、显示命令面板；选择变化时重建列表。
+     */
+    private void updateCommandMode(){
+        InputHandler input = input();
+        boolean cmd = input != null && input.commandMode;
+
+        mainContent.setVisible(!cmd);
+        commandTable.setVisible(cmd);
+
+        if(!cmd){
+            lastCommandSig = "";
+            return;
+        }
+
+        if(input.selectedUnits.size == 0){
+            //无选中单位：只显示提示（对应原版 commandmode.nounits）
+            if(!lastCommandSig.equals("-")){
+                rebuildCommandList(null, null);
+                lastCommandSig = "-";
+            }
+            return;
+        }
+
+        //选择签名：各类型数量 + 姿态位（变了才重建，避免每帧分配 Actor）
+        java.util.LinkedHashMap<com.phoenix.game.type.UnitType, int[]> counts = new java.util.LinkedHashMap<>();
+        StringBuilder sig = new StringBuilder();
+        for(int i = 0; i < input.selectedUnits.size; i++){
+            com.phoenix.game.entities.type.BaseUnit unit = input.selectedUnits.get(i);
+            int[] count = counts.get(unit.getType());
+            if(count == null){
+                count = new int[1];
+                counts.put(unit.getType(), count);
+            }
+            count[0]++;
+            if(unit.commandAI != null) sig.append(unit.commandAI.stances.toString()).append(';');
+        }
+        for(java.util.Map.Entry<com.phoenix.game.type.UnitType, int[]> e : counts.entrySet()){
+            sig.append(e.getKey().name).append(':').append(e.getValue()[0]).append('|');
+        }
+
+        if(!sig.toString().equals(lastCommandSig)){
+            rebuildCommandList(input, counts);
+            lastCommandSig = sig.toString();
+        }
+    }
+
+    /** 重建命令面板内容：选中单位图标行 + 命令/姿态按钮行。 */
+    private void rebuildCommandList(InputHandler input, java.util.Map<com.phoenix.game.type.UnitType, int[]> counts){
+        commandList.clearChildren();
+        commandList.top().left();
+
+        if(input == null || counts == null){
+            commandList.add(new Label("选中单位后右键下达命令", Styles.defaultLabel)).left().pad(Scl.scl(4f)).row();
+            return;
+        }
+
+        //单位类型图标行：左键把该类型移出选择，右键只保留该类型（对应原版 rebuildCommand）
+        Table unitsRow = new Table();
+        int shown = 0;
+        for(java.util.Map.Entry<com.phoenix.game.type.UnitType, int[]> e : counts.entrySet()){
+            com.phoenix.game.type.UnitType type = e.getKey();
+            if(type.icon(com.phoenix.game.ui.Cicon.medium) == null) continue;
+
+            Table cell = new Table();
+            ImageButton.ImageButtonStyle iconStyle = new ImageButton.ImageButtonStyle(Styles.selecti);
+            iconStyle.imageUp = new TextureRegionDrawable(type.icon(com.phoenix.game.ui.Cicon.medium));
+            ImageButton iconBtn = new ImageButton(iconStyle);
+            com.phoenix.game.type.UnitType fType = type;
+            iconBtn.addListener(new ClickListener(){
+                @Override
+                public void clicked(com.badlogic.gdx.scenes.scene2d.InputEvent event, float x, float y){
+                    if(event.getButton() == com.badlogic.gdx.Input.Buttons.RIGHT){
+                        //右键：只保留该类型
+                        for(int i = input.selectedUnits.size - 1; i >= 0; i--){
+                            if(input.selectedUnits.get(i).getType() != fType){
+                                input.selectedUnits.removeIndex(i);
+                            }
+                        }
+                    }else{
+                        //左键：把该类型移出选择
+                        for(int i = input.selectedUnits.size - 1; i >= 0; i--){
+                            if(input.selectedUnits.get(i).getType() == fType){
+                                input.selectedUnits.removeIndex(i);
+                            }
+                        }
+                    }
+                }
+            });
+            cell.add(iconBtn).size(Scl.scl(40f)).row();
+            cell.add(new Label("×" + e.getValue()[0], Styles.defaultLabel)).center();
+            unitsRow.add(cell).pad(Scl.scl(2f));
+            shown++;
+        }
+        if(shown > 0){
+            commandList.add(unitsRow).left().row();
+        }
+
+        //命令按钮行（对应原版命令按钮 + 姿态按钮）
+        Table cmdRow = new Table();
+
+        //移动命令
+        addCommandButton(cmdRow, com.phoenix.game.ai.UnitCommand.moveCommand.getIcon(), "移动",
+            allSelectedCommand(input, com.phoenix.game.ai.UnitCommand.moveCommand),
+            () -> input.setUnitCommand(com.phoenix.game.ai.UnitCommand.moveCommand));
+
+        //取消命令（对应原版 UnitStance.stop → clearCommands）
+        addStanceButton(cmdRow, input, com.phoenix.game.ai.UnitStance.stop);
+        //停火 / 追击目标
+        addStanceButton(cmdRow, input, com.phoenix.game.ai.UnitStance.holdFire);
+        addStanceButton(cmdRow, input, com.phoenix.game.ai.UnitStance.pursueTarget);
+
+        commandList.add(cmdRow).left().pad(Scl.scl(4f)).row();
+
+        commandList.add(new Label("左键框选 · 右键移动/攻击 · 中键追加", Styles.defaultLabel))
+            .left().pad(Scl.scl(4f)).row();
+    }
+
+    /** @return 是否所有选中单位的当前命令都是该命令。 */
+    private boolean allSelectedCommand(InputHandler input, com.phoenix.game.ai.UnitCommand command){
+        for(int i = 0; i < input.selectedUnits.size; i++){
+            com.phoenix.game.entities.type.BaseUnit unit = input.selectedUnits.get(i);
+            if(unit.commandAI == null || unit.commandAI.currentCommand() != command){
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** 命令按钮：图标 + 提示文字。 */
+    private void addCommandButton(Table row, com.badlogic.gdx.scenes.scene2d.utils.Drawable icon,
+                                  String name, boolean checked, Runnable action){
+        ImageButton.ImageButtonStyle style = new ImageButton.ImageButtonStyle(Styles.clearTogglei);
+        style.imageUp = icon;
+        ImageButton button = new ImageButton(style);
+        button.setChecked(checked);
+        button.addListener(new ClickListener(){
+            @Override
+            public void clicked(com.badlogic.gdx.scenes.scene2d.InputEvent event, float x, float y){
+                action.run();
+            }
+        });
+        row.add(button).size(Scl.scl(40f)).pad(Scl.scl(2f));
+    }
+
+    /** 姿态按钮（toggle；stop = 取消全部命令）。 */
+    private void addStanceButton(Table row, InputHandler input, com.phoenix.game.ai.UnitStance stance){
+        boolean checked = stance != com.phoenix.game.ai.UnitStance.stop && anySelectedStance(input, stance);
+        addCommandButton(row, stance.getIcon(), stance.localized(), checked, () -> input.setUnitStance(stance));
+    }
+
+    /** @return 是否有选中单位开启该姿态。 */
+    private boolean anySelectedStance(InputHandler input, com.phoenix.game.ai.UnitStance stance){
+        for(int i = 0; i < input.selectedUnits.size; i++){
+            com.phoenix.game.entities.type.BaseUnit unit = input.selectedUnits.get(i);
+            if(unit.commandAI != null && unit.commandAI.hasStance(stance)){
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -433,7 +743,8 @@ public class PlacementFragment extends Fragment{
         if(item == null || Core.bundle == null) return "";
         String key = "item." + item.name + ".name";
         String value = Core.bundle.get(key);
-        return value.equals(key) ? item.name : value;
+        //I18NBundle 缺键返回 "???key???"（不是键本身），两种形态都视为缺失
+        return (value.equals(key) || value.equals("???" + key + "???")) ? item.name : value;
     }
 
     /** @return 钻头每秒采集量文本；非钻头返回空串。 */
@@ -472,8 +783,14 @@ public class PlacementFragment extends Fragment{
      * 原版靠 {@code buildVisibility} + 解锁状态过滤（{@code PlacementFragment:424}），phoenix 两者都没有，按类型过滤。
      */
     private boolean buildable(Block block){
-        return !(block instanceof com.phoenix.game.world.Floor)
-            && !(block instanceof com.phoenix.game.world.blocks.Rock);
+        if(block instanceof com.phoenix.game.world.Floor || block instanceof com.phoenix.game.world.blocks.Rock){
+            return false;
+        }
+        //沙盒方块只在沙盒模式下列出（对应原版 BuildVisibility.sandboxOnly）
+        if(block.sandboxOnly && !Vars.state.rules.sandbox){
+            return false;
+        }
+        return true;
     }
 
     private Tile hoveredTile(){

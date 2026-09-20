@@ -68,6 +68,15 @@ public class Draw{
         Core.batch.setColor(Tmp.c1.set(a).lerp(b, s));
     }
 
+    /** 三段渐变：s&lt;0.5 在 a→b 之间，否则在 b→c 之间（对应 arc 的 {@code Draw.color(a,b,c,s)}）。 */
+    public static void color(Color a, Color b, Color c, float s) {
+        if(s < 0.5f){
+            Core.batch.setColor(Tmp.c1.set(a).lerp(b, s * 2f));
+        }else{
+            Core.batch.setColor(Tmp.c1.set(b).lerp(c, s * 2f - 1f));
+        }
+    }
+
     public static void color() {
         Core.batch.setPackedColor(Color.WHITE_FLOAT_BITS);
     }
@@ -112,6 +121,8 @@ public class Draw{
     }
 
     public static void rect(TextureRegion region, float x, float y, float w, float h) {
+        //画精灵前先把几何会话收尾，保证「精灵 → 几何 → 精灵」的绘制顺序严格成立
+        Drawf.end();
         Core.batch.draw(region, x - w / 2.0F, y - h / 2.0F, w, h);
     }
 
@@ -120,14 +131,18 @@ public class Draw{
     }
 
     public static void rect(TextureRegion region, float x, float y, float w, float h, float rotation) {
+        Drawf.end();
         Core.batch.draw(region, x - w / 2.0F, y - h / 2.0F, w / 2.0F, h / 2.0F, w, h, 1, 1, rotation);
     }
 
     public static void rect(TextureRegion region, float x, float y, float w, float h, float originX, float originY, float rotation) {
+        Drawf.end();
         Core.batch.draw(region, x - w / 2.0F, y - h / 2.0F, originX, originY, w, h, 1, 1, rotation);
     }
 
     public static void flush() {
+        //几何会话先落盘，再 flush 精灵批次（批次 flush 会重新绑定自己的 shader 与贴图）
+        Drawf.end();
         Core.batch.flush();
     }
 

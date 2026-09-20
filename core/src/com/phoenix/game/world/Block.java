@@ -186,8 +186,9 @@ public class Block {
         if(Core.bundle == null) return name;
         String key = "block." + name + ".name";
         String value = Core.bundle.get(key);
-        //I18NBundle 缺键时返回键本身，这里视为缺失并回退
-        return value.equals(key) ? name : value;
+        //I18NBundle 缺键时返回 "???key???"（见 I18NBundle.setExceptionOnMissingKey(false)），
+        //不是返回键本身 —— 判断错会把问号串直接显示出去，这里两种形态都视为缺失并回退到内部名
+        return (value.equals(key) || value.equals("???" + key + "???")) ? name : value;
     }
 
     /** @return 悬停瓦片时显示的名称（对应原版 getDisplayName(Tile)）。 */
@@ -219,6 +220,12 @@ public class Block {
             addItemsBar(entity, table);
         }
     }
+
+    /**
+     * 只允许在沙盒模式建造（对应原版 {@code BuildVisibility.sandboxOnly}）。
+     * <p>建造菜单里只有当 {@code rules.sandbox} 打开时才会列出这些方块。
+     */
+    public boolean sandboxOnly;
 
     /** 是否显示物品储量条（对应原版 configurable 开关）。 */
     public boolean itemsBarEnabled;
@@ -262,8 +269,10 @@ public class Block {
     }
 
     public boolean hasEntity(){
-        //有血量的建筑（如墙体）也需要实体来承载血量，即使没有每帧逻辑
-        return update || destructible;
+        //有血量的建筑（如墙体）也需要实体来承载血量，即使没有每帧逻辑。
+        //必须同时要求 entityType != null：否则 newEntity() 会返回 null，
+        //结果这一格"有方块、没实体"，血量和拆除都会静默失效
+        return entityType != null && (update || destructible);
     }
 
     public boolean isSolidFor(Tile tile){
@@ -289,9 +298,28 @@ public class Block {
     public boolean configurable;
     /** 是否能被装卸器（Unloader）取物（对应原版 {@code Block.unloadable}）。 */
     public boolean unloadable = true;
+    /** 配置值是"另一格的位置"（物品桥/质量驱动器/电力节点），对应原版 {@code Block.posConfig}。 */
+    public boolean posConfig;
 
     /** 玩家放置后回调（对应原版 {@code Block.playerPlaced}）。 */
     public void playerPlaced(Tile tile){
+    }
+
+    /**
+     * 地形条件校验（对应原版 {@code Block.canPlaceOn}）：瓦片为空之外的地形要求。
+     * @return false 表示该瓦片不满足放置条件（如钻头脚下没有可采矿物）
+     */
+    public boolean canPlaceOn(Tile tile){
+        return true;
+    }
+
+    /**
+     * 玩家点击本方块时回调（对应原版 {@code Block.tapped}）。
+     * <p>用于"点一下就能操作"的方块：指挥中心切指令、机甲平台换机甲、在建方块续建。
+     * @return true 表示本方块已处理这次点击，输入层不再把它当开火
+     */
+    public boolean tapped(Tile tile, com.phoenix.game.entities.type.Player player){
+        return false;
     }
 
     /**
@@ -320,6 +348,14 @@ public class Block {
     public void onProximityRemoved(Tile tile){
     }
 
+    /**
+     * 子弹命中本建筑时回调（对应原版 {@code Block.handleBulletHit}）。
+     * <p>用于"受击时做事"的方块：反射墙（反弹子弹）、合金墙（闪电反击）等。
+     * <p>注意调用时机在**子弹被移除之前**，因此在这里调 {@code bullet.deflect()} 可以让子弹不被消耗。
+     */
+    public void handleBulletHit(TileEntity entity, com.phoenix.game.entities.type.Bullet bullet){
+    }
+
     /** 是否隐藏不绘制（如 BlockPart 卫星瓦片）。 */
     public boolean isHidden(){
         return false;
@@ -346,6 +382,14 @@ public class Block {
     public void drawLayer(Tile tile){
     }
 
+    /**
+     * 在所有方块绘制完成后的"顶层"绘制（电力节点的激光连线等需要盖住相邻方块的内容）。
+     * <p>逐格绘制时后画的方块会压掉先画的内容，所以这类跨方块的连线必须放到独立的一遍里。
+     * @param tile 本方块所在瓦片
+     */
+    public void drawTopLayer(Tile tile){
+    }
+
     /** @return 是否向相邻建筑输出物品（对应原版 Block.outputsItems），传送带贴图拼接会用到。 */
     public boolean outputsItems(){
         return hasItems;
@@ -370,6 +414,42 @@ public class Block {
     /** 消耗功率（每帧）。 */
     public float powerConsumption;
 
+    /**
+     * 建造总成本（对应原版 {@code Block.buildCost}）：各材料数量 × 材料单价之和。
+     * <p>由 {@link #init()} 算出。建造队列用它决定推进速度——成本越高，单位时间内涨的进度越少。
+     * 无材料要求的方块成本为 0，会瞬间建成（与原版一致）。
+     */
+    public float buildCost;
+
+    /** 资源消耗器集合（对应原版 {@code Block.consumes}）：物品/液体/电力统一在这里声明。 */
+    public final com.phoenix.game.world.consumers.Consumers consumes = new com.phoenix.game.world.consumers.Consumers();
+
+    /**
+     * 内容加载时调用一次（对应原版 {@code Block.init}）：拍平消耗器数组供热路径遍历。
+     * <p>必须在方块字段配置完之后、{@link #load()} 之前调用（{@code Blocks.load} 里统一做）。
+     */
+    public void init(){
+        consumes.init();
+
+        //建造总成本 = Σ(材料数量 × 单价)（对应原版 Block.init）
+        buildCost = 0f;
+        for(ItemStack stack : requirements){
+            buildCost += stack.amount * stack.item.cost;
+        }
+
+        //把电力消耗器同步回旧字段：PowerGraph 仍按 powerConsumption / powerProduction 算电量平衡，
+        //这样各方块只需声明 consumes.power(...)，不必再手写 powerConsumption（避免两处不一致）
+        if(consumes.hasPower()){
+            com.phoenix.game.world.consumers.ConsumePower power =
+                consumes.get(com.phoenix.game.world.consumers.ConsumeType.power);
+
+            hasPower = true;
+            if(!power.buffered){
+                powerConsumption = power.usage;
+            }
+        }
+    }
+
     /** @return 方块每帧发电量。 */
     public float getPowerProduction(Tile tile){
         return powerProduction;
@@ -378,6 +458,27 @@ public class Block {
     /** @return 方块每帧耗电量。 */
     public float getPowerNeeded(Tile tile){
         return powerConsumption;
+    }
+
+    /** 电网连线距离（格）；0 表示只连邻接建筑。对应原版 {@code PowerNode.laserRange}。 */
+    public float powerRange;
+
+    /**
+     * 收集本建筑在电网中**直接相连**的瓦片（对应原版 {@code PowerBlock.getPowerConnections}）。
+     * <p>{@link PowerGraph} 只通过这个入口做连通性 BFS，所以覆写它就能改变电网拓扑：
+     * 默认 = 邻接表（外围一圈同队建筑）；{@code PowerNode} 覆写成"范围内其他节点"以支持远距离连线；
+     * {@code PowerDiode} 覆写成"只连背面"以实现单向输电。
+     * @param out 输出列表（调用方负责清空），只会被加入带电瓦片
+     */
+    public void getPowerConnections(Tile tile, Array<Tile> out){
+        if(tile.entity == null) return;
+
+        for(int i = 0; i < tile.entity.proximity.size; i++){
+            Tile other = tile.entity.proximity.get(i);
+            if(other.entity != null && other.entity.power != null){
+                out.add(other);
+            }
+        }
     }
 
     /**
@@ -559,6 +660,39 @@ public class Block {
     /** @return 本方块在指定锚点瓦片处的几何中心 Y */
     public float centerY(Tile tile){
         return tile.worldy() + offset() + tilesize / 2f;
+    }
+
+    /**
+     * 本瓦片的可燃性（对应原版 {@code Block.getFlammability}）：火系统的蔓延/熄灭判据。
+     * <p>判据分两支：<br>
+     * ① 没有物品库存（空瓦片、墙、地板）时返回**地板液体**的可燃性——水是 0，火落在水上没有燃料，
+     * 会被 {@code Fire.update} 按 8 倍速烧完（相当于被浇灭）；<br>
+     * ② 有物品库存时累加库存物品的可燃性，有液体储量再按 1/3 折算进去。
+     * <p>刻意偏离：原版读 {@code tile.floor().liquidDrop.flammability}（每个液体地板挂一个 Liquid 内容），
+     * 本工程没有液体地板内容，改为 {@link Floor#flammability} 直接标在地板上。
+     */
+    public float getFlammability(Tile tile){
+        if(tile == null) return 0f;
+
+        if(!hasItems || tile.entity == null){
+            Floor floor = tile.floor();
+            return floor != null && floor.isLiquid && !solid ? floor.flammability : 0f;
+        }
+
+        float result = 0f;
+        if(tile.entity.items != null){
+            for(int i = 0; i < Items.all.size; i++){
+                Item item = Items.all.get(i);
+                int amount = tile.entity.items.get(item);
+                if(amount > 0) result += item.flammability * amount;
+            }
+        }
+
+        if(hasLiquids && tile.entity.liquids != null && tile.entity.liquids.current != null){
+            result += tile.entity.liquids.current.flammability * tile.entity.liquids.amount / 3f;
+        }
+
+        return result;
     }
 
     @Override

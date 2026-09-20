@@ -13,6 +13,7 @@ import com.phoenix.game.net.Net;
 import com.phoenix.game.net.NetworkIO;
 import com.phoenix.game.net.Packets;
 import com.phoenix.game.net.PhoenixNetProvider;
+import com.phoenix.game.core.Tmp;
 import com.phoenix.game.type.UnitType;
 
 import java.util.UUID;
@@ -281,6 +282,30 @@ public class NetClient {
         net.send(req, Net.SendMode.tcp);
     }
 
+    /**
+     * 发送 RTS 命令（服务端权威执行；本机只保留表现层状态）。
+     * @param type {@link Packets#TYPE_ORDERS} / {@link Packets#TYPE_COMMAND} / {@link Packets#TYPE_STANCE}
+     * @param extra TYPE_ORDERS 时为攻击目标单位 id（-1 无）；TYPE_COMMAND/TYPE_STANCE 时为命令/姿态下标
+     */
+    public void sendUnitCommand(int type, int[] unitIds, int extra, float x, float y, boolean queue){
+        if(!connected || unitIds == null || unitIds.length == 0) return;
+
+        //对应原版 maxChunkSize：超长分批发，避免单包过大
+        for(int start = 0; start < unitIds.length; start += com.phoenix.game.input.InputHandler.maxChunkSize){
+            int end = Math.min(start + com.phoenix.game.input.InputHandler.maxChunkSize, unitIds.length);
+            Packets.UnitCommandPacket packet = new Packets.UnitCommandPacket();
+            packet.type = (byte)type;
+            packet.unitIds = java.util.Arrays.copyOfRange(unitIds, start, end);
+            packet.commandId = extra;
+            packet.attack = type == Packets.TYPE_ORDERS && extra >= 0;
+            packet.targetUnitId = type == Packets.TYPE_ORDERS ? extra : -1;
+            packet.x = x;
+            packet.y = y;
+            packet.queue = queue;
+            net.send(packet, Net.SendMode.tcp);
+        }
+    }
+
     /** 断开连接并清理远端代理单位。 */
     public void disconnect(){
         if(connected){
@@ -460,7 +485,7 @@ public class NetClient {
 
         // ---- 6b：建筑 / 子弹 / 世界状态同步 ----
 
-        //建筑状态：放置/更新（含发起者自己的确认）
+        //建筑状态：放置/更新（含发起者自己的确认 + 实体内部状态）
         net.handleClient(Packets.BlockState.class, st -> {
             if(Vars.world == null) return;
             com.phoenix.game.world.Block block = com.phoenix.game.content.Blocks.all.get(
@@ -468,13 +493,28 @@ public class NetClient {
             com.phoenix.game.world.Tile tile = Vars.world.tile(st.x, st.y);
             if(tile == null) return;
 
-            //已一致则跳过（发起者本地预放置后服务器确认）
-            if(tile.block() == block && tile.getTeam() == com.phoenix.game.game.Team.get(st.teamId)){
-                if(tile.entity != null) tile.entity.health(st.health);
-                return;
+            if(tile.block() != block || tile.getTeam() != com.phoenix.game.game.Team.get(st.teamId)){
+                tile.setBlock(block, com.phoenix.game.game.Team.get(st.teamId), st.rotation);
             }
-            tile.setBlock(block, com.phoenix.game.game.Team.get(st.teamId), st.rotation);
-            if(tile.entity != null) tile.entity.health(st.health);
+
+            if(tile.entity != null){
+                //实体内部状态（配置值/建造进度/传送带物品/炮塔角度…）：与存档共用同一套序列化。
+                //服务端是权威，这里直接覆盖本地值 —— 客户端不跑建造队列，进度只认广播。
+                boolean applied = false;
+                if(st.entityData != null && st.entityData.length > 0){
+                    try{
+                        java.io.DataInputStream in = new java.io.DataInputStream(
+                            new java.io.ByteArrayInputStream(st.entityData));
+                        byte revision = in.readByte();
+                        tile.entity.read(in, revision);
+                        applied = true;
+                    }catch(Exception e){
+                        System.err.println("应用建筑实体状态失败: " + e);
+                    }
+                }
+                //没有实体数据（或解析失败）时至少把血量对齐
+                if(!applied) tile.entity.health(st.health);
+            }
         });
 
         //建筑血量纠偏：客机不本地扣血，服务端每次命中后广播权威血量（对应原版 Call.onTileDamage 的接收端）
@@ -516,6 +556,61 @@ public class NetClient {
             Vars.state.enemies = ws.enemies;
             Vars.state.wavetime = ws.wavetime;
         });
+
+        //RTS 命令（其他玩家的命令转发）：在代理单位上应用表现层状态 + 播确认特效。
+        //远端代理单位不跑 AI，这里只记录目标供画线；真实移动由服务器快照同步。
+        net.handleClient(Packets.UnitCommandPacket.class, p -> {
+            if(Vars.world == null) return;
+            handleUnitCommandVisual(p);
+        });
+    }
+
+    /** 处理收到的 RTS 命令包（表现层：记录目标 + 特效）。 */
+    private void handleUnitCommandVisual(Packets.UnitCommandPacket p){
+        com.phoenix.game.ai.UnitCommand command = null;
+        com.phoenix.game.ai.UnitStance stance = null;
+        BaseUnit unitTarget = p.targetUnitId >= 0 ? findUnit(p.targetUnitId) : null;
+
+        if(p.type == Packets.TYPE_COMMAND && p.commandId >= 0 && p.commandId < com.phoenix.game.ai.UnitCommand.all.size){
+            command = com.phoenix.game.ai.UnitCommand.all.get(p.commandId);
+        }else if(p.type == Packets.TYPE_STANCE && p.commandId >= 0 && p.commandId < com.phoenix.game.ai.UnitStance.all.size){
+            stance = com.phoenix.game.ai.UnitStance.all.get(p.commandId);
+        }
+
+        for(int i = 0; i < p.unitIds.length; i++){
+            BaseUnit unit = findUnit(p.unitIds[i]);
+            if(unit == null || unit.isDead() || unit.isPlayer) continue;
+
+            com.phoenix.game.ai.types.CommandAI ai = unit.command();
+            if(p.type == Packets.TYPE_ORDERS){
+                if(unitTarget != null){
+                    ai.commandTarget(unitTarget);
+                }else if(p.queue){
+                    ai.commandQueue(Tmp.v2.set(p.x, p.y));
+                }else{
+                    ai.commandPosition(Tmp.v2.set(p.x, p.y));
+                }
+            }else if(p.type == Packets.TYPE_COMMAND && command != null){
+                ai.command(command);
+                if(command.resetTarget) ai.clearCommands();
+            }else if(p.type == Packets.TYPE_STANCE && stance != null){
+                if(stance == com.phoenix.game.ai.UnitStance.stop){
+                    ai.clearCommands();
+                }else{
+                    ai.setStance(stance, !ai.hasStance(stance));
+                }
+            }
+        }
+
+        //特效只对移动/攻击命令播（其他客户端也能看到有人下了命令）
+        if(p.type == Packets.TYPE_ORDERS && p.unitIds.length > 0){
+            BaseUnit first = findUnit(p.unitIds[0]);
+            if(first != null && first.getTeam() == (Vars.player != null ? Vars.player.getTeam() : null)){
+                com.phoenix.game.entities.Effects.effect(
+                    unitTarget != null ? com.phoenix.game.content.Fx.attackCommand : com.phoenix.game.content.Fx.moveCommand,
+                    p.x, p.y);
+            }
+        }
     }
 
     /** 读取 Streamable 的 stream 全量字节（WorldStream 携带）。 */

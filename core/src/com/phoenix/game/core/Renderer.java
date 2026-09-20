@@ -131,6 +131,13 @@ public class Renderer {
         drawHealthBars(world);
         drawBossHealthBars();
         drawSelectionBox();
+
+        //RTS 命令系统：选中单位指示（圈/连线/目的标记）与框选矩形（对应原版 OverlayRenderer 调用链）
+        if(Vars.control != null && Vars.control.input != null && !Vars.state.isMenu()){
+            Vars.control.input.drawCommanded();
+            Vars.control.input.drawUnitSelection();
+        }
+
         Effects.render();
 
         Core.batch.end();
@@ -163,6 +170,15 @@ public class Renderer {
                         Core.batch.draw(region, tile.x * tilesize, tile.y * tilesize, tilesize, tilesize);
                     }
                 }
+
+                //覆盖层：矿脉斑点、波次出生点标记（对应原版 drawFloor 里随地板绘制的 overlay）
+                Floor overlay = tile.overlay();
+                if(overlay != null && overlay != Blocks.air){
+                    TextureRegion oRegion = overlay.variant(tile.x, tile.y);
+                    if(oRegion != null){
+                        Core.batch.draw(oRegion, tile.x * tilesize, tile.y * tilesize, tilesize, tilesize);
+                    }
+                }
             }
         }
 
@@ -193,6 +209,19 @@ public class Renderer {
                 }
             }
         }
+
+        //第三遍：顶层内容（电力节点的激光连线要盖在相邻方块之上）
+        for(int y = miny; y <= maxy; y++){
+            for(int x = minx; x <= maxx; x++){
+                Tile tile = world.tile(x, y);
+                if(tile == null || tile.isLinked()) continue;
+
+                Block block = tile.block();
+                if(block != null && block != Blocks.air){
+                    block.drawTopLayer(tile);
+                }
+            }
+        }
     }
 
     private void drawUnits(){
@@ -210,6 +239,10 @@ public class Renderer {
             if(bullet.isDead()) continue;
             bullet.draw();
         }
+
+        //激光弹这类"纯几何"的子弹会让 Drawf 的 ShapeRenderer 会话一直开着；这里收尾，
+        //否则后面的 batch 精灵（电力线/血条）会先于几何落盘，绘制顺序错乱
+        com.phoenix.game.core.Drawf.end();
     }
 
     /** 绘制电网连接线：把相邻的带电建筑连成拓扑（黄色细线）。 */
@@ -302,7 +335,7 @@ public class Renderer {
         if(Vars.world == null || Vars.control == null || Vars.control.input == null || Vars.state.isMenu()) return;
 
         com.phoenix.game.input.InputHandler input = Vars.control.input;
-        if(input.buildBlock == null && !input.breaking) return;
+        if(input.buildBlock == null && !input.breaking && input.pasteSchematic == null) return;
 
         TextureRegion white = region("white");
         if(white == null) return;
@@ -314,6 +347,23 @@ public class Renderer {
         int tx = Vars.world.toTile(v.x), ty = Vars.world.toTile(v.y);
         Tile tile = Vars.world.tile(tx, ty);
         if(tile == null) return;
+
+        //蓝图粘贴预览：把整张蓝图以光标为中心铺一遍半透明贴图（合法绿/非法红）
+        if(input.pasteSchematic != null){
+            com.phoenix.game.game.Schematic schem = input.pasteSchematic;
+            int ox = tx - schem.width / 2, oy = ty - schem.height / 2;
+
+            for(int i = 0; i < schem.tiles.size; i++){
+                com.phoenix.game.game.Schematic.Stile stile = schem.tiles.get(i);
+                Tile target = Vars.world.tile(stile.x + ox, stile.y + oy);
+                if(target == null) continue;
+
+                boolean ok = com.phoenix.game.world.Build.validPlace(target, stile.block);
+                drawGhost(target, stile.block, stile.rotation, ok, white);
+            }
+            Core.batch.setColor(1f, 1f, 1f, 1f);
+            return;
+        }
 
         //拆除预览：整个方块范围标红
         if(input.buildBlock == null){
@@ -386,7 +436,7 @@ public class Renderer {
     private void drawArrow(int tx, int ty, int rotation, boolean valid, Block block, TextureRegion white){
         float cx = tx * tilesize + block.offset() + tilesize / 2f;
         float cy = ty * tilesize + block.offset() + tilesize / 2f;
-        float a = spriteAngle(rotation);
+        float a = arrowAngle(rotation);
         float len = tilesize * 0.7f, hl = tilesize * 0.35f;
 
         Core.batch.setColor(valid ? com.phoenix.game.graphics.Pal.accent : com.phoenix.game.graphics.Pal.remove);
@@ -405,8 +455,19 @@ public class Renderer {
         }
     }
 
-    /** 本项目 rotation（0=上/1=右/2=下/3=左）→ 贴图旋转角（建筑贴图基准朝向为“右”，对应原版 rotation*90）。 */
+    /**
+     * 本项目 rotation（0=上/1=右/2=下/3=左）→ 贴图旋转角。
+     * <p>建筑贴图基准朝向为"上"（与原版一致），libgdx 的 batch.draw 角度是顺时针为正，故 = rotation * 90。
+     */
     private static float spriteAngle(int rotation){
+        return (rotation & 3) * 90f;
+    }
+
+    /**
+     * 本项目 rotation → 朝向箭头角度（供 {@link com.phoenix.game.math.Angles#trnsx} 等用）。
+     * <p>与贴图角不同：这里用的是数学角度约定（0=+X、逆时针为正），故 = (1 - rotation) * 90。
+     */
+    private static float arrowAngle(int rotation){
         return (1 - (rotation & 3)) * 90f;
     }
 

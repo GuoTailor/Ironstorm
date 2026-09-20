@@ -2,6 +2,7 @@ package com.phoenix.game.world.blocks.production;
 
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
+import com.phoenix.game.content.Items;
 import com.phoenix.game.core.Core;
 import com.phoenix.game.core.Draw;
 import com.phoenix.game.core.Time;
@@ -13,13 +14,16 @@ import com.phoenix.game.world.Tile;
 
 /**
  * 采集钻头。参照 Mindustry mindustry.world.blocks.production.Drill 移植。
- * <p>每 drillTime 帧产 1 个 result 存入自身库存，随后尝试交给相邻建筑（传送带/核心/仓库）。
- * 速度受供电满足率与液体加成影响（对应原版 warmup / liquidBoostIntensity）。
- * 未移植：矿层依赖（任何位置都能采）、dominantItem 按矿脉选择。
+ * <p>产出由脚下矿脉决定（{@link Tile#drop()}：矿脉 overlay 优先，其次地板自带产出如沙），
+ * 多格钻头统计整个覆盖面，取数量最多的矿物为主产出（对应原版 countOre/dominantItem）。
+ * <p>速度受供电满足率与液体加成影响（对应原版 warmup / liquidBoostIntensity），
+ * 硬度越高的矿物采集越慢（对应原版 hardnessDrillMultiplier）。
  */
 public class Drill extends Block{
-    /** 采出的物品。 */
-    public Item result;
+    /** 能采集的矿物硬度上限（对应原版 Drill.tier）。 */
+    public int tier;
+    /** 每点硬度增加的基础帧数（对应原版 hardnessDrillMultiplier；原版 50，按本项目 drillTime 数值体系折算）。 */
+    public float hardnessDrillMultiplier = 4f;
     /** 每采集 1 个所需的基础帧数。 */
     public float drillTime = 60f;
     /** 液体加速倍率上限（对应原版 liquidBoostIntensity）；<=1 表示无加速。 */
@@ -47,10 +51,11 @@ public class Drill extends Block{
         health = 80;
         hasItems = true;
         itemCapacity = 10;
+        //液体模块用于"液体加速"（原版 liquidBoostIntensity）
         hasLiquids = true;
         liquidCapacity = 5f;
-        hasPower = true;
-        powerConsumption = 0.05f;
+        //不在这里写 hasPower/powerConsumption：需要电的钻头由 Blocks 里声明 consumes.power(...) 开启，
+        //机械钻头（原版无电）因此不会平白多出一个电力模块（否则没接电网就 speed=0，完全不产出）
         entityType = DrillEntity::new;
     }
 
@@ -155,12 +160,23 @@ public class Drill extends Block{
         public float warmup;
         /** 最后一次计算的采集速度（每秒），用于详情条。 */
         public float lastDrillSpeed;
-        /** 产出的物品种类（详情面板显示用）。 */
+        /** 产出的物品种类与格数（countOre 统计结果；读档后下一帧重算）。 */
         public Item dominantItem;
+        public int dominantItems;
 
         @Override
         public void update(){
-            if(result == null) return;
+            //主产出：只统计一次（矿脉不会消失）；没矿时每帧重试，等不到就待机
+            if(dominantItem == null){
+                countOre(tile);
+                if(returnItem == null){
+                    lastDrillSpeed = 0f;
+                    warmup = Mathf.lerpDelta(warmup, 0f, warmupSpeed);
+                    return;
+                }
+                dominantItem = returnItem;
+                dominantItems = returnCount;
+            }
 
             float speed = speedf();
 
@@ -176,14 +192,15 @@ public class Drill extends Block{
             float boost = liquidBoostIntensity > 1f && liquids != null && !liquids.isEmpty() ? liquidBoostIntensity : 1f;
             float rate = speed * boost * warmup;
 
-            lastDrillSpeed = rate / drillTime * 60f;
-            dominantItem = result;
-            progress += Time.delta() * rate;
+            //硬度越高的矿物越慢：满 1 个所需帧数 = drillTime + 硬度 × multiplier（对应原版）
+            float required = drillTime + hardnessDrillMultiplier * dominantItem.hardness;
+            lastDrillSpeed = rate * dominantItems / required * 60f;
+            progress += Time.delta() * rate * dominantItems;
 
-            if(progress >= drillTime){
+            if(progress >= required){
                 progress = 0f;
                 //先尝试直接交给相邻建筑，无处可去才留在自身库存
-                offloadNear(tile, result);
+                offloadNear(tile, dominantItem);
             }
 
             //把积压的库存持续往外送
@@ -194,5 +211,89 @@ public class Drill extends Block{
         private float speedf(){
             return power == null ? 1f : power.status;
         }
+
+        @Override
+        public void write(java.io.DataOutputStream out) throws java.io.IOException{
+            super.write(out);
+            out.writeFloat(progress);
+            out.writeFloat(warmup);
+        }
+
+        @Override
+        public void read(java.io.DataInputStream in, byte revision) throws java.io.IOException{
+            super.read(in, revision);
+            progress = in.readFloat();
+            warmup = in.readFloat();
+            //lastDrillSpeed/dominantItem 是派生量，下一帧重算
+        }
+    }
+
+    // ---- 矿物统计（对应原版 Drill.countOre / isValid） ----
+
+    /** countOre 的结果：主产出与它的格数（对应原版 returnItem / returnCount）。 */
+    private Item returnItem;
+    private int returnCount;
+
+    /**
+     * 统计锚点瓦片覆盖面上可采的矿物，取数量最多者为主产出。
+     * <p>排序与原版一致：非沙优先 → 数量降序 → id 升序（沙最廉价，垫底）。
+     */
+    private void countOre(Tile tile){
+        returnItem = null;
+        returnCount = 0;
+
+        java.util.HashMap<Item, Integer> counts = new java.util.HashMap<>();
+        for(Tile other : linkedTiles(tile)){
+            if(isValid(other)){
+                Item drop = other.drop();
+                counts.merge(drop, 1, Integer::sum);
+            }
+        }
+
+        for(java.util.Map.Entry<Item, Integer> entry : counts.entrySet()){
+            Item item = entry.getKey();
+            int amount = entry.getValue();
+            if(returnItem == null
+                || (item != Items.sand && returnItem == Items.sand)
+                || (amount > returnCount && (item != Items.sand) == (returnItem != Items.sand))
+                || (amount == returnCount && (item != Items.sand) == (returnItem != Items.sand) && item.id < returnItem.id)){
+                returnItem = item;
+                returnCount = amount;
+            }
+        }
+    }
+
+    /** @return 该瓦片的矿物本钻头可采（非空且硬度 ≤ tier，对应原版 Drill.isValid）。 */
+    private boolean isValid(Tile tile){
+        Item drop = tile == null ? null : tile.drop();
+        return drop != null && drop.hardness <= tier;
+    }
+
+    /** @return 本钻头在该瓦片上的主产出矿物；没矿返回 null（调试输出也在用）。 */
+    public Item resultFor(Tile tile){
+        countOre(tile);
+        return returnItem;
+    }
+
+    @Override
+    public boolean canPlaceOn(Tile tile){
+        //与原版一致：覆盖面里至少一格可采才能放置
+        for(Tile other : linkedTiles(tile)){
+            if(isValid(other)) return true;
+        }
+        return false;
+    }
+
+    /** 覆盖面瓦片（与 Tile.setBlock 的多格铺开范围一致，支持偶数尺寸）。 */
+    private java.util.ArrayList<Tile> linkedTiles(Tile tile){
+        java.util.ArrayList<Tile> out = new java.util.ArrayList<>();
+        int offset = -(size - 1) / 2;
+        for(int dx = 0; dx < size; dx++){
+            for(int dy = 0; dy < size; dy++){
+                Tile other = tile.getNearby(dx + offset, dy + offset);
+                if(other != null) out.add(other);
+            }
+        }
+        return out;
     }
 }

@@ -63,6 +63,11 @@ public abstract class BulletType {
     public Effects.Effect hitEffect = Fx.none;
     /** 消失特效。 */
     public Effects.Effect despawnEffect = Fx.none;
+    /** 开火时炮口闪光特效（对应原版 BulletType.shootEffect）。
+     *  <p>炮塔自身的 {@code Turret.shootEffect} 为 {@link Fx#none} 时会退回本字段（见 Turret.effects）。 */
+    public Effects.Effect shootEffect = Fx.shootSmall;
+    /** 开火时炮口附加烟雾（对应原版 BulletType.smokeEffect）。退回规则同 {@link #shootEffect}。 */
+    public Effects.Effect smokeEffect = Fx.shootSmallSmoke;
     /** 命中音效。 */
     public Sound hitSound = Sounds.none;
     /** 消失音效。 */

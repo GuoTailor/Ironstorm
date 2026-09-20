@@ -147,61 +147,10 @@ public class MenuFragment extends Fragment {
         System.out.println("fadeInMenu");
     }
 
-    /** 弹出读档对话框：列出全部存档槽位，点选即读档进入战场。 */
+    /** 弹出读档对话框（与 HUD 共用同一实现；读档前先把菜单隐藏掉）。 */
     private void showLoadDialog(){
-        if(Vars.saves == null) return;
-
-        com.badlogic.gdx.scenes.scene2d.ui.Window.WindowStyle winStyle =
-            new com.badlogic.gdx.scenes.scene2d.ui.Window.WindowStyle(com.phoenix.game.core.Fonts.def,
-                com.phoenix.game.graphics.Pal.accent, Styles.defaultDialog.background);
-        com.badlogic.gdx.scenes.scene2d.ui.Dialog dialog = new com.badlogic.gdx.scenes.scene2d.ui.Dialog("读档", winStyle);
-
-        Table list = new Table();
-        list.top().left();
-
-        com.badlogic.gdx.utils.Array<com.phoenix.game.game.Saves.SaveSlot> slots = Vars.saves.getSlots();
-        if(slots.size == 0){
-            list.add(new Label("暂无存档", Styles.defaultLabel));
-        }else{
-            for(com.phoenix.game.game.Saves.SaveSlot slot : slots){
-                Button b = new Button(Styles.defaultb);
-                Label label = new Label(slot.toString(), Styles.defaultLabel);
-                label.setAlignment(Align.left);
-                b.add(label).pad(Scl.scl(5f)).growX();
-                b.addListener(new ClickListener(){
-                    @Override
-                    public void clicked(InputEvent event, float x, float y){
-                        dialog.hide();
-                        if(Vars.control != null){
-                            hide();
-                            Vars.control.load(slot);
-                        }
-                    }
-                });
-                list.add(b).width(Scl.scl(320f)).pad(Scl.scl(2f)).row();
-            }
-        }
-
-        dialog.getContentTable().add(list).pad(Scl.scl(10f));
-        //注意：Dialog 由 WindowStyle 构造（skin 为 null），不能调用 dialog.button(...)——
-        //libgdx 该方法依赖 skin，会抛 IllegalStateException 直接崩掉渲染线程
-        Button close = new Button(Styles.defaultb);
-        close.add(new Label("关闭", Styles.defaultLabel)).pad(Scl.scl(5f));
-        close.addListener(new ClickListener(){
-            @Override
-            public void clicked(InputEvent event, float x, float y){
-                dialog.hide();
-            }
-        });
-        dialog.getButtonTable().add(close).width(Scl.scl(120f)).height(Scl.scl(40f)).pad(Scl.scl(4f));
-        if(group != null && group.getStage() != null){
-            com.badlogic.gdx.scenes.scene2d.Stage st = group.getStage();
-            dialog.show(st);
-            //同 showJoinDialog：pack 后重新居中，避免 hit 区域错位
-            dialog.pack();
-            dialog.setPosition((st.getWidth() - dialog.getWidth()) / 2f,
-                               (st.getHeight() - dialog.getHeight()) / 2f);
-        }
+        if(group == null || group.getStage() == null) return;
+        HudFragment.showLoadDialog(group.getStage(), this::hide);
     }
 
     /** 弹出加入服务器对话框：输入 IP:端口与玩家名，连接成功进入联机模式。 */

@@ -143,5 +143,21 @@ public class OverflowGate extends Block{
                 lastItem = null;
             }
         }
+
+        @Override
+        public void read(java.io.DataInputStream in, byte revision) throws java.io.IOException{
+            super.read(in, revision);
+            time = 0f;
+            //物品由基类从 items 恢复，这里捡回 lastItem，避免下一帧的残留清理把它丢掉
+            lastItem = items == null ? null : items.first();
+        }
+
+        @Override
+        public void afterRead(){
+            //lastInput 是瓦片引用、不入档：邻接表重建后挑一个邻居当输入方向
+            if(lastItem != null && lastInput == null && proximity.size > 0){
+                lastInput = proximity.first();
+            }
+        }
     }
 }

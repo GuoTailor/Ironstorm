@@ -203,6 +203,10 @@ public class Bullet extends SolidEntity implements Pool.Poolable, VelocityTrait,
 
         type.update(this);
 
+        //注意：type.update 里的回调可能已经把这颗子弹回收了（remove() 会清空 type，见 MassDriver 的投递回调），
+        //此时必须立刻返回，否则下面读 type.drag / type.lifetime 会 NPE
+        if(isDead() || type == null) return;
+
         x += velocity.x * Time.delta();
         y += velocity.y * Time.delta();
 
@@ -229,14 +233,19 @@ public class Bullet extends SolidEntity implements Pool.Poolable, VelocityTrait,
                         //只有实心方块会阻挡子弹（与原版一致：传送带等非实心建筑不阻挡）
                         if(!tile.solid()) return false;
 
-                        //只有敌方建筑会被扣血；友方墙体只挡子弹、不吃伤害
-                        if(tile.entity != null && team.isEnemy(tile.getTeam())){
-                            tile.entity.handleDamage(type.damage);
-                            //受击火花反馈
-                            com.phoenix.game.entities.Effects.effect(com.phoenix.game.content.Fx.spark, tile.drawx(), tile.drawy(), rot());
+                        if(tile.entity != null){
+                            //先给方块一次拦截机会（护盾/反射墙）；被拦截的子弹不再造成伤害
+                            tile.block().handleBulletHit(tile.entity, this);
+
+                            //只有敌方建筑会被扣血；友方墙体只挡子弹、不吃伤害
+                            if(!deflected && team.isEnemy(tile.getTeam())){
+                                tile.entity.handleDamage(type.damage);
+                                //受击火花反馈
+                                com.phoenix.game.entities.Effects.effect(com.phoenix.game.content.Fx.spark, tile.drawx(), tile.drawy(), rot());
+                            }
                         }
 
-                        if(!supressCollision){
+                        if(!deflected && !supressCollision){
                             type.hitTile(this);
                             remove();
                         }
@@ -312,6 +321,17 @@ public class Bullet extends SolidEntity implements Pool.Poolable, VelocityTrait,
     /** 生命周期进度（对应原版 Scaled.fin，待 Scaled 移植后可加回 @Override）。 */
     public float fin(){
         return type.lifetime <= 0f ? 1f : time / type.lifetime;
+    }
+
+    /** @return 1 - fin()，即"剩余比例"（对应原版 Scaled.fout）。 */
+    public float fout(){
+        return 1f - fin();
+    }
+
+    /** @return 0→1→0 的三角波（对应原版 Scaled.fslope），用于"中途最大"的粒子尺寸/拖尾。 */
+    public float fslope(){
+        float f = fin();
+        return (0.5f - Math.abs(f - 0.5f)) * 2f;
     }
 
     @Override

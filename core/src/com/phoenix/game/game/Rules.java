@@ -28,4 +28,9 @@ public class Rules{
     public float unitDamageMultiplier = 1f;
     /** 敌方是否作弊 */
     public boolean enemyCheat = false;
+    /**
+     * 沙盒模式：打开后建造菜单里会出现无限资源类方块（电力源/物品源/虚空等）。
+     * <p>对应原版按 {@code BuildVisibility.sandboxOnly} 过滤方块。
+     */
+    public boolean sandbox = false;
 }

@@ -128,6 +128,8 @@ public class Vars {
     public static com.phoenix.game.core.Renderer renderer;
     /** 流场寻路器（世界加载时在 Pathfinder 内自行挂接 WorldLoadEvent 启动后台线程）。 */
     public static com.phoenix.game.ai.Pathfinder pathfinder;
+    /** RTS 命令寻路器（按目的地缓存流场，对应原版 Vars.controlPath）。 */
+    public static com.phoenix.game.ai.ControlPathfinder controlPath;
     /** 波次生成器（世界加载时自行挂接 WorldLoadEvent 扫描出生点）。 */
     public static com.phoenix.game.ai.WaveSpawner spawner;
     /** 存档槽位管理器（应用启动后 load()，读到本地槽位）。 */
@@ -136,6 +138,10 @@ public class Vars {
     public static com.phoenix.game.maps.Maps maps;
     /** 模组/插件加载器。 */
     public static com.phoenix.game.mod.Mods mods;
+    /** 全局库存（战役跨区运输，对应原版 Vars.data）。 */
+    public static com.phoenix.game.game.GlobalData data;
+    /** 蓝图管理（读 local/schematics/*.msch）。 */
+    public static com.phoenix.game.game.Schematics schematics;
 
     /** HUD 根组件。 */
     public static com.phoenix.game.ui.fragments.HudFragment hud;
@@ -184,6 +190,10 @@ public class Vars {
 
         collisions = new EntityCollisions();
         pathfinder = new com.phoenix.game.ai.Pathfinder();
+        controlPath = new com.phoenix.game.ai.ControlPathfinder();
+        //RTS 命令系统内容（对应原版 ContentLoader.load 里的 UnitCommand.loadAll / UnitStance.loadAll）
+        com.phoenix.game.ai.UnitCommand.loadAll();
+        com.phoenix.game.ai.UnitStance.loadAll();
         spawner = new com.phoenix.game.ai.WaveSpawner();
         saves = new com.phoenix.game.game.Saves();
         saves.load();
@@ -191,6 +201,14 @@ public class Vars {
         maps.load();
         mods = new com.phoenix.game.mod.Mods();
         mods.load();
+
+        //全局库存（跨区运输）：本地持久化，启动时读一次
+        data = new com.phoenix.game.game.GlobalData();
+        data.load();
+
+        //蓝图：扫描 local/schematics 下的 .msch
+        schematics = new com.phoenix.game.game.Schematics();
+        schematics.load();
     }
 
 }

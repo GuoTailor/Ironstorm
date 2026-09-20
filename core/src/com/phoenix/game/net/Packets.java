@@ -420,6 +420,13 @@ public class Packets {
         public int blockId;
         public byte teamId, rotation;
         public float health;
+        /**
+         * 实体内部状态（{@code revision} 字节 + {@code TileEntity.write} 的字节）。
+         * <p>与存档用**同一套序列化**：配置值、建造进度、传送带上的物品、炮塔角度……
+         * 全部走它同步，避免"客户端看到空白格子/进度不动的在建方块"。
+         * <p>没有实体的方块为 null。
+         */
+        public byte[] entityData;
 
         @Override
         public void write(ByteBuffer buffer){
@@ -429,6 +436,13 @@ public class Packets {
             buffer.put(teamId);
             buffer.put(rotation);
             buffer.putFloat(health);
+
+            if(entityData == null){
+                buffer.putInt(-1);
+            }else{
+                buffer.putInt(entityData.length);
+                buffer.put(entityData);
+            }
         }
 
         @Override
@@ -439,6 +453,14 @@ public class Packets {
             teamId = buffer.get();
             rotation = buffer.get();
             health = buffer.getFloat();
+
+            int length = buffer.getInt();
+            if(length < 0){
+                entityData = null;
+            }else{
+                entityData = new byte[length];
+                buffer.get(entityData);
+            }
         }
     }
 
@@ -564,6 +586,68 @@ public class Packets {
         @Override
         public void read(ByteBuffer buffer){
             time = buffer.getLong();
+        }
+    }
+
+    // ---- RTS 命令系统（对应原版 @Remote commandUnits / setUnitCommand / setUnitStance） ----
+
+    /** 命令包子类型：下达移动/攻击命令。 */
+    public static final int TYPE_ORDERS = 0;
+    /** 命令包子类型：切换命令（setUnitCommand）。 */
+    public static final int TYPE_COMMAND = 1;
+    /** 命令包子类型：切换姿态 / 取消命令（setUnitStance）。 */
+    public static final int TYPE_STANCE = 2;
+
+    /**
+     * RTS 命令。客户端 → 服务端为权威请求；服务端 → 其他客户端为表现转发
+     * （画连线、播特效 —— 远端代理单位不跑 AI，只记录目标）。
+     * <p>对应原版的四个 {@code @Remote} 方法，这里合成一个包按 {@code type} 分派。
+     */
+    public static class UnitCommandPacket implements Packet {
+        /** 子类型：{@link #TYPE_ORDERS} / {@link #TYPE_COMMAND} / {@link #TYPE_STANCE}。 */
+        public byte type;
+        /** 目标单位 id 数组。 */
+        public int[] unitIds = new int[0];
+        /** {@code TYPE_COMMAND}/{@code TYPE_STANCE}：命令/姿态下标（all 数组下标）。 */
+        public int commandId;
+        /** {@code TYPE_ORDERS}：是否为攻击命令（false = 移动）。 */
+        public boolean attack;
+        /** {@code TYPE_ORDERS}：攻击目标单位 id（-1 = 无）。 */
+        public int targetUnitId = -1;
+        /** {@code TYPE_ORDERS}：目标坐标（移动目的地 / 攻击点）。 */
+        public float x, y;
+        /** {@code TYPE_ORDERS}：true = 追加队列命令（中键），false = 覆盖当前命令。 */
+        public boolean queue;
+
+        @Override
+        public void write(ByteBuffer buffer){
+            buffer.put(type);
+            buffer.putInt(unitIds.length);
+            for(int i = 0; i < unitIds.length; i++){
+                buffer.putInt(unitIds[i]);
+            }
+            buffer.putInt(commandId);
+            buffer.put((byte)(attack ? 1 : 0));
+            buffer.putInt(targetUnitId);
+            buffer.putFloat(x);
+            buffer.putFloat(y);
+            buffer.put((byte)(queue ? 1 : 0));
+        }
+
+        @Override
+        public void read(ByteBuffer buffer){
+            type = buffer.get();
+            int count = Math.min(buffer.getInt(), 512);
+            unitIds = new int[count];
+            for(int i = 0; i < count; i++){
+                unitIds[i] = buffer.getInt();
+            }
+            commandId = buffer.getInt();
+            attack = buffer.get() == 1;
+            targetUnitId = buffer.getInt();
+            x = buffer.getFloat();
+            y = buffer.getFloat();
+            queue = buffer.get() == 1;
         }
     }
 }

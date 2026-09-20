@@ -4,6 +4,9 @@ package com.phoenix.game.world;
  * 最小实现：把瓦片坐标打包成 int。参照 Mindustry mindustry.world.Pos 移植。
  */
 public class Pos {
+    /** 无效坐标（对应原版 {@code Pos.invalid}）；用作"未连接"的哨兵值。 */
+    public static final int invalid = -1;
+
     public static int get(int x, int y){
         return (x & 0xFFFF) << 16 | (y & 0xFFFF);
     }

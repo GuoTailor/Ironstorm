@@ -82,15 +82,18 @@ public class GroundUnit extends BaseUnit {
         return attack;
     }
 
+    /** @return 当前 AI 状态名（调试/验证用）。 */
+    public String stateName(){
+        UnitState current = state.current();
+        if(current == attack) return "attack";
+        if(current == rally) return "rally";
+        if(current == retreat) return "retreat";
+        return "none";
+    }
+
     /** @return 走路动画相位（调试用）。 */
     public float walkTime(){
         return walkTime;
-    }
-
-    /** 武器射程（无子弹时退回攻击距离）。 */
-    private float range(){
-        Weapon weapon = getWeapon();
-        return weapon == null || weapon.bullet == null ? type.attackLength : Math.max(weapon.bullet.range(), 20f);
     }
 
     public void move(float x, float y) {

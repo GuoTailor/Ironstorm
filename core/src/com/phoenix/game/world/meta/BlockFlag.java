@@ -14,6 +14,7 @@ public enum BlockFlag {
     shield,
     rally,
     commandCenter,
+    mechPad,
     launch,
     unitFactory;
 }

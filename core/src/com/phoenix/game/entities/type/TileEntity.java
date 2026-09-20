@@ -9,6 +9,7 @@ import com.phoenix.game.entities.traits.SolidTrait;
 import com.phoenix.game.world.Block;
 import com.phoenix.game.world.Edges;
 import com.phoenix.game.world.Tile;
+import com.phoenix.game.world.modules.ConsumeModule;
 import com.phoenix.game.world.modules.ItemModule;
 import com.phoenix.game.world.modules.LiquidModule;
 import com.phoenix.game.world.modules.PowerModule;
@@ -33,6 +34,8 @@ public abstract class TileEntity extends SolidEntity{
     public PowerModule power;
     /** 所属电网（由 PowerGraph 分配）。 */
     public PowerGraph graph;
+    /** 消耗状态模块（对应原版 {@code TileEntity.cons}）：每帧刷新，方块逻辑判 {@code cons.valid()}。 */
+    public ConsumeModule cons;
 
     /**
      * 邻接表：外围一圈"有实体且可互通（同队）"的瓦片，物流/电力都靠它找目标
@@ -61,6 +64,8 @@ public abstract class TileEntity extends SolidEntity{
         if(block.hasPower){
             this.power = new PowerModule();
         }
+        //消耗状态模块：所有实体都有（没有消耗器的方块它的 valid 恒为 true）
+        this.cons = new ConsumeModule(this);
         set(tile.worldx(), tile.worldy());
         return this;
     }
@@ -129,6 +134,15 @@ public abstract class TileEntity extends SolidEntity{
         }
     }
 
+    /**
+     * 本建筑的配置值（对应原版 {@code TileEntity.config}）：-1 表示没有配置。
+     * <p>本工程把配置存在各方块实体自己的字段里（如 {@code ItemBridgeEntity.link}），
+     * 这个方法只用于把配置**导出**给蓝图；可配置方块需要覆写它。
+     */
+    public int config(){
+        return -1;
+    }
+
     public Block block(){
         return block;
     }
@@ -148,6 +162,12 @@ public abstract class TileEntity extends SolidEntity{
 
     public float maxHealth(){
         return block.health;
+    }
+
+    /** 治疗建筑（对应原版 TileEntity.healBy）；不会超过最大血量。 */
+    public void healBy(float amount){
+        if(amount <= 0f) return;
+        health = Math.min(health + amount, maxHealth());
     }
 
     public float healthf(){
@@ -220,5 +240,100 @@ public abstract class TileEntity extends SolidEntity{
     @Override
     public float mass(){
         return 10f;
+    }
+
+    // ==================== 存档序列化 ====================
+
+    /**
+     * 实体数据版本（对应原版 {@code TileEntity.version()}）：实体字段结构变化时递增，
+     * 读档时传给 {@link #read(DataInputStream, byte)} 用于兼容旧数据。
+     */
+    public byte revision(){
+        return 1;
+    }
+
+    /**
+     * 序列化本实体状态（对应原版 {@code TileEntity.write}）。
+     * <p>默认写：血量、本地物品库存、电力储量与满足率。
+     * 子类覆盖时**必须先调用 {@code super.write(out)}**，再写自己的字段。
+     * <p>不写每帧可重算的派生量（proximity / cons / graph / produced / needed）。
+     */
+    public void write(java.io.DataOutputStream out) throws java.io.IOException{
+        out.writeFloat(health);
+
+        if(items == null){
+            out.writeBoolean(false);
+        }else{
+            out.writeBoolean(true);
+            for(int i = 0; i < com.phoenix.game.content.Items.all.size; i++){
+                out.writeInt(items.get(com.phoenix.game.content.Items.all.get(i)));
+            }
+        }
+
+        if(power == null){
+            out.writeBoolean(false);
+        }else{
+            out.writeBoolean(true);
+            //储量必须存（电池累积，不是每帧重算）；满足率只在没有电网重算时才用得上
+            out.writeFloat(power.stored);
+            out.writeFloat(power.status);
+        }
+    }
+
+    /**
+     * 反序列化本实体状态（对应原版 {@code TileEntity.read}）。
+     * <p>读之前实体已由 {@code tile.setBlock} 按方块类型创建并 {@code init} 过。
+     * 子类覆盖时**必须先调用 {@code super.read(in, revision)}**。
+     */
+    public void read(java.io.DataInputStream in, byte revision) throws java.io.IOException{
+        health = in.readFloat();
+
+        //即使本实体没有 items 模块也必须把字节消费掉，否则后续字段全部错位
+        if(in.readBoolean()){
+            for(int i = 0; i < com.phoenix.game.content.Items.all.size; i++){
+                int amount = in.readInt();
+                if(items != null) items.set(com.phoenix.game.content.Items.all.get(i), amount);
+            }
+        }
+
+        if(in.readBoolean()){
+            float stored = in.readFloat();
+            float status = in.readFloat();
+            if(power != null){
+                power.stored = stored;
+                power.status = status;
+            }
+        }
+    }
+
+    /**
+     * 读档完成后的回调：此时**整张地图已经建好、邻接表也重建完毕**，
+     * 可以解析那些跨越瓦片的引用（如 Router 的"上一件物品来自哪"）。
+     * <p>需要它的实体覆写即可；默认什么都不做。
+     */
+    public void afterRead(){
+    }
+
+    /** 写一个 float 数组（长度前缀）。null 记为长度 -1。 */
+    protected static void writeFloats(java.io.DataOutputStream out, float[] array) throws java.io.IOException{
+        if(array == null){
+            out.writeShort(-1);
+            return;
+        }
+        out.writeShort(array.length);
+        for(float value : array){
+            out.writeFloat(value);
+        }
+    }
+
+    /** 读一个 float 数组（长度前缀）。 */
+    protected static float[] readFloats(java.io.DataInputStream in) throws java.io.IOException{
+        int length = in.readShort();
+        if(length < 0) return null;
+        float[] array = new float[length];
+        for(int i = 0; i < length; i++){
+            array[i] = in.readFloat();
+        }
+        return array;
     }
 }

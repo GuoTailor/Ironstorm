@@ -20,6 +20,16 @@ public class Logic {
         Time.update();
         Effects.update();
 
+        //游玩时长（存档元数据用）：只在真正游玩时累加，回菜单后停止
+        if(!Vars.state.isMenu()){
+            Vars.state.playtime += Time.delta();
+        }
+
+        //全局库存有改动就落盘（对应原版 GlobalData.checkSave）
+        if(Vars.data != null){
+            Vars.data.checkSave();
+        }
+
         //规则级逻辑只在服务端跑（对应原版 Logic.update 里的 net.client() 守卫）：
         //波次生成 / 敌兵统计 / 胜负判定 / 自动存档。
         if(!Vars.isClient()){
@@ -35,6 +45,9 @@ public class Logic {
         if(Vars.world != null){
             Vars.world.updateTiles();
         }
+
+        //燃烧（对应原版 Logic.update 里 tileGroup 之后的 fireGroup.update）
+        com.phoenix.game.entities.effect.Fire.updateAll();
 
         //玩家：同步位置 + 重生计时（原版玩家本身是单位，随单位一起更新）
         if(Vars.player != null){

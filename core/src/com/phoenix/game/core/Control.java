@@ -57,6 +57,9 @@ public class Control{
         //波次：默认编成 + 开局宽限（对应原版 Logic.play 的 waveSpacing * 2）
         Vars.state.wave = 1;
         Vars.state.enemies = 0;
+        //存档元数据：地图名与游玩时长（新局从零开始计时）
+        Vars.state.mapName = "campaign";
+        Vars.state.playtime = 0f;
         Vars.state.rules.spawns = new DefaultWaves().get();
         Vars.state.wavetime = Vars.state.rules.waveSpacing * 2f;
 
@@ -84,6 +87,7 @@ public class Control{
 
         Units.units.clear();
         Bullet.all.clear();
+        com.phoenix.game.entities.effect.Fire.clear();
         Effects.clear();
         Time.clear(); //清掉上一局残留的延迟任务（武器连发等）
 
@@ -124,7 +128,9 @@ public class Control{
      */
     public void load(com.phoenix.game.game.Saves.SaveSlot slot){
         try{
-            slot.load();
+            //走 Saves.load 而不是 slot.load：前者还会把该槽设为"当前槽"，
+            //否则读档后自动存档仍然写回上一局的槽位
+            Vars.saves.load(slot);
             Vars.state.rules.spawns = new DefaultWaves().get();
             Build.refundMultiplier = Vars.state.rules.deconstructRefundMultiplier;
             //上一局若已判定胜负（gameOver=true）会残留在状态里，
@@ -133,6 +139,7 @@ public class Control{
 
             Units.units.clear();
             Bullet.all.clear();
+        com.phoenix.game.entities.effect.Fire.clear();
             Effects.clear();
             Time.clear();
             Vars.player = new Player();
@@ -170,6 +177,17 @@ public class Control{
         //用玩家当前选择的单位类型重生（默认 dagger）
         com.phoenix.game.type.UnitType type = Vars.player != null && Vars.player.selectedType != null
             ? Vars.player.selectedType : UnitTypes.dagger;
+
+        spawnPlayerUnitAt(team, type, x, y);
+    }
+
+    /**
+     * 在指定位置用指定单位类型重生玩家（机甲平台 MechPad 也走这里）。
+     * <p>同时把该类型记到 {@code player.selectedType}，这样后续死亡重生会沿用同一型号。
+     */
+    public BaseUnit spawnPlayerUnitAt(Team team, com.phoenix.game.type.UnitType type, float x, float y){
+        if(Vars.world == null || type == null) return null;
+
         BaseUnit unit = type.create();
         unit.setTeam(team);
         unit.set(x, y);
@@ -178,6 +196,7 @@ public class Control{
 
         if(Vars.player != null){
             Vars.player.team = team;
+            Vars.player.selectedType = type;
             Vars.player.unit(unit);
         }
 
@@ -185,6 +204,7 @@ public class Control{
             Core.camera.position.set(x, y, 0f);
             Core.camera.update();
         }
+        return unit;
     }
 
     /** 退出到菜单。 */
@@ -196,6 +216,7 @@ public class Control{
         //清理战场残留（单位/子弹/建筑实体）
         Units.units.clear();
         Bullet.all.clear();
+        com.phoenix.game.entities.effect.Fire.clear();
         //重置事件：停掉寻路后台线程
         Events.fire(new EventType.ResetEvent());
         Time.clear();

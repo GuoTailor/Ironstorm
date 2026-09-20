@@ -49,6 +49,14 @@ public class Sorter extends Block{
         }
     }
 
+    /** 配置界面：物品选择表（对应原版 ItemSelection.buildTable）。 */
+    @Override
+    public void buildConfiguration(Tile tile, com.badlogic.gdx.scenes.scene2d.ui.Table table){
+        SorterEntity e = tile.entity instanceof SorterEntity ? (SorterEntity)tile.entity : null;
+        com.phoenix.game.ui.fragments.BlockConfigFragment.itemPicker(table, e == null ? null : e.sortItem,
+            item -> tile.configure(item == null ? -1 : item.id));
+    }
+
     @Override
     public void configured(Tile tile, Player player, int value){
         SorterEntity e = (SorterEntity)tile.entity;
@@ -155,5 +163,24 @@ public class Sorter extends Block{
     public class SorterEntity extends TileEntity{
         /** 配置的分类物品；null 表示未配置。 */
         public Item sortItem;
+
+        @Override
+        public int config(){
+            return sortItem == null ? -1 : sortItem.id;
+        }
+
+        @Override
+        public void write(java.io.DataOutputStream out) throws java.io.IOException{
+            super.write(out);
+            out.writeShort(sortItem == null ? -1 : com.phoenix.game.content.Items.all.indexOf(sortItem, true));
+        }
+
+        @Override
+        public void read(java.io.DataInputStream in, byte revision) throws java.io.IOException{
+            super.read(in, revision);
+            int index = in.readShort();
+            sortItem = index < 0 || index >= com.phoenix.game.content.Items.all.size
+                ? null : com.phoenix.game.content.Items.all.get(index);
+        }
     }
 }

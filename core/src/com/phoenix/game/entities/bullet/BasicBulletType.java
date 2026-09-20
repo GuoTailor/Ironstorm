@@ -17,12 +17,20 @@ public class BasicBulletType extends BulletType{
     /** 飞行过程中向内收缩的比例 */
     public float shrinkX = 0.2f, shrinkY = 0.5f;
     public Color backColor = Pal.bulletYellowBack, frontColor = Pal.bulletYellow;
+    /** 贴图前缀（对应原版 {@code bulletSprite}）：找 {@code "<name>-back"} 与 {@code "<name>"}，如 bullet / shell / missile。 */
+    public String bulletSprite = "bullet";
 
-    private TextureRegion backRegion, frontRegion;
+    protected TextureRegion backRegion, frontRegion;
     private boolean loaded;
+    private String loadedSprite;
 
     public BasicBulletType(float speed, float damage){
+        this(speed, damage, "bullet");
+    }
+
+    public BasicBulletType(float speed, float damage, String bulletSprite){
         super(speed, damage);
+        this.bulletSprite = bulletSprite;
 
         hitEffect = Fx.hit;
         despawnEffect = Fx.hit;
@@ -30,14 +38,31 @@ public class BasicBulletType extends BulletType{
         despawnSound = Sounds.pew;
     }
 
-    private void load(){
-        if(loaded) return;
+    protected void load(){
+        //atlas 可能在构造后才就绪，所以懒加载；换过 bulletSprite 要重新取
+        if(loaded && bulletSprite.equals(loadedSprite)) return;
         loaded = true;
+        loadedSprite = bulletSprite;
 
         if(Core.atlas != null){
-            backRegion = Core.atlas.findRegion("bullet-back");
-            frontRegion = Core.atlas.findRegion("bullet");
+            backRegion = Core.atlas.findRegion(bulletSprite + "-back");
+            frontRegion = Core.atlas.findRegion(bulletSprite);
         }
+    }
+
+    /** 供子类复用的贴图绘制（缩放后的宽高与旋转由子类算好传入）。 */
+    protected void drawRegions(float x, float y, float w, float h, float rotation){
+        if(backRegion != null){
+            Draw.color(backColor);
+            Draw.rect(backRegion, x, y, w * 1.1f, h * 1.3f, rotation);
+        }
+
+        if(frontRegion != null){
+            Draw.color(frontColor);
+            Draw.rect(frontRegion, x, y, w, h, rotation);
+        }
+
+        Draw.color();
     }
 
     @Override
@@ -46,18 +71,7 @@ public class BasicBulletType extends BulletType{
 
         float w = width * (1f - shrinkX * b.fin());
         float h = height * (1f - shrinkY * b.fin());
-        float rot = b.rot();
 
-        if(backRegion != null){
-            Draw.color(backColor);
-            Draw.rect(backRegion, b.x, b.y, w * 1.1f, h * 1.3f, rot - 90f);
-        }
-
-        if(frontRegion != null){
-            Draw.color(frontColor);
-            Draw.rect(frontRegion, b.x, b.y, w, h, rot - 90f);
-        }
-
-        Draw.color();
+        drawRegions(b.x, b.y, w, h, b.rot() - 90f);
     }
 }

@@ -105,8 +105,9 @@ public class Conveyor extends Block{
         if(reg == null) return;
 
         float cx = tile.worldx() + tilesize / 2f, cy = tile.worldy() + tilesize / 2f;
-        //贴图基准朝向是"右"，本项目 rotation 0=上/1=右/2=下/3=左，故角度 = (1 - rotation) * 90
-        float angle = (1 - (tile.rotation() & 3)) * 90f;
+        //贴图基准朝向是"上"（conveyor-0-0 的带子长轴竖直，与原版一致），
+        //本项目 rotation 0=上/1=右/2=下/3=左，故角度 = rotation * 90
+        float angle = (tile.rotation() & 3) * 90f;
 
         Core.batch.draw(reg, cx - tilesize / 2f, cy - tilesize / 2f, tilesize / 2f, tilesize / 2f,
                 tilesize, tilesize, e.blendsclx, e.blendscly, angle);
@@ -392,6 +393,38 @@ public class Conveyor extends Block{
             }else{
                 clogHeat = 0f;
             }
+        }
+
+        @Override
+        public void write(java.io.DataOutputStream out) throws java.io.IOException{
+            super.write(out);
+            out.writeByte(len);
+            for(int i = 0; i < len; i++){
+                out.writeShort(ids[i] == null ? -1 : com.phoenix.game.content.Items.all.indexOf(ids[i], true));
+                out.writeFloat(xs[i]);
+                out.writeFloat(ys[i]);
+            }
+        }
+
+        @Override
+        public void read(java.io.DataInputStream in, byte revision) throws java.io.IOException{
+            super.read(in, revision);
+            len = Math.min(in.readUnsignedByte(), capacity);
+            for(int i = 0; i < len; i++){
+                int index = in.readShort();
+                ids[i] = index < 0 || index >= com.phoenix.game.content.Items.all.size
+                    ? null : com.phoenix.game.content.Items.all.get(index);
+                xs[i] = in.readFloat();
+                ys[i] = in.readFloat();
+            }
+            //派生量交给下一帧 update 重算（minitem/mid/clogHeat 都是每帧重算的）
+            minitem = 1f;
+            mid = 0;
+            lastInserted = -1;
+            clogHeat = 0f;
+            //下游引用由邻接表重建后自行解析
+            next = null;
+            nextc = null;
         }
     }
 }

@@ -106,5 +106,23 @@ public class Router extends Block{
                 lastItem = null;
             }
         }
+
+        @Override
+        public void read(java.io.DataInputStream in, byte revision) throws java.io.IOException{
+            super.read(in, revision);
+            time = 0f;
+            //物品本身由基类从 items 里恢复，这里把它捡回 lastItem，
+            //否则下一帧 update 开头的"残留清理"（lastItem == null && items.total() > 0 → clear）会把它丢掉
+            lastItem = items == null ? null : items.first();
+        }
+
+        @Override
+        public void afterRead(){
+            //lastInput 不入档（它是瓦片引用，读档时目标格可能还没建好）：
+            //等邻接表重建完，随便挑一个同队邻居当输入方向，物品就能继续送出
+            if(lastItem != null && lastInput == null && proximity.size > 0){
+                lastInput = proximity.first();
+            }
+        }
     }
 }

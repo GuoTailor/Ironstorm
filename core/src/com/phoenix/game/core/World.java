@@ -6,6 +6,7 @@ import com.phoenix.game.content.Blocks;
 import com.phoenix.game.game.EventType;
 import com.phoenix.game.game.Team;
 import com.phoenix.game.math.Mathf;
+import com.phoenix.game.math.Simplex;
 import com.phoenix.game.world.Block;
 import com.phoenix.game.world.Floor;
 import com.phoenix.game.world.Pos;
@@ -49,10 +50,47 @@ public class World {
             }
         }
 
+        generateOres();
         placeSpawnPoints();
 
         generating = false;
         rebuildPowerGraphs();
+    }
+
+    /**
+     * 矿脉生成（参照 Mindustry OriginalGenerator/BasicGenerator.ores 的双层噪声结构）。
+     * <p>每种矿需同时通过两层 Simplex 噪声：大尺度团块噪声（2 octaves，决定矿脉成片）+
+     * 细尺度掩膜（1 octave，把团块打成不规则矿脉），稀有矿判定在前、命中即停。
+     * <p>阈值按稀有度递增（对应原版 OreBlock.oreThreshold 0.81→0.882 的递进设计；
+     * 数值按本项目噪声分布校准：铜约 7%、铅 6%、煤 5%、钛 2.6%、钍 1.8% 的可采覆盖率）。
+     * <p>刻意收紧：液体地板与实心岩壁上不铺矿（原版允许，但矿盖在水面上视觉突兀、
+     * 盖在岩壁下永远看不见）。
+     */
+    private void generateOres(){
+        int seed = MathUtils.random(99999999);
+        Simplex sim = new Simplex(seed);
+        Simplex sim2 = new Simplex(seed + 1);
+        //稀有度从低到高排列（原版数组序），从末尾（最稀有）向首遍历，命中即停
+        Floor[] ores = {Blocks.oreCopper, Blocks.oreLead, Blocks.oreCoal, Blocks.oreTitanium, Blocks.oreThorium};
+        //大尺度团块阈值（稀有度递增）
+        float[] blobThresholds = {0.13f, 0.13f, 0.18f, 0.21f, 0.26f};
+        float maskThreshold = 0.30f;
+
+        for(int y = 0; y < height; y++){
+            for(int x = 0; x < width; x++){
+                Tile tile = tiles[y * width + x];
+                if(tile.floor().isLiquid || tile.solid()) continue;
+
+                int offsetX = x - 4, offsetY = y + 23;
+                for(int i = ores.length - 1; i >= 0; i--){
+                    if(Math.abs(0.5f - sim.octaveNoise2D(2, 0.7f, 1f / (40 + i * 2), offsetX, offsetY + i * 999)) > blobThresholds[i] &&
+                       Math.abs(0.5f - sim2.octaveNoise2D(1, 1f, 1f / (30 + i * 4), offsetX, offsetY - i * 999)) > maskThreshold){
+                        tile.setOverlay(ores[i]);
+                        break;
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -183,6 +221,15 @@ public class World {
         return generating;
     }
 
+    /**
+     * 批量加载/生成期间挂起逐瓦片通知（对应原版 WorldContext.begin/end 的 generating 标记）。
+     * <p>读档时先打开，逐格 setBlock 才不会触发 O(瓦片数²) 的电网重建与寻路网格刷新；
+     * 全部载入后再关闭并统一 {@link #rebuildPowerGraphs()}。
+     */
+    public void setGenerating(boolean generating){
+        this.generating = generating;
+    }
+
     /** 更新所有带实体的瓦片。 */
     public void updateTiles(){
         updatePower();
@@ -190,6 +237,8 @@ public class World {
             if(tile != null && tile.entity != null && tile.block().update){
                 //超频计时衰减（对应原版 TileEntity.update 开头）
                 tile.entity.updateTimeScale();
+                //先刷新消耗状态：方块逻辑要用 cons.valid() 判断能否工作
+                if(tile.entity.cons != null) tile.entity.cons.update();
                 tile.entity.update();
             }
         }
@@ -242,6 +291,16 @@ public class World {
     /** 重建全部电网并更新一次电力分配。 */
     public void rebuildPowerGraphs(){
         powerGraphs.clear();
+
+        //必须先清空归属：reflow 会给每个瓦片写上 power.graph，
+        //若不清空，第二次重建时所有旧瓦片都会被下面的 graph != null 判据跳过，
+        //结果每放一块建筑电网就只剩它自己（相邻建筑永不连通）。
+        for(Tile tile : tiles){
+            if(tile != null && tile.entity != null && tile.entity.power != null){
+                tile.entity.power.graph = null;
+            }
+        }
+
         for(Tile tile : tiles){
             if(tile == null || tile.entity == null || tile.entity.power == null) continue;
             if(tile.entity.power.graph != null) continue;
@@ -260,14 +319,16 @@ public class World {
     }
 
     public void notifyChanged(Tile tile){
+        //批量加载/生成期间不做逐瓦片通知：寻路网格与电网都在批量结束后统一重建，
+        //否则每放一格都会重建一次电网（O(瓦片数²)）并刷新一次寻路网格
+        if(generating) return;
+
         //建筑/地形改变：刷新寻路网格，让流场重算
         if(Vars.pathfinder != null){
             Vars.pathfinder.updateTile(tile);
         }
         rebuildPowerGraphs();
         //广播瓦片变化：小地图据此更新对应像素（对应原版 TileChangeEvent）。
-        //createMap 期间每个 setBlock 都会走到这里，此时小地图的 pixmap 还是旧世界的，
-        //MinimapRenderer.update 里靠 pixmap == null / 越界判断早退。
         Events.fire(new EventType.TileChangeEvent(tile));
     }
 

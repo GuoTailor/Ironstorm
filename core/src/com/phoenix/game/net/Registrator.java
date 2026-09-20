@@ -34,6 +34,8 @@ public class Registrator {
         new ClassEntry(Ping.class, Ping::new),
         new ClassEntry(Pong.class, Pong::new),
         new ClassEntry(TileDamage.class, TileDamage::new),
+        //RTS 命令系统：追加在末尾（1 字节包 ID = 数组下标，已有顺序不可调整）
+        new ClassEntry(UnitCommandPacket.class, UnitCommandPacket::new),
     };
     private static final ObjectIntMap<Class<?>> ids = new ObjectIntMap<>();
     private static final IntMap<ClassEntry> byID = new IntMap<>();

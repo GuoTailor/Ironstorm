@@ -80,14 +80,92 @@ public class DesktopInput extends InputHandler{
             updateShooting();
         }
 
-        //数字键切换玩家单位类型（重生时生效）
-        updateTypeSwitch();
+        //数字键切换玩家单位类型（重生时生效）；命令模式下数字键让位给编组
+        if(!commandMode){
+            updateTypeSwitch();
+        }
         //冲刺技能（空格）
         updateDash();
 
         //松开左键停止射击（对应原版 keyRelease(Binding.select)）
         if(player != null && !Gdx.input.isButtonPressed(Input.Buttons.LEFT)){
             player.isShooting = false;
+        }
+
+        // ---- RTS 命令模式（对应 v8 DesktopInput 的 commandMode 逻辑）----
+
+        //进入建造状态时强制退出命令模式（对应原版 block != null 时 commandMode 失效）
+        if(commandMode && isPlacing()){
+            exitCommandMode();
+        }
+
+        //Q 键切换命令模式（对应原版 Binding.commandMode = shiftLeft 的 keyTap 切换；
+        //phoenix 的 Shift 已被玩家加速占用，故改用 Q）
+        if(keyTap(Input.Keys.Q) && !isPlacing() && player != null && !player.isDead()){
+            commandMode = !commandMode;
+            if(!commandMode){
+                //退出命令模式：清空选择（已下达的命令继续执行）
+                selectedUnits.clear();
+                commandRect = false;
+            }
+        }
+
+        //Esc 退出命令模式
+        if(keyTap(Input.Keys.ESCAPE) && commandMode){
+            exitCommandMode();
+        }
+
+        if(commandMode){
+            //清理无效的选中单位（死亡/被玩家接管/换队伍）
+            for(int i = selectedUnits.size - 1; i >= 0; i--){
+                if(!canCommand(selectedUnits.get(i))){
+                    selectedUnits.removeIndex(i);
+                }
+            }
+
+            //拖框超过阈值后视为框选而非点选
+            if(commandRect && Gdx.input.isButtonPressed(Input.Buttons.LEFT)){
+                if(Mathf.dst(commandRectX, commandRectY, targetX, targetY) > 8f){
+                    tappedOne = false;
+                }
+            }
+
+            //数字键编组（对应原版 controlGroupBindings）：Ctrl+数字保存、数字恢复
+            boolean ctrl = keyDown(Input.Keys.CONTROL_LEFT) || keyDown(Input.Keys.CONTROL_RIGHT);
+            for(int i = 0; i < controlGroups.length; i++){
+                int key = i == 9 ? Input.Keys.NUM_0 : Input.Keys.NUM_1 + i;
+                if(!keyTap(key)) continue;
+
+                if(ctrl && selectedUnits.size > 0){
+                    //创建编组：记录当前选中单位的 id
+                    controlGroups[i].clear();
+                    for(int j = 0; j < selectedUnits.size; j++){
+                        controlGroups[i].add(selectedUnits.get(j).getID());
+                    }
+                }else if(controlGroups[i].size > 0){
+                    //恢复编组
+                    selectedUnits.clear();
+                    for(int j = 0; j < controlGroups[i].size; j++){
+                        com.phoenix.game.entities.type.BaseUnit unit = findUnitById(controlGroups[i].get(j));
+                        if(canCommand(unit)){
+                            selectedUnits.add(unit);
+                        }
+                    }
+                }
+            }
+
+            //G 键：全选屏幕内本队单位（对应原版 selectAllUnits + selectAcrossScreen）
+            if(keyTap(Input.Keys.G)){
+                float[] bounds = cameraBounds();
+                selectedUnits.clear();
+                for(int i = 0; i < com.phoenix.game.entities.Units.units.size; i++){
+                    com.phoenix.game.entities.type.BaseUnit unit = com.phoenix.game.entities.Units.units.get(i);
+                    if(canCommand(unit) && unit.x >= bounds[0] && unit.x <= bounds[1]
+                        && unit.y >= bounds[2] && unit.y <= bounds[3]){
+                        selectedUnits.add(unit);
+                    }
+                }
+            }
         }
 
         //F11 切换全屏（对应 Binding.fullscreen）
@@ -146,12 +224,35 @@ public class DesktopInput extends InputHandler{
     }
 
     /**
-     * 左键：建造模式下开始连线（拖拽可连放，松手才建造）、拆除模式下拆除方块，否则开始射击
-     * （对应原版 DesktopInput 的“非建造状态按下 select 即开火”）。
-     * 右键：退出建造/拆除模式（对应原版 Binding.deselect）。
+     * 命令模式下：左键开始框选（松手结算）、右键下达移动/攻击命令、中键追加队列命令
+     * （对应原版 DesktopInput 的 commandMode 分支：select/commandQueue 键位）。
+     * 非命令模式保持原行为：右键取消建造、左键建造/配置/开火。
      */
     @Override
     public boolean touchDown(int screenX, int screenY, int pointer, int button){
+        //命令模式：输入全部让给命令系统
+        if(commandMode && !isPlacing() && Vars.player != null && !Vars.player.isDead() && !Vars.state.isPaused()){
+            float wx = mouseWorldX(screenX), wy = mouseWorldY(screenY);
+
+            if(button == Input.Buttons.LEFT){
+                //开始框选（对应原版 keyTap(select) && commandMode → commandRect = true）
+                commandRect = true;
+                tappedOne = true;
+                commandRectX = wx;
+                commandRectY = wy;
+                return true;
+            }else if(button == Input.Buttons.RIGHT){
+                //移动/攻击命令（对应原版 Binding.commandQueue 的 touchDown 分支 —— 原版右键即命令）
+                commandTap(wx, wy, false);
+                return true;
+            }else if(button == Input.Buttons.MIDDLE){
+                //追加队列命令（对应原版 Binding.commandQueue = mouseMiddle）
+                commandTap(wx, wy, true);
+                return true;
+            }
+            return false;
+        }
+
         if(button == Input.Buttons.RIGHT){
             clearBuild();
             return false;
@@ -160,7 +261,10 @@ public class DesktopInput extends InputHandler{
         if(button != Input.Buttons.LEFT) return false;
 
         if(isPlacing() && Vars.world != null){
-            if(breaking){
+            if(pasteSchematic != null){
+                //蓝图粘贴：点一下贴一整张
+                placeWorld(Vars.world.toTile(mouseWorldX(screenX)), Vars.world.toTile(mouseWorldY(screenY)));
+            }else if(breaking){
                 int tx = Vars.world.toTile(mouseWorldX(screenX)), ty = Vars.world.toTile(mouseWorldY(screenY));
                 breakWorld(tx, ty);
                 //记录起点，之后按住拖动即可沿路径连续拆除
@@ -173,6 +277,25 @@ public class DesktopInput extends InputHandler{
             return false;
         }
 
+        //非建造状态点击方块：可配置的方块打开配置面板（对应原版点 configurable 方块弹配置界面），
+        //其余交给方块自己的 tapped（机甲平台换机甲等）；处理了就不开火
+        if(Vars.world != null && Vars.player != null && !Vars.player.isDead()){
+            com.phoenix.game.world.Tile tappedTile = Vars.world.tile(
+                Vars.world.toTile(mouseWorldX(screenX)), Vars.world.toTile(mouseWorldY(screenY)));
+
+            if(tappedTile != null && tappedTile.entity != null && tappedTile.block().configurable){
+                //再点同一格就关掉（方便快速收起面板）
+                configTile = configTile == tappedTile ? null : tappedTile;
+                return false;
+            }
+
+            configTile = null;
+
+            if(tappedTile != null && tappedTile.block().tapped(tappedTile, Vars.player)){
+                return false;
+            }
+        }
+
         if(Vars.player != null && !Vars.player.isDead()){
             Vars.player.isShooting = true;
         }
@@ -183,6 +306,13 @@ public class DesktopInput extends InputHandler{
     @Override
     public boolean touchUp(int screenX, int screenY, int pointer, int button){
         if(button == Input.Buttons.LEFT){
+            //命令模式松开左键：结算框选/点选（对应原版 keyRelease(select) && commandRect → selectUnitsRect）
+            if(commandMode && commandRect){
+                commandRect = false;
+                selectUnitsRect(mouseWorldX(screenX), mouseWorldY(screenY));
+                return true;
+            }
+
             //松开左键：把连线上的方块一次性放下（对应原版 flushRequests）
             if(lineMode){
                 flushLine();
@@ -197,10 +327,37 @@ public class DesktopInput extends InputHandler{
         return false;
     }
 
-    /** 在世界坐标放置当前 `buildBlock`：校验位置、扣除材料，可连续放置。
+    /** 在世界坐标放置当前 `buildBlock`：**入建造队列**，由玩家单位逐帧建（不再是瞬间建成）。
      * 联机时改为向服务器发建造请求（服务端权威执行，等 BlockState 确认）。 */
     public void placeWorld(int tileX, int tileY){
-        if(buildBlock == null || Vars.world == null) return;
+        if(Vars.world == null) return;
+
+        //蓝图粘贴：把整张蓝图转成建造请求入队（单机走队列，联机暂不支持——见 Build.useBuildQueue）
+        com.phoenix.game.game.Schematic schematic = Vars.control != null && Vars.control.input != null
+            ? Vars.control.input.pasteSchematic : null;
+        if(schematic != null){
+            com.badlogic.gdx.utils.Array<com.phoenix.game.world.BuildRequest> reqs =
+                Vars.schematics.toRequests(schematic, tileX, tileY);
+
+            if(Vars.netClient != null && Vars.netClient.isConnected()){
+                //联机：逐格发建造请求，由服务端的玩家单位权威建造（进度再从 BlockState 广播回来）。
+                //注意蓝图里的"配置值"（桥的连接目标、分拣器物品…）不带在请求里 —— 服务端会按自己的
+                //playerPlaced 规则自动连，粘贴出来的机器需要玩家手动改配置
+                for(int i = 0; i < reqs.size; i++){
+                    com.phoenix.game.world.BuildRequest req = reqs.get(i);
+                    if(req.block != null){
+                        Vars.netClient.sendBuild(req.x, req.y, req.block, req.rotation);
+                    }
+                }
+            }else if(Vars.player != null){
+                for(int i = 0; i < reqs.size; i++){
+                    Vars.player.addBuildRequest(reqs.get(i));
+                }
+            }
+            return;
+        }
+
+        if(buildBlock == null) return;
 
         //联机：发请求，不做本地执行（避免与服务端状态分叉）
         if(Vars.netClient != null && Vars.netClient.isConnected()){
@@ -208,7 +365,13 @@ public class DesktopInput extends InputHandler{
             return;
         }
 
-        //用玩家（sharded）阵营放置；多格建筑以中心瓦片铺开
+        //单机：入建造队列，由玩家单位逐帧建
+        if(Build.useBuildQueue() && Vars.player != null){
+            Vars.player.addBuildRequest(new com.phoenix.game.world.BuildRequest(tileX, tileY, buildRotation, buildBlock));
+            return;
+        }
+
+        //联机：服务端即时建造（见 Build.useBuildQueue 的说明）
         if(Build.placeBlock(Vars.world.tile(tileX, tileY), buildBlock, Team.sharded, buildRotation)){
             if(Sounds.place != null){
                 Sounds.place.play(1f);
@@ -216,7 +379,7 @@ public class DesktopInput extends InputHandler{
         }
     }
 
-    /** 在世界坐标拆除方块（只能拆自己阵营的、可破坏的方块），返还一半材料。
+    /** 在世界坐标拆除方块（只能拆自己阵营的、可破坏的方块），同样入队由单位拆，按比例返还材料。
      * 联机时改为向服务器发拆除请求。 */
     public void breakWorld(int tileX, int tileY){
         if(Vars.world == null) return;
@@ -227,6 +390,13 @@ public class DesktopInput extends InputHandler{
             return;
         }
 
+        //单机：入队列，由玩家单位逐帧拆
+        if(Build.useBuildQueue() && Vars.player != null){
+            Vars.player.addBuildRequest(new com.phoenix.game.world.BuildRequest(tileX, tileY));
+            return;
+        }
+
+        //联机：服务端即时拆除
         if(Build.deconstruct(Vars.world.tile(tileX, tileY), Team.sharded)){
             if(Sounds.breaks != null){
                 Sounds.breaks.play(1f);

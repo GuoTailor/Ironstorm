@@ -93,6 +93,14 @@ public class Tile implements Position, TargetTrait {
         return overlay;
     }
 
+    /**
+     * @return 本瓦片的矿物产出（对应原版 Tile.drop）：
+     * 矿脉 overlay 优先，其次地板自带产出（如沙地掉沙）；都没有返回 null。
+     */
+    public com.phoenix.game.type.Item drop(){
+        return overlay == Blocks.air || overlay.itemDrop == null ? floor.itemDrop : overlay.itemDrop;
+    }
+
     public byte rotation(){
         return rotation;
     }
@@ -258,8 +266,14 @@ public class Tile implements Position, TargetTrait {
         return block.solid || block.isSolidFor(this);
     }
 
+    /**
+     * 这一格能不能被玩家拆（对应原版 {@code Tile.breakable}）。
+     * <p>判据是「有血量 **或** 可拆 **或** 每帧更新」：原版里机器（传送带/发电机）都没写
+     * {@code destructible}，只写了 {@code update}，只看 destructible 会导致它们拆不掉。
+     * <p>多格建筑的卫星格要转发到中心格判断。
+     */
     public boolean breakable(){
-        return block.destructible || block.breakable;
+        return !isLinked() ? (block.destructible || block.breakable || block.update) : link().breakable();
     }
 
     /**
@@ -324,6 +338,28 @@ public class Tile implements Position, TargetTrait {
         if(x == cx && y == cy + 1) return 2;
         if(x == cx - 1 && y == cy) return 1;
         if(x == cx + 1 && y == cy) return 3;
+        return -1;
+    }
+
+    /**
+     * 取"从本瓦片指向 (cx,cy)"的方向索引，**不限距离**（只要求同行或同列）；
+     * 不同行也不同列返回 -1。对应原版 {@code Tile.absoluteRelativeTo}。
+     * <p>物品桥（ItemBridge）用它判断"对端在哪个方向"，从而禁止物品从对端方向回灌。
+     */
+    public int absoluteRelativeTo(int cx, int cy){
+        if(x == cx && y <= cy - 1) return 0;
+        if(x == cx && y >= cy + 1) return 2;
+        if(x <= cx - 1 && y == cy) return 1;
+        if(x >= cx + 1 && y == cy) return 3;
+        return -1;
+    }
+
+    /** 静态版本，语义同 {@link #absoluteRelativeTo(int, int)}。 */
+    public static int absoluteRelativeTo(int x, int y, int cx, int cy){
+        if(x == cx && y <= cy - 1) return 0;
+        if(x == cx && y >= cy + 1) return 2;
+        if(x <= cx - 1 && y == cy) return 1;
+        if(x >= cx + 1 && y == cy) return 3;
         return -1;
     }
 

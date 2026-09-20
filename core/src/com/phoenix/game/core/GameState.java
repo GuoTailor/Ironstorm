@@ -17,6 +17,10 @@ public class GameState{
     public float wavetime;
     /** 场上敌方（波次阵营）单位数量。 */
     public int enemies;
+    /** 当前地图名（存档元数据用；程序生成图默认 "campaign"）。 */
+    public String mapName = "campaign";
+    /** 本局累计游玩时长（秒），存档元数据用（由 Logic 累加）。 */
+    public float playtime;
 
     public boolean isPlaying(){
         return state == State.playing;

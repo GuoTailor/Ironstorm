@@ -85,6 +85,21 @@ public class Player{
         return Vars.state.teams == null ? null : Vars.state.teams.closestCore(x, y, team);
     }
 
+    // ---- 建造队列（真正的队列挂在被控制的单位上，见 BaseUnit#updateBuilding） ----
+
+    /** 追加一条建造/拆除请求。玩家死亡（没有单位）时无法建造。 */
+    public void addBuildRequest(com.phoenix.game.world.BuildRequest req){
+        if(unit != null) unit.addBuildRequest(req);
+    }
+
+    public void clearBuilding(){
+        if(unit != null) unit.clearBuilding();
+    }
+
+    public boolean isBuilding(){
+        return unit != null && unit.isBuilding();
+    }
+
     /** 每帧更新：同步位置 + 死亡后在最近核心处重生（对应原版 updateRespawning）。 */
     public void update(){
         if(!isDead()){
