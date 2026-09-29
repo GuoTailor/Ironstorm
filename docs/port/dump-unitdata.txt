@@ -1,0 +1,23 @@
+[小地图] 已采样 166 个方块颜色
+Menu background generated in 44 ms
+UNITDATA dagger 8.0 130.0 bullet=9.0/2.5/60.0/0.0/-1.0 imm=
+UNITDATA crawler 8.0 120.0 bullet=0.0/1.1/30.0/30.0/55.0 imm=
+UNITDATA titan 9.0 460.0 bullet=6.0/3.0/42.0/0.0/-1.0 imm=burning,
+UNITDATA fortress 10.0 750.0 bullet=0.0/2.0/90.0/38.0/20.0 imm=
+UNITDATA eruptor 9.0 600.0 bullet=2.0/2.1/74.0/0.0/-1.0 imm=melting,burning,
+UNITDATA chaos-array 20.0 3000.0 bullet=7.0/4.0/40.0/33.0/34.0 imm=
+UNITDATA eradicator 20.0 9000.0 bullet=65.0/8.0/40.0/0.0/-1.0 imm=
+UNITDATA flare 6.0 90.0 bullet=8.0/3.0/40.0/0.0/-1.0 imm=
+UNITDATA wraith 7.0 75.0 bullet=9.0/2.5/60.0/0.0/-1.0 imm=
+UNITDATA ghoul 7.0 220.0 bullet=0.0/1.5/30.0/10.0/20.0 imm=
+UNITDATA draug 7.0 80.0 bullet=140.0/0.001/16.0/0.0/-1.0 imm=
+UNITDATA spirit 7.0 100.0 bullet=15.0/5.2/40.0/0.0/-1.0 imm=
+UNITDATA phantom 7.0 400.0 bullet=13.0/5.2/40.0/0.0/-1.0 imm=
+UNITDATA revenant 20.0 1000.0 bullet=12.0/2.7/60.0/10.0/25.0 imm=
+UNITDATA lich 40.0 6000.0 bullet=12.0/2.7/60.0/10.0/25.0 imm=
+UNITDATA reaper 56.0 11000.0 bullet=42.0/7.0/40.0/0.0/-1.0 imm=
+UNITDATA javelin-ship 6.0 170.0 bullet=10.5/5.0/90.0/1.0/20.0 imm=
+UNITDATA trident-ship 6.0 250.0 bullet=0.0/0.7/30.0/16.0/25.0 imm=
+UNITDATA glaive-ship 6.0 240.0 bullet=7.5/4.0/60.0/0.0/-1.0 imm=
+UNITDATA dart-ship 6.0 200.0 bullet=9.0/2.5/60.0/0.0/-1.0 imm=
+初始化完成>>>>>>>>>>
