@@ -50,8 +50,10 @@ import static com.phoenix.game.Vars.*;
  *   <li><b>{@code SaveMeta} 类型不同</b>：原版 {@code getMeta} 返回 {@code mindustry.io.SaveMeta}
  *       （含 version/build/mods/stats 与 {@code Map} 对象）。本项目 {@code io/SaveMeta} 是**自有格式**的
  *       JSON 元数据快照（字段集完全不同，且原版 {@code SaveMeta.java} 不在本批）→
- *       {@link #getMeta(DataInput)} 只映射两边都有的标量（wave/wavetime/playtime/saved/mapname/width/height），
- *       version/build/mods/stats/rules 全部 TODO。</li>
+ *       {@link #getMeta(DataInput)} 只映射两边都有的标量（wave/wavetime/playtime/saved/mapname/width/height）；
+ *       version/build/mods/stats/rules **不走 SaveMeta**：build/stats/rules 已在 {@link #writeMeta}/
+ *       {@link #readMeta} 直接读写（build = {@code Version.build}，stats/rules 走 {@code JsonIO}），
+ *       mods 恒写 {@code "[]"}（mod 系统降级，见下文 Mods 条目）。</li>
  *   <li><b>{@code Tile} 缺少 {@code floorID()/overlayID()/blockID()}</b> →
  *       分别写成 {@code floor().id / overlay().id / blockRaw().id}
  *       （注意用 {@code blockRaw()} 而不是 {@code block()}：本项目 {@code block()} 会解析多格链接，

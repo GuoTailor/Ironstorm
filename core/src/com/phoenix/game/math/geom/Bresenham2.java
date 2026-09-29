@@ -6,7 +6,8 @@ import com.phoenix.game.func.Intc2;
  * 整数网格上的直线遍历。参照 {@code arc.math.geom.Bresenham2} 移植（arc 的替代层类型）。
  *
  * <p>原版编辑器（{@code EditorTool.line} / {@code MapView.touchDragged}）用它把「起点→终点」
- * 展开成一串格子坐标；{@code Placement} 里也有同名 TODO（{@code lineNoDiagonal}）。
+ * 展开成一串格子坐标；原版 {@code Placement} 的 {@code lineNoDiagonal}（不带对角步进的变体）
+ * 已在 {@code input/Placement} 内联实现，不经过本类。
  * 本项目此前没有这个类，这里只补编辑器需要的 {@link #line}。
  *
  * <p>算法与 {@code World.raycastEach} 完全一致（标准 Bresenham），只把回调换成 {@link Intc2}。

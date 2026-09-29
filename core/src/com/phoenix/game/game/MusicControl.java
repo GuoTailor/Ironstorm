@@ -53,8 +53,9 @@ public class MusicControl{
 
     /** Update and play the right music track.*/
     public void update(){
-        //TODO 原版依赖 Vars.ui.deploy / Vars.ui.editor 的 isShown()（UI 系统尚未移植），
-        // 所以菜单态下只会播 Musics.menu，发射场/编辑器音乐暂时不播。
+        //原版此处按 ui.deploy.isShown()/ui.editor.isShown() 分播 Musics.launch/editor；
+        // 本项目 UI 已移植（Vars.ui.deploy/editor 均存在）但该分支尚未接线（缺失功能，见 todo-classified.md ②），
+        // 菜单态目前只播 Musics.menu，发射场/编辑器音乐不播。
         if(state.isMenu()){
             silenced = false;
             play(Musics.menu);

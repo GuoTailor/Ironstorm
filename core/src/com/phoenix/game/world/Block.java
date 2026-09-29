@@ -1342,16 +1342,24 @@ public class Block extends com.phoenix.game.ctype.UnlockableContent {
 
     /**
      * 某内容被生产出来时调用（对应原版 {@code Block.useContent}）：战役模式下解锁该内容。
-     * <p>TODO（B 类，缺依赖）：原版体是
+     * <p>原版体是
      * {@code if(!headless && tile.getTeam() == player.getTeam() && world.isZone()) logic.handleContent(content);}，
-     * 而 {@code logic.handleContent} → {@code data.unlockContent(content)} 这条解锁链本项目没有：
-     * {@code GlobalData} 无 {@code isUnlocked}/{@code unlockContent}（grep 已证），{@code ContentLoader.handleContent}
-     * 是"注册内容"不是"解锁内容"，两者同名但无关。注意 {@code Vars.world.isZone()} 本身**已存在**，
-     * 缺的只是解锁动作，所以整个方法体仍留空。
+     * 其中 {@code Logic.handleContent}（原版 Logic.java:96-100）就是 {@code if(!headless) data.unlockContent(content);}。
+     * 本项目 {@code GlobalData.isUnlocked/unlockContent} 已在 S4a 批落地（此处曾因"缺依赖"留空，理由已过时）
+     * → 按原版两段合并后的语义直接调 {@code data.unlockContent}（{@code ContentLoader.handleContent}
+     * 是"注册内容"不是"解锁内容"，两者同名但无关，不走它；{@code unlockContent} 内部按 {@code set.add}
+     * 防重复、首次解锁才派发 {@code UnlockEvent}，本方法被方块 update 高频调用是安全的）。
      * <p>刻意偏离：参数从原版的 {@code UnlockableContent} 放宽到 {@code MappableContent}
-     * （本项目 Liquid 继承 MappableContent，否则 {@code useContent(tile, liquid)} 无法通过编译）。
+     * （本项目 Liquid 继承 MappableContent，否则 {@code useContent(tile, liquid)} 无法通过编译）；
+     * 液体不是 UnlockableContent → 解锁前按 instanceof 过滤。
      */
     public void useContent(Tile tile, com.phoenix.game.ctype.MappableContent content){
+        //原版 Block.java:374-379 + Logic.java:96-100：only unlocks content in zones
+        if(!com.phoenix.game.Vars.headless && tile.getTeam() == com.phoenix.game.Vars.player.getTeam()
+            && com.phoenix.game.Vars.world.isZone()
+            && content instanceof com.phoenix.game.ctype.UnlockableContent){
+            com.phoenix.game.Vars.data.unlockContent((com.phoenix.game.ctype.UnlockableContent)content);
+        }
     }
 
     /** 轮询指针前移（rotation 兼作 dump 起点，对应原版 incrementDump）。 */

@@ -24,9 +24,8 @@ import io.anuke.mindustry.gen.Sounds;
  *
  * <p><b>与本项目的差异（逐条对应原版写法）</b>：
  * <ul>
- *   <li><b>弹药</b>：已全部使用原版弹药（F12b 修正：此前注释说这些弹药"未移植"，其实
- *       {@code Bullets.standardMechSmall/lightning/healBullet/missileSwarm/missileJavelin/standardGlaive}
- *       早已在 {@code Bullets} 里注册，只是本类的 TODO 未同步更新）。</li>
+ *   <li><b>弹药</b>：已全部使用原版弹药（{@code Bullets.standardMechSmall/lightning/healBullet/
+ *       missileSwarm/missileJavelin/standardGlaive}，均在 {@code Bullets} 注册并赋给 weapon.bullet）。</li>
  *   <li><b>Player 相关</b>：原版 {@code Player} 自身就是单位（{@code player.healBy/velocity()/rotation/
  *       shootHeat/timer}）；本项目 {@code Player} 只是"被控单位的持有者" → 一律改成走
  *       {@code player.unit()}；{@code shootHeat} 完全没有对应物，依赖它的覆写（omega 的
@@ -86,7 +85,7 @@ public class Mechs implements com.phoenix.game.ctype.ContentList{
                     reload = 14f;
                     alternate = true;
                     ejectEffect = Fx.shellEjectSmall;
-                    //F12b：原版弹药（此前 TODO 说"未移植"是过时信息，Bullets.standardMechSmall 早已存在）
+                    //原版弹药（F12b）
                     bullet = Bullets.standardMechSmall;
                 }};
             }
@@ -123,7 +122,7 @@ public class Mechs implements com.phoenix.game.ctype.ContentList{
                     shots = 2;
                     inaccuracy = 0f;
                     ejectEffect = Fx.none;
-                    //F12b：原版弹药（Bullets.lightning 早已存在，此前 TODO 是过时信息）
+                    //原版弹药（F12b）
                     bullet = Bullets.lightning;
                     shootSound = Sounds.spark;
                 }};
@@ -175,7 +174,7 @@ public class Mechs implements com.phoenix.game.ctype.ContentList{
                     alternate = false;
                     ejectEffect = Fx.none;
                     recoil = 2f;
-                    //F12b：原版弹药（Bullets.healBullet 早已存在，此前 TODO 是过时信息）
+                    //原版弹药（F12b）
                     bullet = Bullets.healBullet;
                     shootSound = Sounds.pew;
                 }};
@@ -233,7 +232,7 @@ public class Mechs implements com.phoenix.game.ctype.ContentList{
                     alternate = true;
                     ejectEffect = Fx.none;
                     shake = 3f;
-                    //F12b：原版弹药（Bullets.missileSwarm 早已存在，此前 TODO 是过时信息）
+                    //原版弹药（F12b）
                     bullet = Bullets.missileSwarm;
                     shootSound = Sounds.shootBig;
                 }};
@@ -334,7 +333,7 @@ public class Mechs implements com.phoenix.game.ctype.ContentList{
                     ejectEffect = Fx.none;
                     velocityRnd = 0.2f;
                     spacing = 1f;
-                    //F12b：原版弹药（Bullets.missileJavelin 早已存在，此前 TODO 是过时信息）
+                    //原版弹药（F12b）
                     bullet = Bullets.missileJavelin;
                     shootSound = Sounds.missile;
                 }};
@@ -455,7 +454,7 @@ public class Mechs implements com.phoenix.game.ctype.ContentList{
                     reload = 13f;
                     alternate = true;
                     ejectEffect = Fx.shellEjectSmall;
-                    //F12b：原版弹药（Bullets.standardGlaive 早已存在，此前 TODO 是过时信息）
+                    //原版弹药（F12b）
                     bullet = Bullets.standardGlaive;
                     shootSound = Sounds.shootSnap;
                 }};
