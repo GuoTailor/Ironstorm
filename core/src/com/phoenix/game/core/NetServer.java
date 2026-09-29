@@ -422,8 +422,8 @@ public class NetServer {
     }
 
     private void onConnect(NetConnection con, Packets.ConnectPacket p){
-        //封禁 / 人数上限校验
-        if(admins.isIPBanned(con.address) || admins.isIDBanned(p.uuid)){
+        //封禁 / 人数上限校验（对应原版 NetServer.java:109 的 isIPBanned || isSubnetBanned || isIDBanned）
+        if(admins.isIPBanned(con.address) || admins.isSubnetBanned(con.address) || admins.isIDBanned(p.uuid)){
             kick(con, "banned");
             return;
         }

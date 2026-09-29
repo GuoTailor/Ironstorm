@@ -77,10 +77,12 @@ public class DatabaseDialog extends FloatingDialog{
             //⚠ 原版的 `isHidden()` 对 Block 的实现是 `!buildVisibility.visible()`（= "建造栏不可见"），
             //  而本项目 `Block.isHidden()` 是"**不绘制**"语义（`BlockPart` 覆写返回 true，`Renderer.drawTiles` 用它跳过绘制）
             //  → 直接照抄会把树/地板/矿石等全列进内容数据库。Block 要改走 `buildVisibility.visible()`（T2b）。
+            //⚠ 本项目 Liquid 不是 UnlockableContent（刻意保留 MappableContent，见转换.md 继承链结论），
+            //  但原版数据库同样列出液体 → isListable 里单独放行。
             Array<Content> array = new Array<>();
             for(int i = 0; i < allContent[j].size; i++){
                 Content c = allContent[j].get(i);
-                if(c instanceof UnlockableContent && dbVisible(c)){
+                if(isListable(c)){
                     array.add(c);
                 }
             }
@@ -107,7 +109,13 @@ public class DatabaseDialog extends FloatingDialog{
             int count = 0;
 
             for(int i = 0; i < array.size; i++){
-                UnlockableContent unlock = (UnlockableContent)array.get(i);
+                Content c = array.get(i);
+                boolean unlockable = c instanceof UnlockableContent;
+                //液体不是 UnlockableContent（刻意保留 MappableContent），没有解锁状态 → 恒按"已解锁"处理
+                UnlockableContent unlock = unlockable ? (UnlockableContent)c : null;
+                boolean shown = unlock == null || unlocked(unlock);
+                //Content 基类没有 name 字段（在 MappableContent 上）；本循环的元素全是 MappableContent 子类
+                String cName = ((com.phoenix.game.ctype.MappableContent)c).name;
 
                 //原版：new Image(Icon.lockOpen, Pal.gray)；libgdx 的 Image 没有 (Drawable, Color) 构造器
                 //⚠ 本项目 Content.icon(Cicon) 缺图时**返回 null**（本项目 `findRegion` 缺图返回 null，见 `type/Item.java`；
@@ -117,28 +125,28 @@ public class DatabaseDialog extends FloatingDialog{
                 //   —— 原版图集同样没有 `burning`/`status-*` 区域（`grep -c '^status' Mindustry 的 sprites.atlas` = 0，
                 //   且 `UnlockableContent.icon()` 的查找链就是 `status-<name>-medium` → `-full` → `status-<name>` → `<name>` → `<name>1`），
                 //   所以原版显示的是 `error` 粉色占位图、本项目显示 `blank` 白块 —— **同属"无图标"，不算移植缺口**。
-                TextureRegion dbIcon = unlocked(unlock) ? unlock.icon(Cicon.medium) : null;
-                if(unlocked(unlock) && dbIcon == null && Core.atlas != null){
+                TextureRegion dbIcon = shown ? (unlockable ? unlock.icon(Cicon.medium) : ((com.phoenix.game.type.Liquid)c).icon(Cicon.medium)) : null;
+                if(shown && dbIcon == null && Core.atlas != null){
                     dbIcon = Core.atlas.findRegion("blank");
                 }
-                if(unlocked(unlock) && dbIcon == null){
+                if(shown && dbIcon == null){
                     continue; //图集都没有 blank（理论上不会）→ 跳过，别把 null 塞进 Image
                 }
-                Image image = unlocked(unlock) ? new Image(dbIcon) : new Image(Icon.locked);
-                if(!unlocked(unlock)){
+                Image image = shown ? new Image(dbIcon) : new Image(Icon.locked);
+                if(!shown){
                     image.setColor(Pal.gray);
                 }
                 list.add(image).size(Scl.scl(8 * 4)).pad(Scl.scl(3f));
                 ClickListener listener = new ClickListener();
                 image.addListener(listener);
-                if(!Vars.mobile && unlocked(unlock)){
+                if(!Vars.mobile && shown){
                     //刻意降级 原版：image.addListener(new HandCursorListener())（arc 的鼠标手型未移植）
                     //刻意降级 原版：image.update(() -> image.getColor().lerp(!listener.isOver() ? Color.lightGray : Color.white, 0.4f * Time.delta()))
                     //  —— arc 的 Element.update(Runnable)（每帧回调）libgdx 没有 → 悬停高亮整段去掉
                     image.setColor(com.badlogic.gdx.graphics.Color.LIGHT_GRAY);
                 }
 
-                if(unlocked(unlock)){
+                if(shown){
                     image.addListener(new ClickListener(){
                         @Override
                         public void clicked(InputEvent event, float x, float y){
@@ -147,16 +155,16 @@ public class DatabaseDialog extends FloatingDialog{
                             //        icons/icons.properties → Fonts.unicodeIcons）
                             //Core.input 没有 keyDown(int) → 用 libgdx 的 Gdx.input.isKeyPressed
                             //（KeyCode.SHIFT_LEFT 就等于 Input.Keys.SHIFT_LEFT，见 KeyCode 类注释）
-                            if(Gdx.input.isKeyPressed(KeyCode.SHIFT_LEFT) && Fonts.getUnicode(unlock.name) != 0){
+                            if(Gdx.input.isKeyPressed(KeyCode.SHIFT_LEFT) && Fonts.getUnicode(cName) != 0){
                                 //libgdx 的 Application 没有 setClipboardText → 用 Gdx.app.getClipboard()
-                                Gdx.app.getClipboard().setContents((char)Fonts.getUnicode(unlock.name) + "");
+                                Gdx.app.getClipboard().setContents((char)Fonts.getUnicode(cName) + "");
                                 //原版 ui.showInfoFade("$copied")：Vars.ui 门面已存在（判空）
                                 if(Vars.ui != null){
                                     Vars.ui.showInfoFade("$copied");
                                 }
                             }else{
                                 //原版 Vars.ui.content.show(unlock)：改走共享门面实例（判空）
-                                openInfo(unlock);
+                                openInfo(c);
                             }
                         }
                     });
@@ -180,16 +188,17 @@ public class DatabaseDialog extends FloatingDialog{
      * 原版走 {@code Vars.ui.content.show(unlock)}；本项目改调共享门面 {@code Vars.ui.content}
      * （不再每次 {@code new ContentInfoDialog()}）。本项目 {@code ContentInfoDialog.show} 需要 Stage
      * （见其类注释），从本 actor 所在的 {@code getStage()} 取（与 {@code TechTreeDialog} 同口径）。
-     * <p>保留"非 Block 就 return"的守卫：本项目 {@code ContentInfoDialog} 只支持 Block。
+     * <p>F-LOW 起解除"非 Block 就 return"守卫：Item/UnitType/Mech/Liquid 都有了 {@code displayInfo}
+     * 实现；没有详情面板的类型（StatusEffect——原版就不是 UnlockableContent；Zone——displayInfo 为空且
+     * isHidden 不进库）由 {@code ContentInfoDialog.show} 内部的分发守卫挡下。
      */
-    private void openInfo(UnlockableContent unlock){
-        if(!(unlock instanceof com.phoenix.game.world.Block)) return;
+    private void openInfo(Content c){
         if(Vars.ui == null || Vars.ui.content == null) return;
 
         Stage stage = getStage();
         if(stage == null) return;
 
-        Vars.ui.content.show((com.phoenix.game.world.Block)unlock, stage);
+        Vars.ui.content.show(c, stage);
     }
 
     boolean unlocked(UnlockableContent content){
@@ -205,13 +214,21 @@ public class DatabaseDialog extends FloatingDialog{
     }
 
     /**
-     * 内容数据库的"是否列出"判据（对应原版 {@code !((UnlockableContent)c).isHidden()}）。
+     * 内容数据库的"是否列出"判据（对应原版 {@code c instanceof UnlockableContent && !c.isHidden()}）。
      * <p>⚠ 本项目 {@code Block.isHidden()} 是"**不绘制**"语义（`BlockPart` 覆写返回 true，
      * {@code Renderer.drawTiles} 用它跳过绘制），而原版 {@code Block.isHidden()} 的实现是
      * {@code !buildVisibility.visible()}（= "建造栏不可见"，见 `转换.md` T2 批）→
      * 直接照抄原式会把树/地板/矿石等非建造方块全列进数据库。所以 Block 单独走 {@code buildVisibility.visible()}。
-     * <p>非 Block 内容（物品/液体/单位）沿用 {@code isHidden()}，语义两边一致。
+     * <p>非 Block 内容（物品/单位/机甲）沿用 {@code isHidden()}，语义两边一致；
+     * 液体不是 UnlockableContent（刻意保留 MappableContent）但原版同样列出 → 单独放行
+     * （StatusEffect 是 UnlockableContent 且 isHidden=false，会照原版样进库——原版里它就是以 error 占位图列出的）。
      */
+    private static boolean isListable(Content c){
+        if(c instanceof com.phoenix.game.type.Liquid) return true;
+        if(c instanceof UnlockableContent) return dbVisible(c);
+        return false;
+    }
+
     private static boolean dbVisible(Content c){
         if(c instanceof com.phoenix.game.world.Block){
             return ((com.phoenix.game.world.Block)c).buildVisibility.visible();

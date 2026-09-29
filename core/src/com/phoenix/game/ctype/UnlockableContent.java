@@ -63,10 +63,11 @@ public abstract class UnlockableContent extends MappableContent{
 
     /**
      * 把本内容的详情渲染进表格（对应原版 {@code UnlockableContent.displayInfo}）。
-     * <p>本项目 Block 已覆写为 {@code ContentDisplay.displayBlock}；其余类型暂留空实现（TODO 逐个补齐）。
+     * <p>本项目 Block/Item/UnitType/Mech 已覆写并转给 {@code ContentDisplay.displayXxx}（F-LOW 批补齐）；
+     * 液体是刻意的 {@code MappableContent} 子类、带自己的 {@code displayInfo}（见 {@code type/Liquid}）。
+     * 原版就没有详情面板的类型（StatusEffect 原版不是 UnlockableContent、Zone 空覆写）保持本空实现。
      */
     public void displayInfo(Table table){
-        //TODO 各内容类型自己的详情面板尚未移植（原版 Item/UnitType/Liquid/StatusEffect 各有 displayInfo）
     }
 
     /** 内容被解锁时调用（用于联动解锁其它内容）。 */

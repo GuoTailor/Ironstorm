@@ -64,6 +64,13 @@ public class UnitType extends com.phoenix.game.ctype.UnlockableContent{
         return com.phoenix.game.ctype.ContentType.unit;
     }
 
+    /** 对应原版 {@code UnitType.displayInfo}（原版 UnitType.java:63-65）：交给 ContentDisplay.displayUnit。 */
+    @Override
+    public void displayInfo(com.badlogic.gdx.scenes.scene2d.ui.Table table){
+        com.phoenix.game.ui.ContentDisplay.displayUnit(table, this);
+    }
+
+
     /**
      * 取指定尺寸的单位图标（覆写 {@code UnlockableContent.icon(Cicon)}）。
      * <p>原版按 {@code unit-<name>-<尺寸>} → {@code unit-<name>-full} → {@code unit-<name>} → {@code <name>} 依次回退；

@@ -19,6 +19,7 @@ import com.phoenix.game.entities.type.Player;
 import com.phoenix.game.input.DesktopInput;
 import com.phoenix.game.input.InputHandler;
 import com.phoenix.game.entities.type.Bullet;
+import com.phoenix.game.core.Strings;
 import com.phoenix.game.entities.Effects;
 import com.phoenix.game.content.UnitTypes;
 import com.phoenix.game.entities.Units;
@@ -158,6 +159,30 @@ public class Control{
             if(Gdx.app != null) Gdx.app.postRunnable(() -> {
                 if(Vars.hud != null) Vars.hud.showUnlock(e.content);
             });
+        });
+
+        //区域需求达成提示（对应原版 Control.java:153-158 的 ZoneRequireCompleteEvent 监听器，F-LOW 批接线；
+        //事件由 Zone.updateObjectives 派发）。
+        //⚠ 两处等价降级：原版 ui.hudfrag.showToast(...)（HUD toast 队列）本项目没有 → 用 UI.showInfoFade
+        //  （同为屏幕顶部淡出提示）；本项目 bundle 的 zone.requirement.complete 键文本与原版不一致
+        //  （"Wave {0} reached: {1} zone requirements met."，arg 语义对不上）→ 按约定硬编码原版英文原文。
+        Events.on(EventType.ZoneRequireCompleteEvent.class, e -> {
+            if(e.objective.display() != null && Gdx.app != null){
+                Gdx.app.postRunnable(() -> {
+                    if(Vars.ui != null) Vars.ui.showInfoFade(
+                        Strings.format("Requirement for {0} completed:[lightgray]\n{1}",
+                            e.zoneForMet.localizedName, e.objective.display()));
+                });
+            }
+        });
+        //区域配置目标（默认波次）达成提示（对应原版 Control.java:159-163；bundle 缺 zone.config.unlocked 键 → 硬编码原文）
+        Events.on(EventType.ZoneConfigureCompleteEvent.class, e -> {
+            if(e.zone.configureObjective.display() != null && Gdx.app != null){
+                Gdx.app.postRunnable(() -> {
+                    if(Vars.ui != null) Vars.ui.showInfoFade(
+                        Strings.format("Loadout unlocked:[lightgray]\n{0}", e.zone.configureObjective.display()));
+                });
+            }
         });
 
         //UI 缩放确认框（对应原版 Control.init() 里的 uiscalechanged 分支）。

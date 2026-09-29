@@ -3,9 +3,15 @@ package com.phoenix.game.game;
 
 import com.badlogic.gdx.ai.fsm.State;
 
+import com.phoenix.game.ai.UnitCommand;
 import com.phoenix.game.ctype.UnlockableContent;
+import com.phoenix.game.entities.traits.BuilderTrait;
 import com.phoenix.game.entities.type.BaseUnit;
 import com.phoenix.game.entities.type.Player;
+import com.phoenix.game.type.ItemStack;
+import com.phoenix.game.type.Item;
+import com.phoenix.game.type.Mech;
+import com.phoenix.game.type.Zone;
 import com.phoenix.game.world.Tile;
 
 public class EventType {
@@ -27,7 +33,11 @@ public class EventType {
         exclusionDeath,
         suicideBomb,
         openWiki,
-        teamCoreDamage
+        teamCoreDamage,
+        //F-LOW 批照原版补齐（原版 EventType.java:32-33）：
+        //update 在原版 Logic.java:211 每帧 fire；socketConfigChanged 由 Config 的 socketInput 三项 fire（本地 TCP 控制台未移植）
+        socketConfigChanged,
+        update
     }
 
     public static class WinEvent{}
@@ -190,6 +200,224 @@ public class EventType {
 
         public UnlockEvent(UnlockableContent content){
             this.content = content;
+        }
+    }
+
+    //==================== F-LOW 批照原版补齐的事件类 ====================
+    //原版定义见 mindustry/game/EventType.java。多数类当前在本项目没有派发点/监听方
+    //(原版的核心消费者也是 mod 或未移植子系统)，先按原版形状立好，接线点在各类注释里注明。
+
+    /** 发射台发射物品（原版 :42-48；原版派发点 LaunchPad.java:83 / Logic.java:190 —— 本项目发射链未移植，暂无派发点）。 */
+    public static class LaunchItemEvent{
+        public final ItemStack stack;
+
+        public LaunchItemEvent(Item item, int amount){
+            this.stack = new ItemStack(item, amount);
+        }
+    }
+
+    /** 指挥中心下达全队命令（原版 :54-62；原版派发点 CommandCenter.java:118 —— 本项目 CommandCenter 已退役为空壳，暂无派发点）。 */
+    public static class CommandIssueEvent{
+        public final Tile tile;
+        public final UnitCommand command;
+
+        public CommandIssueEvent(Tile tile, UnitCommand command){
+            this.tile = tile;
+            this.command = command;
+        }
+    }
+
+    /** 收到玩家聊天消息（原版 :64-72；原版派发点 NetClient.java:165 —— 本项目自研网络无该分发点，暂无派发点）。 */
+    public static class PlayerChatEvent{
+        public final Player player;
+        public final String message;
+
+        public PlayerChatEvent(Player player, String message){
+            this.player = player;
+            this.message = message;
+        }
+    }
+
+    /** 区域的一个需求目标达成（原版 :75-84；派发点 {@code Zone.updateObjectives}，本项目已接线）。 */
+    public static class ZoneRequireCompleteEvent{
+        public final Zone zoneMet, zoneForMet;
+        public final Objective objective;
+
+        public ZoneRequireCompleteEvent(Zone zoneMet, Zone zoneForMet, Objective objective){
+            this.zoneMet = zoneMet;
+            this.zoneForMet = zoneForMet;
+            this.objective = objective;
+        }
+    }
+
+    /** 区域的配置目标（默认波次）达成（原版 :87-93；派发点 {@code Zone.updateObjectives}，本项目已接线）。 */
+    public static class ZoneConfigureCompleteEvent{
+        public final Zone zone;
+
+        public ZoneConfigureCompleteEvent(Zone zone){
+            this.zone = zone;
+        }
+    }
+
+    /** 客户端创建（原版 :95-97；原版派发点 ClientLauncher.java:36 —— 启动早期，本项目暂无派发点）。 */
+    public static class ClientCreateEvent{
+
+    }
+
+    /** headless 服务端加载完成（原版 :104-106；本项目无 headless 循环，暂无派发点）。 */
+    public static class ServerLoadEvent{
+
+    }
+
+    /** 内容重载（mod 热重载后重取贴图/布局；原版 :108-110，派发点 Mods.java:452 —— 本项目 mod 系统降级，暂无派发点）。
+     * <p>原版消费者：MapRenderer 重取 clear-editor 贴图、TechTreeDialog 重排布局（两处本项目都有对应 TODO）。 */
+    public static class ContentReloadEvent{
+
+    }
+
+    /** 玩家点了一下方块（原版 :179-187；原版派发点 InputHandler.onTileTapped —— 本项目 tapped 调用点分散在 DesktopInput/MobileInput/ClientLauncher，未接线）。 */
+    public static class TapEvent{
+        public final Tile tile;
+        public final Player player;
+
+        public TapEvent(Tile tile, Player player){
+            this.tile = tile;
+            this.player = player;
+        }
+    }
+
+    /** 玩家配置了方块（原版 :190-200；原版派发点 InputHandler.onTileConfig —— 本项目唯一配置入口 {@code Tile.configured} 可接线但当前无消费者，暂未派发）。 */
+    public static class TapConfigEvent{
+        public final Tile tile;
+        public final Player player;
+        public final int value;
+
+        public TapConfigEvent(Tile tile, Player player, int value){
+            this.tile = tile;
+            this.player = player;
+            this.value = value;
+        }
+    }
+
+    /** 游戏结束（原版 :202-208）。派发点 {@code Logic.checkGameOver}（本项目已接线）；
+     * 原版消费者 Control 的"弹结算框 + 结算统计"在本项目已内联等价实现，监听本事件的新逻辑可自行挂接。 */
+    public static class GameOverEvent{
+        public final Team winner;
+
+        public GameOverEvent(Team winner){
+            this.winner = winner;
+        }
+    }
+
+    /** 开始建造/拆除一个方块（占位方块落下时；原版 :253-263，派发点 Build.java:43/64 —— 本项目 Build.beginPlace 未拆分 begin/end 派发，暂无派发点）。 */
+    public static class BlockBuildBeginEvent{
+        public final Tile tile;
+        public final Team team;
+        public final boolean breaking;
+
+        public BlockBuildBeginEvent(Tile tile, Team team, boolean breaking){
+            this.tile = tile;
+            this.team = team;
+            this.breaking = breaking;
+        }
+    }
+
+    /** 单位/玩家开始建造某个占位方块（原版 :284-296；派发点 {@code BuilderTrait.updateBuilding}，本项目已接线，
+     * 消费者 BuilderDrone"对方块开始建造时停手"联动已按原版恢复）。 */
+    public static class BuildSelectEvent{
+        public final Tile tile;
+        public final Team team;
+        public final BuilderTrait builder;
+        public final boolean breaking;
+
+        public BuildSelectEvent(Tile tile, Team team, BuilderTrait builder, boolean breaking){
+            this.tile = tile;
+            this.team = team;
+            this.builder = builder;
+            this.breaking = breaking;
+        }
+    }
+
+    /** 工厂出厂一个单位（原版 :316-322；原版派发点 UnitFactory.java:66 —— 本项目 spawnUnit 可接线但当前无消费者，暂未派发）。 */
+    public static class UnitCreateEvent{
+        public final BaseUnit unit;
+
+        public UnitCreateEvent(BaseUnit unit){
+            this.unit = unit;
+        }
+    }
+
+    /** 玩家机甲变更（原版 :328-336；原版派发点 MechPad.java:79 —— 本项目 Player 无机甲装备系统（F12 等价路径），暂无派发点）。 */
+    public static class MechChangeEvent{
+        public final Player player;
+        public final Mech mech;
+
+        public MechChangeEvent(Player player, Mech mech){
+            this.player = player;
+            this.mech = mech;
+        }
+    }
+
+    /** 玩家连上并拿到世界数据、可以开始玩（原版 :339-345；原版派发点 NetServer.java:649 —— 本项目自研网络，暂无派发点）。 */
+    public static class PlayerJoin{
+        public final Player player;
+
+        public PlayerJoin(Player player){
+            this.player = player;
+        }
+    }
+
+    /** 玩家已连接但还没加入游戏（原版 :348-354；原版派发点 NetServer.java:245 —— 本项目自研网络，暂无派发点）。 */
+    public static class PlayerConnect{
+        public final Player player;
+
+        public PlayerConnect(Player player){
+            this.player = player;
+        }
+    }
+
+    /** 玩家离开（原版 :356-362；原版派发点 NetServer.java:487 —— 本项目自研网络，暂无派发点）。 */
+    public static class PlayerLeave{
+        public final Player player;
+
+        public PlayerLeave(Player player){
+            this.player = player;
+        }
+    }
+
+    /** 玩家被封禁（原版 :364-370；原版派发点 Administration.banPlayerID —— 本项目 Administration.ban 走文件持久化，暂无派发点）。 */
+    public static class PlayerBanEvent{
+        public final Player player;
+
+        public PlayerBanEvent(Player player){
+            this.player = player;
+        }
+    }
+
+    /** 玩家被解禁（原版 :372-378）。 */
+    public static class PlayerUnbanEvent{
+        public final Player player;
+
+        public PlayerUnbanEvent(Player player){
+            this.player = player;
+        }
+    }
+
+    /** IP 被封禁（原版 :380-387）。 */
+    public static class PlayerIpBanEvent{
+        public final String ip;
+
+        public PlayerIpBanEvent(String ip){
+            this.ip = ip;
+        }
+    }
+
+    /** IP 被解禁（原版 :389-396）。 */
+    public static class PlayerIpUnbanEvent{
+        public final String ip;
+
+        public PlayerIpUnbanEvent(String ip){
+            this.ip = ip;
         }
     }
 

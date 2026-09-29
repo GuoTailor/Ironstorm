@@ -1,9 +1,11 @@
 package com.phoenix.game.entities.traits;
 
+import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.math.Vector2;
 import com.phoenix.game.Vars;
 import com.phoenix.game.content.Blocks;
 import com.phoenix.game.core.Draw;
+import com.phoenix.game.core.Events;
 import com.phoenix.game.core.Fill;
 import com.phoenix.game.core.Lines;
 import com.phoenix.game.core.Time;
@@ -111,8 +113,11 @@ public interface BuilderTrait extends Entity, TeamTrait{
         }
 
         if(tile.entity instanceof BuildEntity && !current.initialized){
-            //B 类：原版 Events.fire(new BuildSelectEvent(tile, unit.getTeam(), this, current.breaking))；
-            //BuildSelectEvent 确实未移植（全工程无该类），只置 initialized
+            //原版 BuilderTrait.java:84：Core.app.post(() -> Events.fire(new BuildSelectEvent(tile, unit.getTeam(), this, current.breaking)))
+            //F-LOW 批已补 BuildSelectEvent（EventType）与消费者（BuilderDrone 构造器："对方块开始建造时停手"）。
+            //延后一帧派发（原版经 Core.app.post），避免在 update 中途同步改其它单位的建造队列
+            if(Gdx.app != null) Gdx.app.postRunnable(() ->
+                Events.fire(new com.phoenix.game.game.EventType.BuildSelectEvent(tile, unit.getTeam(), this, current.breaking)));
             current.initialized = true;
         }
 

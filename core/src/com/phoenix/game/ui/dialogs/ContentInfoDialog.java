@@ -11,10 +11,11 @@ import com.badlogic.gdx.scenes.scene2d.ui.Window;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.phoenix.game.core.Core;
 import com.phoenix.game.core.Scl;
-import com.phoenix.game.ui.ContentDisplay;
+import com.phoenix.game.ctype.Content;
+import com.phoenix.game.ctype.UnlockableContent;
+import com.phoenix.game.type.Liquid;
 import com.phoenix.game.ui.Label;
 import com.phoenix.game.ui.Styles;
-import com.phoenix.game.world.Block;
 
 /**
  * 内容信息对话框，参照 Mindustry mindustry.ui.dialogs.ContentInfoDialog。
@@ -34,13 +35,27 @@ public class ContentInfoDialog{
     /** 全屏遮罩（对应原版 DialogStyle.stageBackground：打开时整屏变暗）。 */
     private Image shade;
 
-    /** 显示某个方块的信息（对应原版 {@code ContentInfoDialog.show(UnlockableContent)}）。 */
-    public void show(Block block, Stage stage){
-        if(stage == null) return;
+    /**
+     * 显示任意内容的信息（对应原版 {@code ContentInfoDialog.show(UnlockableContent)}：内部调
+     * {@code content.displayInfo(table)}）。
+     * <p>分发：{@link UnlockableContent}（含 Block/Item/UnitType/Mech）走各自的 {@code displayInfo} 覆写；
+     * {@link Liquid} 是本项目刻意保留的 {@code MappableContent} 子类（见转换.md 继承链结论），
+     * 带自己的 {@code displayInfo} → 单独分发。其它内容类型（如 StatusEffect，原版就没有详情面板）不弹窗。
+     */
+    public void show(Content content, Stage stage){
+        if(stage == null || content == null) return;
+        if(!(content instanceof UnlockableContent) && !(content instanceof Liquid)) return;
+        //原版没有详情面板的类型：StatusEffect 原版是 MappableContent（不是 UnlockableContent，数据库也不列出）、
+        //Zone 的 displayInfo 是空覆写 —— 放行会弹出一个空白框，这里一并挡下
+        if(content instanceof com.phoenix.game.type.StatusEffect || content instanceof com.phoenix.game.type.Zone) return;
         if(dialog == null) create();
 
-        content.clearChildren();
-        ContentDisplay.displayBlock(content, block);
+        this.content.clearChildren();
+        if(content instanceof UnlockableContent){
+            ((UnlockableContent)content).displayInfo(this.content);
+        }else{
+            ((Liquid)content).displayInfo(this.content);
+        }
 
         //遮罩只添加一次：libgdx 的 addActor 会把它提到最上层，重复添加会盖住对话框
         if(shade.getStage() == null){

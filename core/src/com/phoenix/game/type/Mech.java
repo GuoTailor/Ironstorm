@@ -133,6 +133,12 @@ public class Mech extends com.phoenix.game.ctype.UnlockableContent{
         return com.phoenix.game.ctype.ContentType.mech;
     }
 
+    /** 对应原版 {@code Mech.displayInfo}（原版 Mech.java:117-119）：交给 ContentDisplay.displayMech。 */
+    @Override
+    public void displayInfo(com.badlogic.gdx.scenes.scene2d.ui.Table table){
+        com.phoenix.game.ui.ContentDisplay.displayMech(table, this);
+    }
+
     @Override
     public String toString(){
         return localizedName;

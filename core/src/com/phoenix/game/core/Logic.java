@@ -208,8 +208,9 @@ public class Logic {
 
             //原版：Events.fire(new GameOverEvent(waveTeam)) → Control 的监听器调 Logic.onGameOver
             //      → ui.restart.show(winner)（GameOverDialog 内部按胜负发 Win/LoseEvent，
-            //        点它的"菜单"按钮才回菜单）。本项目没有 GameOverEvent 与对应监听器，
-            //        这里直接弹结算框；没有 UI 设施时退回旧行为（发 WinEvent + 直接回菜单）。
+            //        点它的"菜单"按钮才回菜单）。F-LOW 批已补 GameOverEvent → 按原版先 fire；
+            //        等价消费逻辑（结算统计/弹结算框）原本就内联在本方法里，新监听者可再挂接。
+            Events.fire(new EventType.GameOverEvent(Vars.state.rules.waveTeam));
             if(Vars.ui != null && Vars.ui.restart != null){
                 Vars.ui.restart.show(Vars.state.rules.waveTeam);
             }else{
@@ -235,6 +236,8 @@ public class Logic {
 
             //原版：区域图里若玩家队获胜，等价于"发射成功"（Call.launchZone）；
             //本项目区域发射/存档/解锁链未移植 → 统一按普通胜利弹结算框。
+            //F-LOW 批：同上，按原版先 fire GameOverEvent（原版 Logic.java:165）。
+            Events.fire(new EventType.GameOverEvent(alive));
             if(Vars.ui != null && Vars.ui.restart != null){
                 Vars.ui.restart.show(alive);
             }else{

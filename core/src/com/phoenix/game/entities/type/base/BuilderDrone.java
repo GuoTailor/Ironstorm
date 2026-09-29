@@ -4,6 +4,7 @@ import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.IntIntMap;
 import com.phoenix.game.Vars;
 import com.phoenix.game.core.Core;
+import com.phoenix.game.core.Events;
 import com.phoenix.game.entities.Units;
 import com.phoenix.game.entities.traits.BuilderTrait;
 import com.phoenix.game.entities.traits.TargetTrait;
@@ -38,8 +39,8 @@ import static com.phoenix.game.Vars.world;
  *       现按原版遍历 {@code Vars.playerGroup.all()}（单人时退化为只有本地玩家）。</li>
  *   <li>{@code unitGroup.all()} → {@link Units#units}。</li>
  *   <li>{@code StaticReset}（原版的"静态监听只注册一次"工具）→ 换成一个 static boolean。</li>
- *   <li>{@code Events.on(BuildSelectEvent.class, ...)}（BuildSelectEvent **确实未移植**，已 grep 无该类）
- *       → 省略"对方块开始建造时停手"的联动。</li>
+ *   <li>{@code Events.on(BuildSelectEvent.class, ...)} → <b>F-LOW 批已接</b>（BuildSelectEvent 已补进
+ *       EventType，派发点在 {@code BuilderTrait.updateBuilding}）：对方块开始反方向建造时停手，见构造器。</li>
  *   <li>{@code team.data().brokenBlocks} → **本批已接**：本项目 {@code Teams} 没有 {@code TeamData} 包装类，
  *       改用 {@code state.teams.brokenBlocks(team)}（对应原版 {@code team.data().brokenBlocks}）→
  *       已补上"自动重建被拆建筑"的逻辑（见 {@link #update()}）。</li>
@@ -152,8 +153,25 @@ public class BuilderDrone extends BaseDrone implements BuilderTrait{
     public BuilderDrone(){
         if(!resetChecked){
             resetChecked = true;
-            //TODO 原版在这里 Events.on(BuildSelectEvent.class, ...) 注册"对方块开始建造时停止本地建造"的联动；
-            //     BuildSelectEvent 未移植，省略。
+            //F-LOW 批按原版 BuilderDrone.java:112-127 恢复：对方块开始（ opposite 方向的）建造时停手。
+            //原版 unitGroup.all() → 本项目 Units.units（类注释的既有映射）；
+            //⚠ 原版 getTeam() 闭包捕获的是"监听者自己"（首个 BuilderDrone）的队伍 —— 照抄该行为。
+            Events.on(com.phoenix.game.game.EventType.BuildSelectEvent.class, event -> {
+                if(!(event.tile.entity instanceof BuildEntity)) return;
+                for(int i = 0; i < Units.units.size; i++){
+                    BaseUnit unit = Units.units.get(i);
+                    if(unit instanceof BuilderDrone && unit.getTeam() == getTeam()){
+                        BuilderDrone drone = (BuilderDrone)unit;
+                        if(drone.isBuilding()){
+                            BuildRequest req = drone.buildRequest();
+                            if(req.breaking != event.breaking && req.x == event.tile.x && req.y == event.tile.y){
+                                drone.clearBuilding();
+                                drone.target = null;
+                            }
+                        }
+                    }
+                }
+            });
         }
     }
 

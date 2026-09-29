@@ -17,4 +17,15 @@ public final class I18n{
         String value = Core.bundle.get(key);
         return (value.equals(key) || value.equals("???" + key + "???")) ? fallback : value;
     }
+
+    /**
+     * 格式化 bundle 文本（对应原版 {@code Core.bundle.format(key, args...)}，文本里的 {@code {0}} 等占位符按参数替换）。
+     * <p>键缺失时对 fallback 也做占位符替换（{@code MessageFormat} 语义与 libgdx bundle 一致）。
+     */
+    public static String format(String key, String fallback, Object... args){
+        if(Core.bundle == null) return java.text.MessageFormat.format(fallback, args);
+        String value = Core.bundle.get(key);
+        if(value.equals(key) || value.equals("???" + key + "???")) return java.text.MessageFormat.format(fallback, args);
+        return Core.bundle.format(key, args);
+    }
 }

@@ -3,6 +3,8 @@ package com.phoenix.game.net;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.ObjectMap;
+import com.phoenix.game.Vars;
+import com.phoenix.game.core.Core;
 
 import java.io.File;
 import java.io.IOException;
@@ -10,10 +12,14 @@ import java.nio.file.Files;
 
 /**
  * 服务端玩家管理。对应原版 Mindustry 的 mindustry.net.Administration（headless 版）。
- * <p>维护 uuid → PlayerInfo（名字/IP/管理员/封禁次数）、IP 封禁、白名单、人数上限，
+ * <p>维护 uuid → PlayerInfo（名字/IP/管理员/封禁次数）、IP 封禁、子网封禁、白名单、人数上限，
  * 并持久化到 {@code admins} 目录（{@code players.dat} 玩家档案、{@code banned.txt} 封禁 IP、
- * {@code whitelist.txt} 白名单）。服务端可手工编辑这些文本文件。
- * <p>聊天/动作过滤（antiSpam）未实现，保留接口供后续。
+ * {@code whitelist.txt} 白名单、{@code subnets.txt} 子网封禁）。服务端可手工编辑这些文本文件。
+ * <p><b>F-LOW 批补齐</b>：子网封禁（subnetBans）与 {@link Config} 配置项子系统（strict/allowCustomClients
+ * 等 19 项，走 {@code Core.settings}）——原版 Administration.java:63-79/411-489；消费点
+ * {@link #getStrict()}/{@link #allowsCustomClients()}/{@link #isSubnetBanned} 已由
+ * {@code core/NetServer.onConnect} 接线。
+ * <p>聊天/动作过滤（antiSpam 的 ChatFilter/ActionFilter 机制）未实现，保留接口供后续。
  */
 public class Administration {
     /** 数据目录（应用本地目录下）。 */
@@ -24,6 +30,8 @@ public class Administration {
     private static final String BANNED_FILE = "banned.txt";
     /** 白名单文件（每行一个 uuid）。 */
     private static final String WHITELIST_FILE = "whitelist.txt";
+    /** 子网封禁文件（每行一个 IP 前缀，F-LOW 批照原版 subnetBans 补齐）。 */
+    private static final String SUBNET_FILE = "subnets.txt";
 
     /** uuid → 玩家档案。 */
     public final ObjectMap<String, PlayerInfo> playerInfo = new ObjectMap<>();
@@ -31,6 +39,8 @@ public class Administration {
     public final Array<String> bannedIPs = new Array<>();
     /** 白名单 uuid 列表。 */
     public final Array<String> whitelist = new Array<>();
+    /** 封禁的 IP 前缀列表（对应原版 {@code Administration.subnetBans}，前缀匹配）。 */
+    public final Array<String> subnetBans = new Array<>();
     /** 是否启用白名单。 */
     public boolean whitelistEnabled;
     /** 加入上限；<=0 表示不限制。 */
@@ -51,9 +61,10 @@ public class Administration {
 
         readLines(new File(dir, BANNED_FILE), bannedIPs);
         readLines(new File(dir, WHITELIST_FILE), whitelist);
+        readLines(new File(dir, SUBNET_FILE), subnetBans);
     }
 
-    /** 保存档案/封禁/白名单到磁盘。 */
+    /** 保存档案/封禁/白名单/子网封禁到磁盘。 */
     public void save(){
         try{
             File dir = dataDir();
@@ -64,6 +75,7 @@ public class Administration {
             Files.write(new File(dir, PLAYERS_FILE).toPath(), writePlayers());
             writeLines(new File(dir, BANNED_FILE), bannedIPs);
             writeLines(new File(dir, WHITELIST_FILE), whitelist);
+            writeLines(new File(dir, SUBNET_FILE), subnetBans);
         }catch(IOException e){
             System.err.println("保存管理数据失败: " + e);
         }
@@ -110,6 +122,44 @@ public class Administration {
     public void unbanIP(String ip){
         bannedIPs.removeValue(ip, true);
         save();
+    }
+
+    // ---- 子网封禁（对应原版 Administration.java:63-79 的 subnetBans，F-LOW 批补齐）----
+
+    /** @return 全部被封禁的 IP 前缀（对应原版 {@code getSubnetBans}）。 */
+    public Array<String> getSubnetBans(){
+        return subnetBans;
+    }
+
+    /** 解封一个 IP 前缀（对应原版 {@code removeSubnetBan}）。 */
+    public void removeSubnetBan(String ip){
+        subnetBans.removeValue(ip, true);
+        save();
+    }
+
+    /** 封禁一个 IP 前缀（对应原版 {@code addSubnetBan}；前缀匹配，如 {@code 192.168.}）。 */
+    public void addSubnetBan(String ip){
+        subnetBans.add(ip);
+        save();
+    }
+
+    /** @return 该 IP 是否命中任一封禁前缀（对应原版 {@code isSubnetBanned} 的 {@code subnetBans.contains(ip::startsWith)}）。 */
+    public boolean isSubnetBanned(String ip){
+        if(ip == null) return false;
+        for(int i = 0; i < subnetBans.size; i++){
+            if(ip.startsWith(subnetBans.get(i))) return true;
+        }
+        return false;
+    }
+
+    /** @return 严格模式是否开启（对应原版 {@code getStrict}：纠位 + 防重复 UUID，仅 headless 服务端消费）。 */
+    public boolean getStrict(){
+        return Config.strict.bool();
+    }
+
+    /** @return 是否允许非官方客户端连接（对应原版 {@code allowsCustomClients}）。 */
+    public boolean allowsCustomClients(){
+        return Config.allowCustomClients.bool();
     }
 
     public boolean isAdmin(String uuid){
@@ -190,8 +240,95 @@ public class Administration {
         return out;
     }
 
-    // ---- 持久化 ----
+    /**
+     * 服务器配置项（对应原版 {@code Administration.Config}，原版 Administration.java:411-489）：
+     * 每项可以是字符串/布尔/数字，持久化在 {@code Core.settings}（本项目 {@code phoenix_settings}）。
+     * <p><b>与原版的差异</b>：socketInput 三项的 {@code changed} 回调原版会 fire {@code Trigger.socketConfigChanged}
+     * （本地 TCP 控制台子系统未移植，Trigger 里也无该常量）→ 回调留空。
+     * <p>当前消费点：{@link #getStrict()} / {@link #allowsCustomClients()}（本项目自研 NetServer 的
+     * 严格模式/自定义客户端校验尚未接，见类注释）；其余项为"配置面先立好"，UI/命令行入口留 TODO。
+     */
+    public enum Config{
+        name("The server name as displayed on clients.", "Server", "servername"),
+        desc("The server description, displayed under the name. Max 100 characters.", "off"),
+        port("The port to host on.", Vars.port),
+        autoUpdate("Whether to auto-update and exit when a new bleeding-edge update arrives.", false),
+        showConnectMessages("Whether to display connect/disconnect messages.", true),
+        enableVotekick("Whether votekick is enabled.", true),
+        startCommands("Commands run at startup. This should be a comma-separated list.", ""),
+        crashReport("Whether to send crash reports.", false, "crashreport"),
+        logging("Whether to log everything to files.", true),
+        strict("Whether strict mode is on - corrects positions and prevents duplicate UUIDs.", true),
+        antiSpam("Whether spammers are automatically kicked and rate-limited.", Vars.headless),
+        messageRateLimit("Message rate limit in seconds. 0 to disable.", 0),
+        messageSpamKick("How many times a player must send a message before the cooldown to get kicked. 0 to disable.", 3),
+        socketInput("Allows a local application to control this server through a local TCP socket.", false, "socket"),
+        socketInputPort("The port for socket input.", 6859),
+        socketInputAddress("The bind address for socket input.", "localhost"),
+        allowCustomClients("Whether custom clients are allowed to connect.", !Vars.headless, "allow-custom"),
+        whitelist("Whether the whitelist is used.", false),
+        motd("The message displayed to people on connection.", "off");
 
+        public static final Config[] all = values();
+
+        public final Object defaultValue;
+        public final String key, description;
+
+        Config(String description, Object def){
+            this(description, def, null);
+        }
+
+        Config(String description, Object def, String key){
+            this.description = description;
+            this.key = key == null ? name() : key;
+            this.defaultValue = def;
+        }
+
+        public boolean isNum(){
+            return defaultValue instanceof Integer;
+        }
+
+        public boolean isBool(){
+            return defaultValue instanceof Boolean;
+        }
+
+        public boolean isString(){
+            return defaultValue instanceof String;
+        }
+
+        /** @return 当前值（对应原版 {@code Config.get}；本项目 Settings 没有泛型 get → 按默认值类型分发）。 */
+        public Object get(){
+            if(isBool()) return bool();
+            if(isNum()) return num();
+            return string();
+        }
+
+        public boolean bool(){
+            return Core.settings.getBool(key, (Boolean)defaultValue);
+        }
+
+        public int num(){
+            return Core.settings.getInt(key, (Integer)defaultValue);
+        }
+
+        public String string(){
+            return Core.settings.getString(key, (String)defaultValue);
+        }
+
+        /** 写入并落盘（对应原版 {@code Config.set}；本项目 Settings 的 put 后必须手动 save）。 */
+        public void set(Object value){
+            if(value instanceof Boolean){
+                Core.settings.put(key, (Boolean)value);
+            }else if(value instanceof Integer){
+                Core.settings.put(key, (Integer)value);
+            }else{
+                Core.settings.put(key, String.valueOf(value));
+            }
+            Core.settings.save();
+        }
+    }
+
+    // ---- 持久化 ----
     private File dataDir(){
         return Gdx.files.local(DATA_DIR).file();
     }

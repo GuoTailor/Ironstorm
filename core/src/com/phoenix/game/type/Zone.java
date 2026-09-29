@@ -4,10 +4,13 @@ import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.phoenix.game.content.Loadouts;
 import com.phoenix.game.core.Core;
+import com.phoenix.game.core.Events;
 import com.phoenix.game.ctype.ContentType;
 import com.phoenix.game.ctype.UnlockableContent;
 import com.phoenix.game.func.Cons;
+import com.phoenix.game.game.EventType;
 import com.phoenix.game.game.Objective;
+import com.phoenix.game.game.Objectives;
 import com.phoenix.game.game.Objectives.ZoneWave;
 import com.phoenix.game.game.Rules;
 import com.phoenix.game.game.Schematic;
@@ -149,29 +152,45 @@ public class Zone extends UnlockableContent{
     }
 
     public void updateObjectives(Runnable closure){
-        //TODO 原版：
-        //  Array<ZoneObjective> incomplete = content.zones()
-        //      .map(z -> z.requirements).<Objective>flatten()
-        //      .select(o -> o.zone() == this && !o.complete())
-        //      .as(ZoneObjective.class);
-        //
-        //  boolean wasConfig = configureObjective.complete();
-        //
-        //  closure.run();
-        //  for(ZoneObjective objective : incomplete){
-        //      if(objective.complete()){
-        //          Events.fire(new ZoneRequireCompleteEvent(objective.zone, content.zones().find(z -> z.requirements.contains(objective)), objective));
-        //      }
-        //  }
-        //
-        //  if(!wasConfig && configureObjective.complete()){
-        //      Events.fire(new ZoneConfigureCompleteEvent(this));
-        //  }
-        // —— 仍然阻塞：EventType.ZoneRequireCompleteEvent/ZoneConfigureCompleteEvent（未移植）
-        //    → 扫描到的"目标达成"无处派发，硬接等于死代码，故只保留 closure.run()。
-        //    （Objectives.ZoneObjective/ZoneWave/Launched 现已启用；content.zones() 可用
-        //      Vars.content.getBy(ContentType.zone) 取，仅差事件系统。）
+        //原版 Zone.java:113-127：先扫描"与本区域相关、尚未完成"的 ZoneObjective，
+        //执行 closure（把 launched/wave 等状态写进去），再把刚达成的目标逐个 fire 事件出去。
+        //F-LOW 批：ZoneRequireCompleteEvent/ZoneConfigureCompleteEvent 已补进 EventType → 按原版接线。
+        //arc 的 map/flatten/select 链没有对应物 → 手写双层循环（加载/结算期调用，非热路径）。
+        //⚠ ContentLoader.getBy 返回的是 libgdx 的 Array（本项目 struct.Array 是另一套）→ 用全限定名接
+        com.badlogic.gdx.utils.Array<Zone> zones = content.getBy(ContentType.zone);
+        Array<Objectives.ZoneObjective> incomplete = new Array<>();
+        for(int i = 0; i < zones.size; i++){
+            Zone z = zones.get(i);
+            for(int j = 0; j < z.requirements.size; j++){
+                Objective o = z.requirements.get(j);
+                if(o instanceof Objectives.ZoneObjective && ((Objectives.ZoneObjective)o).zone == this && !o.complete()){
+                    incomplete.add((Objectives.ZoneObjective)o);
+                }
+            }
+        }
+
+        boolean wasConfig = configureObjective.complete();
+
         closure.run();
+
+        for(int i = 0; i < incomplete.size; i++){
+            Objectives.ZoneObjective objective = incomplete.get(i);
+            if(objective.complete()){
+                //原版 content.zones().find(z -> z.requirements.contains(objective))：找出"哪个区域的需求包含该目标"
+                Zone zoneForMet = null;
+                for(int j = 0; j < zones.size; j++){
+                    if(zones.get(j).requirements.contains(objective::equals)){
+                        zoneForMet = zones.get(j);
+                        break;
+                    }
+                }
+                Events.fire(new EventType.ZoneRequireCompleteEvent(objective.zone, zoneForMet, objective));
+            }
+        }
+
+        if(!wasConfig && configureObjective.complete()){
+            Events.fire(new EventType.ZoneConfigureCompleteEvent(this));
+        }
     }
 
     public int bestWave(){

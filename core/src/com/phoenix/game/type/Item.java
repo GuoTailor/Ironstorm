@@ -60,6 +60,12 @@ public class Item extends UnlockableContent{
         return alwaysUnlocked;
     }
 
+    /** 对应原版 {@code Item.displayInfo}（原版 Item.java:49-51）：交给 ContentDisplay.displayItem。 */
+    @Override
+    public void displayInfo(com.badlogic.gdx.scenes.scene2d.ui.Table table){
+        com.phoenix.game.ui.ContentDisplay.displayItem(table, this);
+    }
+
     /** @return 该物品的图标区域（对应原版 Item.icon(Cicon)）；图集缺失返回 null。 */
     public TextureRegion icon(){
         if(!iconLoaded){
