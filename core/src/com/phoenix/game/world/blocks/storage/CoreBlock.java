@@ -133,6 +133,12 @@ public class CoreBlock extends Block{
             0.5f + Mathf.absin(Time.time(), 20f, 0.1f));
     }
 
+    /** 核心不可被手动拆除（对应原版 {@code CoreBlock.canBreak}，原版 CoreBlock.java:147-149）；判据消费点在 {@code Build.canDeconstruct}。 */
+    @Override
+    public boolean canBreak(com.phoenix.game.world.Tile tile){
+        return false;
+    }
+
     /** 核心实体：库存指向本队共享模块，使全队核心共用同一份物品。 */
     public class CoreEntity extends TileEntity{
         @Override

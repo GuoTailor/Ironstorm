@@ -65,6 +65,11 @@ public class Tile implements Position, TargetTrait {
         return block().offset() + worldy();
     }
 
+    /** 是否参与地图暗化（对应原版 Tile.isDarkened，原版 Tile.java:123-125）：实心、非人造、铺满整格的自然墙。 */
+    public boolean isDarkened(){
+        return block().solid && !block().synthetic() && block().fillsTile;
+    }
+
     public Floor floor(){
         return floor;
     }

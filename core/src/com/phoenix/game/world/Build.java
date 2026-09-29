@@ -188,11 +188,18 @@ public class Build{
         return true;
     }
 
-    /** 是否可以拆除（自己的、可拆的方块）。判据见 {@link Tile#breakable()}。 */
+    /**
+     * 是否可以拆除（自己的、可拆的方块）。
+     * <p>对应原版 {@code Build.validBreak}（原版 Build.java:149-152）的判据子集：
+     * {@code tile.block().canBreak(tile) && tile.breakable() && 队伍校验} —— 原版的
+     * {@code interactable(team)} 在本项目等价实现为 {@code tile.getTeam() == team}；
+     * {@code canBreak} 是 F10 补的：CoreBlock 覆写 false，此前缺它导致玩家/建造无人机能拆自家核心
+     * （玩家拆除 MobileInput、无人机拆线 BuilderTrait/BaseUnit 都走本判据，一处补齐全覆盖）。
+     */
     public static boolean canDeconstruct(Tile tile, Team team){
         if(tile == null) return false;
 
-        return tile.block() != Blocks.air && tile.breakable() && tile.getTeam() == team;
+        return tile.block() != Blocks.air && tile.block().canBreak(tile) && tile.breakable() && tile.getTeam() == team;
     }
 
     /**

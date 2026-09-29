@@ -670,8 +670,12 @@ public class Renderer {
 
                 //卫星瓦片不单独绘制：整个多格建筑由中心瓦片一次性绘制
                 //（注意不能用 block.isHidden() 判断——tile.block() 对卫星瓦片会转发到中心方块）
+                //⚠ 暗化墙的"全包围最暗格"（暗度 5）跳过绘制：对应原版 FloorRenderer.java:185 的
+                //`!(tile.isDarkened() && tile.rotation() >= 5)` —— 该格已被 fog 黑幕 100% 盖住，画贴图纯属浪费；
+                //暗度 0-4 的墙照常绘制（fog 按暗度叠黑幕）。
                 Block block = tile.block();
-                if(block != null && block != Blocks.air && !tile.isLinked() && !block.isHidden()){
+                if(block != null && block != Blocks.air && !tile.isLinked() && !block.isHidden()
+                    && !(tile.isDarkened() && tile.rotation() >= 5)){
                     //方块本体（默认按 region 铺满；传送带等带朝向/动画的方块自行绘制）
                     block.draw(tile);
                     //受损裂纹（对应原版 BlockRenderer.drawBlocks 里 `draw(tile)` 之后紧跟的

@@ -17,6 +17,7 @@ import com.phoenix.game.core.Draw;
 import com.phoenix.game.core.Events;
 import com.phoenix.game.core.Fonts;
 import com.phoenix.game.core.Scl;
+import com.phoenix.game.core.Tmp;
 import com.phoenix.game.entities.Units;
 import com.phoenix.game.entities.type.BaseUnit;
 import com.phoenix.game.game.EventType;
@@ -224,9 +225,11 @@ public class MinimapRenderer implements Disposable{
 
     /**
      * 取瓦片的小地图颜色（对应原版 {@code MinimapRenderer.colorFor}）。
-     * <p>原版还会按 {@code block.cacheLayer == CacheLayer.walls} 用朝向压暗；本项目 {@code graphics/CacheLayer}
-     * 类<b>存在</b>（enum，water/tar/normal/walls 四层），但 {@code Block} 没有 {@code cacheLayer} 字段
-     * （{@code beginShader/endShader} 仍是 TODO 空壳）→ 省略该步。
+     * <p>暗化压暗（对应原版 {@code MinimapRenderer.java:165} 的
+     * {@code .mul(block.cacheLayer == CacheLayer.walls ? 1f - tile.rotation() / 4f : 1f)}）：
+     * 原版判据是 walls 缓存层，本项目 {@code Block} 没有 {@code cacheLayer} 字段 →
+     * 用等价的 {@link Tile#isDarkened()}（solid && !synthetic && fillsTile，正是 walls 层那批自然墙）。
+     * F10 补上：此前该步因缺暗度数据（rotation 未被 addDarkness 写入）而省略。
      */
     private int colorFor(Tile tile){
         if(tile == null) return 0;
@@ -236,7 +239,14 @@ public class MinimapRenderer implements Disposable{
         if(bc != 0){
             return bc;
         }
-        return MapIO.colorFor(tile.floor(), tile.block(), tile.overlay(), tile.getTeam());
+        int c = MapIO.colorFor(tile.floor(), tile.block(), tile.overlay(), tile.getTeam());
+        if(tile.isDarkened()){
+            //mul 同时缩放 RGB 与 alpha，与原版 arc 的 Color.mul(float) 行为一致；
+            //arc 的 Color.rgba() → libgdx 的 toIntBits()
+            Tmp.c1.set(c).mul(1f - tile.rotation() / 4f);
+            c = Tmp.c1.toIntBits();
+        }
+        return c;
     }
 
     @Override

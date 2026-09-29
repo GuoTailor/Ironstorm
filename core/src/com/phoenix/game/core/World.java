@@ -1,5 +1,6 @@
 package com.phoenix.game.core;
 
+import com.badlogic.gdx.math.GridPoint2;
 import com.badlogic.gdx.math.MathUtils;
 import com.phoenix.game.Vars;
 import com.phoenix.game.content.Blocks;
@@ -7,6 +8,7 @@ import com.phoenix.game.game.EventType;
 import com.phoenix.game.game.Team;
 import com.phoenix.game.math.Mathf;
 import com.phoenix.game.math.Simplex;
+import com.phoenix.game.math.geom.Geometry;
 import com.phoenix.game.world.Block;
 import com.phoenix.game.world.Floor;
 import com.phoenix.game.world.Pos;
@@ -42,6 +44,12 @@ public class World {
         generating = true;
         Tile[][] grid = createTiles(width, height);
         generateTerrain(grid, width, height);
+        //普通开局路径不经 {@link #endMapLoad}（本项目自加的入口）→ 暗化在这里补跑
+        //（对应原版"所有建图路径最终都会经 endMapLoad 跑 addDarkness"的语义）；
+        //headless 服务器无渲染，跳过（与原版 `if(!headless)` 一致）
+        if(!Vars.headless){
+            addDarkness();
+        }
         generating = false;
         rebuildPowerGraphs();
     }
@@ -79,7 +87,7 @@ public class World {
      * <p>⚠ <b>必须先展平</b>：{@code BasicGenerator} 系列会 {@code tiles[x][y] = new Tile(...)} **替换对象**，
      * 一维数组里的旧引用就失效了。
      * <p>原版还会在这里做 {@code prepareTiles}（铺多格 BlockPart）/遮蔽/实体组 resize；本项目这些由
-     * {@code Tile.setBlock} 自身与各系统在 {@code WorldLoadEvent} 里完成，故只保留展平 + 电网重建。
+     * {@code Tile.setBlock} 自身与各系统在 {@code WorldLoadEvent} 里完成，故只保留展平 + 暗化 + 电网重建。
      */
     public void endMapLoad(Tile[][] grid){
         for(int x = 0; x < width; x++){
@@ -87,8 +95,82 @@ public class World {
                 tiles[y * width + x] = grid[x][y];
             }
         }
+
+        //世界暗化（对应原版 endMapLoad 里的 `if(!headless){ addDarkness(tiles); }`，原版 World.java:178-180）：
+        //给自然墙按暴露程度写入 0-5 的暗度（复用 rotation 字段），渲染侧的 fog 烘焙据此涂黑幕
+        if(!Vars.headless){
+            addDarkness();
+        }
+
         generating = false;
         rebuildPowerGraphs();
+    }
+
+    /**
+     * 世界暗化计算（对应原版 {@code World.addDarkness}，原版 World.java:300-354）：
+     * 自然墙（{@link Tile#isDarkened()}）先全部标记为最暗（4），再迭代 4 轮向暴露面衰减 ——
+     * 每轮里"四邻存在更小暗度"的格子暗度减 1，得到由墙体外缘向内的渐变；
+     * 完全被同类包围（自身与四邻暗度都是 4）的格子记 5，表示"连墙贴图都不必画"（被黑幕完全盖住）。
+     * 结果直接写进 {@code tile.rotation} —— 自然墙不使用朝向语义，原版就是复用该字段存暗度；
+     * 渲染侧（{@code graphics/BlockRenderer} 的 fog 烘焙 + {@code Renderer.drawTiles} 的墙贴图跳过）按它消费。
+     * <p>⚠ 签名差异：原版是 {@code addDarkness(Tile[][] tiles)}（二维）；本项目一维存储，内部按
+     * {@code y * width + x} 索引。{@code Structs.inBounds} → 手写范围判断；{@code Mathf.num} → 三元。
+     */
+    public void addDarkness(){
+        byte[][] dark = new byte[width][height];
+        byte[][] writeBuffer = new byte[width][height];
+
+        byte darkIterations = 4;
+        for(int x = 0; x < width; x++){
+            for(int y = 0; y < height; y++){
+                Tile tile = tiles[y * width + x];
+                if(tile.isDarkened()){
+                    dark[x][y] = darkIterations;
+                }
+            }
+        }
+
+        for(int i = 0; i < darkIterations; i++){
+            for(int x = 0; x < width; x++){
+                for(int y = 0; y < height; y++){
+                    boolean min = false;
+                    for(GridPoint2 point : Geometry.d4){
+                        int newX = x + point.x, newY = y + point.y;
+                        if(newX >= 0 && newY >= 0 && newX < width && newY < height && dark[newX][newY] < dark[x][y]){
+                            min = true;
+                            break;
+                        }
+                    }
+                    writeBuffer[x][y] = (byte)Math.max(0, dark[x][y] - (min ? 1 : 0));
+                }
+            }
+
+            for(int x = 0; x < width; x++){
+                System.arraycopy(writeBuffer[x], 0, dark[x], 0, height);
+            }
+        }
+
+        for(int x = 0; x < width; x++){
+            for(int y = 0; y < height; y++){
+                Tile tile = tiles[y * width + x];
+                if(tile.isDarkened()){
+                    tile.rotation(dark[x][y]);
+                }
+                if(dark[x][y] == 4){
+                    boolean full = true;
+                    for(GridPoint2 p : Geometry.d4){
+                        int px = p.x + x, py = p.y + y;
+                        if(px >= 0 && py >= 0 && px < width && py < height
+                            && !(tiles[py * width + px].isDarkened() && dark[px][py] == 4)){
+                            full = false;
+                            break;
+                        }
+                    }
+
+                    if(full) tile.rotation(5);
+                }
+            }
+        }
     }
 
     /**

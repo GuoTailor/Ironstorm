@@ -655,6 +655,11 @@ public class SaveIO{
             world.setGenerating(false);
         }
 
+        //世界暗化重算（对应原版读档路径 SaveIo/WorldContext 最终也会走 World.endMapLoad 里的
+        //addDarkness，原版 World.java:178-180）。⚠ 必须在全部 setBlock 之后：上面 setBlock 的
+        //`rotation % 4` 会把存档里的暗度编码（0-5）破坏掉，这里统一按地形重新计算。
+        world.addDarkness();
+
         //批量结束后统一重建邻接表与电网（生成期间被挂起了）
         for(Tile tile : world.tiles){
             if(tile != null && tile.entity != null){

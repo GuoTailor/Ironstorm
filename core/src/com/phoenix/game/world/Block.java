@@ -812,6 +812,11 @@ public class Block extends com.phoenix.game.ctype.UnlockableContent {
         setStats();
     }
 
+    /** @return 玩家/单位能否手动拆除本方块（对应原版 {@code Block.canBreak}，原版 Block.java:167-169）。CoreBlock 覆写为 false，防止拆掉自家核心。 */
+    public boolean canBreak(Tile tile){
+        return true;
+    }
+
     /**
      * @return 是否"可建造"（对应原版 {@code Block.java:171-173}）。
      * <p>原版语义是"可见性不是 hidden/debugOnly"，<b>不是</b>"有没有材料"。

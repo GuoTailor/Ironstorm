@@ -54,6 +54,16 @@ public class Units {
         return invalidateTarget(target, targeter.getX(), targeter.getY(), targeter.getWeapon().bullet.range());
     }
 
+    /**
+     * 对应原版 {@code Units.anyEntities(Tile)}（原版 Units.java:49-52）：方块占用的矩形内有无地面单位。
+     * <p>⚠ 原版用 {@code tile.drawx()/drawy()}（原版口径即方块中心）；本项目 {@code tile.drawx()} 是
+     * 角点口径 → 改用 {@code Block.centerX/centerY}（同一坐标换算约定）。
+     */
+    public static boolean anyEntities(Tile tile){
+        float size = tile.block().size * Vars.tilesize;
+        return anyEntities(tile.block().centerX(tile) - size / 2f, tile.block().centerY(tile) - size / 2f, size, size);
+    }
+
     /** Returns whether there are any entities in this rectangle. */
     public static boolean anyEntities(float x, float y, float width, float height){
         for(int i = 0; i < units.size; i++){

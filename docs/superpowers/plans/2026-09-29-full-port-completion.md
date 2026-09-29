@@ -67,7 +67,7 @@
 | T1~Tn | 清理 | 按分类逐批消化 TODO（过时注释直接修；缺失功能转 F 批） | ☐ |
 | F1 | 功能 | **单位物理五项**（A1 高）：卡墙 kill / 深水溺亡 drownTime / 出界 kill+warp 推回 / spawner 失效 kill / 液体地板状态+伤害+walkEffect（原版 Unit.java:99,183,196-216,236-260,288）；**含 Block.unitOn 钩子与 Conveyor 单位推动**（A2：Conveyor.java:141，原版 Unit.java:226 调用点） | ☑ 六项全落（提交 410166c）；FlyingUnit.updateVelocity 冗余覆写删除改走基类飞行分支；**实测：深水 dagger ~f230 溺亡、飞行玩家悬停满血** |
 | F2 | 功能 | **开波整链**（A1 高）：出生点清场（spawnShockwave+全额伤害）、延迟分批出生（Time.run+spawn 特效）、attack 模式核心增援（WaveSpawner.java:72-150） | ☑（提交 02e230c）；**实测：wave+0/+10 敌人 0 → +100 出齐 4 个（延迟分批），清场未误伤玩家**；附带修 groundSpawns 空 early-return（attack 图跳过增援） |
-| F3 | 功能 | **Lightning 完整化**（A1 高）：沿途 damageLightning 子弹 + 30 格链式跳跃（maxChain 8）+ insulated 绝缘墙拦截（Lightning.java:71-115） | ☐ |
+| F3 | 功能 | **Lightning 完整化**（A1 高）：沿途 damageLightning 子弹 + 30 格链式跳跃（maxChain 8）+ insulated 绝缘墙拦截（Lightning.java:71-115） | ☑（提交 3adba0d）；**实测：3 连纵队每只均匀 3 击（130→100）**；insulated 纠正=塑钢墙/PowerDiode（非 surge），SurgeWall/ShockMine 补偿代码已回退 |
 | F4 | 功能 | **破坏表现链**（A1 中）：Block.onDestroyed 库存爆炸/液体泼洒/电力缓冲（Block.java:604-647，配套 ItemModule.sum/has/addAll——A2）、breakSound、单位 deathSound、死亡携带物品殉爆（Unit.java:99-101） | ☐ |
 | F5 | 功能 | **子弹对空语义**（A1 高，小改）：collides() 改 `!(flying && !collidesAir)`、collideGroups 方向（Bullet.java:168-170）——实际执行时 collideGroups 实参顺序**保持本项目对调**（同步回收子弹的既声明偏离，仅补注释）；BaseUnit.collides 照原版 Unit.collides 重写 | ☑ |
 | F6 | 功能 | **Damage 家族**（A1 中）：tileDamage 菱形蔓延、calculateDamage 距离衰减+击退、dynamicExplosion 分层时序+震屏上限（Damage.java:33-274） | ☐ |
@@ -164,3 +164,4 @@ UI 类以"功能等价"判（arc→libgdx 已知缺口见 转换.md，不算缺�
 - 2026-09-29 F5+F7 完成：6 项全落（Bullet.collides 照原版、collideGroups 保持对调+补注释、BaseUnit.collides/calculateDamage 照原版、WaveEvent 静态块、launchWaveMultiplier、Fire 水洼+事件），编译绿 + autoplay 冒烟无异常（提交 d4423fe）；派发 F1
 - 2026-09-29 F1 完成：6 项全落（卡墙/溺亡/液体交互/出界三件/spawner 失效/unitOn 钩子），FlyingUnit 冗余覆写删除；**深水溺亡专项实测通过**（dagger f230 死、飞行玩家满血）（提交 410166c）；派发 F2
 - 2026-09-29 F2 完成：清场/延迟分批出生/attack 增援三链 + Damage 6 参重载 + BaseUnit.add()；**波次专项实测通过**（runWave 后 +0/+10 敌 0、+100 出齐 4、玩家满血）（提交 02e230c）；派发 F3
+- 2026-09-29 F3 完成：沿途/链式/绝缘三段照原版重写 + Geometry.findFurthest 补齐 + insulated 字段（塑钢墙/二极管）；**闪电链实测 3 连纵队均匀 3 击**（提交 3adba0d，含 1 处 arc Color.white 编译修正）；派发 F10
