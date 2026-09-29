@@ -19,6 +19,8 @@ public class PowerDiode extends Block{
         solid = true;
         rotate = true;
         health = 260;
+        //原版 PowerDiode.java:23 insulated = true（二极管绝缘：闪电打不穿）
+        insulated = true;
         entityType = DiodeEntity::new;
     }
 

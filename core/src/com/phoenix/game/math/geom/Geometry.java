@@ -91,4 +91,22 @@ public final class Geometry {
 
         return tmp1;
     }
+
+    /**
+     * 逐字照抄 arc {@code Geometry.findFurthest}（{@code Arc/arc-core/src/arc/math/geom/Geometry.java:102}）：
+     * @return 列表里距 (x, y) 最远的元素；空列表返回 null。
+     * <p>消费点：{@code Lightning.createLighting} 的链式跳跃（在候选敌人里挑最远的跳过去）。
+     */
+    public static <T extends com.phoenix.game.math.Position> T findFurthest(float x, float y, Iterable<T> list){
+        T closest = null;
+        float cdist = 0f;
+        for(T t : list){
+            float dst = t.dst(x, y);
+            if(closest == null || dst > cdist){
+                closest = t;
+                cdist = dst;
+            }
+        }
+        return closest;
+    }
 }

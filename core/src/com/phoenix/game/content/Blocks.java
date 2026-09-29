@@ -438,9 +438,13 @@ public class Blocks implements com.phoenix.game.ctype.ContentList {
 
         plastaniumWall = wall("plastanium-wall", 190,
             new ItemStack(Items.plastanium, 5), new ItemStack(Items.metaglass, 2));
+        //原版 Blocks.java:764 insulated = true（塑钢墙绝缘：闪电打不穿）
+        plastaniumWall.insulated = true;
         plastaniumWallLarge = wall("plastanium-wall-large", 760,
             new ItemStack(Items.plastanium, 20), new ItemStack(Items.metaglass, 8));
         plastaniumWallLarge.size = 2;
+        //原版 Blocks.java:771 insulated = true
+        plastaniumWallLarge.insulated = true;
 
         //相织物墙（反射弱子弹：伤害 ≤ 10 的子弹会被弹回）
         phaseWall = new com.phoenix.game.world.blocks.defense.DeflectorWall("phase-wall");

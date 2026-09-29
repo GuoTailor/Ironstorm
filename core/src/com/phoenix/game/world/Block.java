@@ -59,6 +59,8 @@ public class Block extends com.phoenix.game.ctype.UnlockableContent {
      * <p>见 {@code graphics/BlockRenderer}：地图加载时把每格烘焙成 1 像素，绘制时放大成柔和的落影。
      */
     public boolean hasShadow = true;
+    /** 该方块是否具有绝缘属性（原版 Block.insulated，"whether this block has insulating properties."）：闪电行进路径扫到即折断（Lightning.createLighting）。塑钢墙/电力二极管为 true。 */
+    public boolean insulated = false;
     /** 血量，-1 表示不可破坏 */
     public int health = -1;
     /** 方块标记，用于 AI 索引 */

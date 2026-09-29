@@ -811,7 +811,9 @@ public class Bullets implements com.phoenix.game.ctype.ContentList{
             //Rules.playerDamageMultiplier 已由 T2 补齐（消费点 Player#damageMultiplier）。
             boolean playerOwned = b.getOwner() instanceof com.phoenix.game.entities.type.BaseUnit
                 && ((com.phoenix.game.entities.type.BaseUnit)b.getOwner()).isPlayer;
-            float dmgMult = playerOwned ? Vars.state.rules.playerDamageMultiplier : Vars.state.rules.unitDamageMultiplier;
+            //原版 Bullets.java:620：damage * (b.getOwner() instanceof Player ? rules.playerDamageMultiplier : 1f)
+            //——非玩家分支乘 1f（此前误写 unitDamageMultiplier，已按原版修正）
+            float dmgMult = playerOwned ? Vars.state.rules.playerDamageMultiplier : 1f;
             Lightning.createLighting(Lightning.nextSeed(), b.getTeam(), Pal.lancerLaser,
                 damage * dmgMult, b.x, b.y, b.rot(), 30);
         }

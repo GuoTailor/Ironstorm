@@ -25,9 +25,8 @@ public class SurgeWall extends Wall{
     public void handleBulletHit(TileEntity entity, Bullet bullet){
         if(bullet == null || !Mathf.chance(lightningChance)) return;
 
-        //朝子弹来的方向放电（对应原版 bullet.rot() + 180f）；seed 用系统计时保证每次形状不同
-        Lightning.createLighting(
-            com.phoenix.game.core.Time.nanos(), entity.getTeam(), com.phoenix.game.graphics.Pal.surge,
+        //朝子弹来的方向放电（对应原版 bullet.rot() + 180f）；seed 用 Lightning.nextSeed()（对应原版 Lightning.create 内部的 nextSeed()）
+        Lightning.createLighting(Lightning.nextSeed(), entity.getTeam(), com.phoenix.game.graphics.Pal.surge,
             lightningDamage, bullet.x, bullet.y, bullet.rot() + 180f, lightningLength);
     }
 }

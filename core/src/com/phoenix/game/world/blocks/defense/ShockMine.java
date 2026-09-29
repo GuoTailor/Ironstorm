@@ -70,16 +70,10 @@ public class ShockMine extends Block{
                 //原版 ShockMine.java:45-47：循环 tendrils 次，每次朝随机方向放一道闪电
                 //⚠ 变量名用 j 不用 i：外层单位遍历已占用 i，Java 禁止同方法内局部变量遮蔽（用 i 会编译报错）
                 for(int j = 0; j < tendrils; j++){
-                    Lightning.createLighting(com.phoenix.game.core.Time.nanos(), tile.getTeam(),
+                    Lightning.createLighting(Lightning.nextSeed(), tile.getTeam(),
                         com.phoenix.game.graphics.Pal.lancerLaser, damage, cx, cy, Mathf.random(360f), length);
                 }
 
-                //⚠ 补偿性偏离（主会话已决策，见 plans/phoenix-remaining-port.md §6）：
-                //原版没有这一行——原版 Lightning 沿整条路径逐段生成伤害子弹（起点就伤），
-                //本项目 Lightning 是简化版（只在末端点 x+trnsx(angle,length*tilesize) 结算一次）→
-                //不补这一行的话，站在雷上的单位反而毫发无伤。**保留，等 Lightning 补齐后回退。**
-                unit.damage(damage);
-                //自伤（踩雷后地雷受损）
                 handleDamage(tileDamage);
 
                 timer = cooldown;
