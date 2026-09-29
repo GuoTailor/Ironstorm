@@ -19,8 +19,6 @@ import com.phoenix.game.math.Mathf;
  */
 public class StatusEffect extends com.phoenix.game.ctype.UnlockableContent{
     public Color color = Color.WHITE.cpy();
-    /** 是否对被施加者持续造成伤害 */
-    public boolean reactive;
 
     /** 速度倍率 */
     public float speedMultiplier = 1f;

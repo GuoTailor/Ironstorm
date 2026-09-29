@@ -2858,6 +2858,8 @@ public class ClientLauncher extends ApplicationAdapter {
         renderer.disposeBloom();
         //蓝图预览图是运行时 new 的 FrameBuffer，也要显式释放
         if(Vars.schematics != null) Vars.schematics.disposePreviews();
+        //主菜单背景的三张 FBO（MenuRenderer.floor/wall/shadows；对应原版 MenuFragment.dispose）
+        if(menufrag != null) menufrag.dispose();
         batch.dispose();
         Core.atlas.dispose();
     }

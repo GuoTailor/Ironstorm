@@ -24,7 +24,6 @@ public class StatusEffects implements com.phoenix.game.ctype.ContentList {
     public static final StatusEffect burning = new StatusEffect("burning"){{
         color = Color.valueOf("ffa665");
         damage = 0.06f;
-        reactive = true;
         effect = Fx.burning;
 
         init(() -> {
@@ -77,7 +76,6 @@ public class StatusEffects implements com.phoenix.game.ctype.ContentList {
         speedMultiplier = 0.8f;
         armorMultiplier = 0.8f;
         damage = 0.3f;
-        reactive = true;
         effect = Fx.melting;
 
         init(() -> {

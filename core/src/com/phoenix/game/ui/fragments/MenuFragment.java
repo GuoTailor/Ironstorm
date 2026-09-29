@@ -288,7 +288,6 @@ public class MenuFragment extends Fragment {
     private void fadeInMenu() {
         submenu.clearActions();
         submenu.addAction(Actions.sequence(Actions.alpha(1f, 0.15f, Interpolation.fade)));
-        System.out.println("fadeInMenu");
     }
 
     /**
@@ -464,7 +463,6 @@ public class MenuFragment extends Fragment {
         submenu.addAction(Actions.sequence(Actions.alpha(1f),
                 Actions.alpha(0f, 0.2f, Interpolation.fade),
                 Actions.run(() -> submenu.clearChildren())));
-        System.out.println("fadeOutMenu");
     }
 
     private void buttons(Table t, Buttoni... buttons) {
@@ -477,7 +475,6 @@ public class MenuFragment extends Fragment {
             ClickListener listener = new ClickListener() {
                 @Override
                 public void clicked(InputEvent event, float x, float y) {
-                    System.out.println(event + " " + x + " " + y);
                     if ((!(t instanceof Disableable) || !((Disableable) t).isDisabled())) {
                         if (currentMenu == button) {
                             button.setChecked(false);
