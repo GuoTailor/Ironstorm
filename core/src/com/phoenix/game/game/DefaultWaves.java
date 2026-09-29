@@ -6,6 +6,7 @@ import com.phoenix.game.content.UnitTypes;
 /**
  * 最小实现：默认波次编成。参照 Mindustry mindustry.game.DefaultWaves 移植。
  * 原版有 20 组（含飞行单位），这里只挑已移植的地面单位，波次推进逐步加码。
+ * <p>F7b：原本自建的 grenadier/tank 两组已删除（无贴图 + 与 eruptor/titan 重复）。
  */
 public class DefaultWaves{
     private static Array<SpawnGroup> spawns;
@@ -78,23 +79,8 @@ public class DefaultWaves{
                 max = 8;
             }});
 
-            //第 9 波起：grenadier（地面榴弹），隔波
-            spawns.add(new SpawnGroup(UnitTypes.grenadier){{
-                begin = 9;
-                unitAmount = 2;
-                unitScaling = 2.5f;
-                spacing = 2;
-                max = 10;
-            }});
-
-            //第 16 波起：tank（重型地面），每隔两波
-            spawns.add(new SpawnGroup(UnitTypes.tank){{
-                begin = 16;
-                unitAmount = 2;
-                unitScaling = 4f;
-                spacing = 2;
-                max = 8;
-            }});
+            //F7b：删除自建的 grenadier/tank 两组（无贴图 + 与原版的 eruptor/titan 定位重复，
+            //  DefaultWaves 里上面那两组本来就在刷；原版波次编成里也没有这两个单位）。
 
             //Boss：chaos-array，第 40 波起每 30 波单独出 1 个（远程 4 连发散射）
             spawns.add(new SpawnGroup(UnitTypes.chaosArray){{

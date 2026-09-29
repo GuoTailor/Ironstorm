@@ -1,8 +1,10 @@
 package com.phoenix.game.world.blocks.units;
 
+import com.phoenix.game.core.Drawf;
 import com.phoenix.game.entities.Units;
 import com.phoenix.game.entities.type.BaseUnit;
 import com.phoenix.game.entities.type.TileEntity;
+import com.phoenix.game.graphics.Pal;
 import com.phoenix.game.math.Angles;
 import com.phoenix.game.math.Mathf;
 import com.phoenix.game.world.Block;
@@ -46,6 +48,28 @@ public class RepairPoint extends Block{
             return powerConsumption;
         }
         return 0f;
+    }
+
+    /**
+     * 悬停时显示维修半径虚线圈（对应原版 {@code RepairPoint.drawSelect}）。
+     * <p>⚠ 坐标口径：原版 {@code tile.drawx()/drawy()} 是贴图中心；本项目是「锚点瓦片左下角 + offset()」，
+     * 改用 {@link Block#centerX}/{@link Block#centerY}（本方块 size=1，无卫星瓦片，仍先 {@code link()} 保险）。
+     */
+    @Override
+    public void drawSelect(Tile tile){
+        Tile anchor = tile.link();
+        Drawf.dashCircle(centerX(anchor), centerY(anchor), repairRadius, Pal.accent);
+    }
+
+    /**
+     * 放置预览：维修半径虚线圈（对应原版 {@code RepairPoint.drawPlace}）。
+     * <p>⚠ 坐标口径同 {@link #drawSelect}：中心 = 锚点瓦片左下角 + offset() + 半格
+     * （原版写 {@code x * tilesize + offset()}，那里它就是贴图中心）。
+     */
+    @Override
+    public void drawPlace(int x, int y, int rotation, boolean valid){
+        Drawf.dashCircle(x * tilesize + offset() + tilesize / 2f, y * tilesize + offset() + tilesize / 2f,
+            repairRadius, Pal.accent);
     }
 
     public class RepairPointEntity extends TileEntity{

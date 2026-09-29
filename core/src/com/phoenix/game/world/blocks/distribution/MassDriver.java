@@ -7,10 +7,12 @@ import com.phoenix.game.content.Bullets;
 import com.phoenix.game.content.Fx;
 import com.phoenix.game.content.Items;
 import com.phoenix.game.core.Core;
+import com.phoenix.game.core.Drawf;
 import com.phoenix.game.entities.Effects;
 import com.phoenix.game.entities.type.Bullet;
 import com.phoenix.game.entities.type.Player;
 import com.phoenix.game.entities.type.TileEntity;
+import com.phoenix.game.graphics.Pal;
 import com.phoenix.game.math.Angles;
 import com.phoenix.game.math.Mathf;
 import com.phoenix.game.type.Item;
@@ -95,12 +97,39 @@ public class MassDriver extends Block{
         if(region == null || !(tile.entity instanceof MassDriverEntity)) return;
         MassDriverEntity e = (MassDriverEntity)tile.entity;
 
-        float cx = tile.worldx() + tilesize / 2f + Angles.trnsx(e.barrelRotation + 180f, e.reload * knockback);
-        float cy = tile.worldy() + tilesize / 2f + Angles.trnsy(e.barrelRotation + 180f, e.reload * knockback);
+        //坐标口径：原版 tile.drawx() 就是方块几何中心，本项目 worldx() 是角点 → 必须用 centerX/centerY
+        float cx = centerX(tile) + Angles.trnsx(e.barrelRotation + 180f, e.reload * knockback);
+        float cy = centerY(tile) + Angles.trnsy(e.barrelRotation + 180f, e.reload * knockback);
 
         //贴图基准朝向是"右"，本项目角度制：角度 = 90 - 炮口朝向
         Core.batch.draw(region, cx - tilesize / 2f, cy - tilesize / 2f, tilesize / 2f, tilesize / 2f,
             tilesize, tilesize, 1f, 1f, 90f - e.barrelRotation);
+    }
+
+    /**
+     * 放置预览：发射范围虚线圈（对应原版 {@code MassDriver.drawPlace} 的第一段 {@code Drawf.dashCircle}）。
+     * <p>⚠ 降级（未做）：原版在"配置面板正选中另一台质量驱动器"时，还会从被选中的驱动器向光标处
+     * 画一条呼吸虚线（{@code control.input.frag.config.isShown() / getSelectedTile()}）。
+     * 本项目配置面板（{@code ui/fragments}）没有"当前选中瓦片"这个接口，故整段省略。
+     * <p>⚠ 坐标口径同 {@link com.phoenix.game.world.blocks.defense.turrets.Turret#drawPlace}：
+     * 中心 = 锚点瓦片左下角 + offset() + 半格（原版写 {@code x * tilesize}，那里它就是贴图中心）。
+     */
+    @Override
+    public void drawPlace(int x, int y, int rotation, boolean valid){
+        Drawf.dashCircle(x * tilesize + offset() + tilesize / 2f, y * tilesize + offset() + tilesize / 2f,
+            range, Pal.accent);
+    }
+
+    /**
+     * 悬停时显示发射范围圈。
+     * <p>⚠ 原版 {@code MassDriver} **没有** {@code drawSelect}（只覆写了 {@code drawPlace/drawConfigure}）；
+     * 这里按本批任务的要求补一个与 {@code drawPlace} 同款的射程圈，便于悬停查看
+     * （属于本项目扩展，非照抄原版，其余方块一律以原版为准）。
+     */
+    @Override
+    public void drawSelect(Tile tile){
+        Tile anchor = tile.link();
+        Drawf.dashCircle(centerX(anchor), centerY(anchor), range, Pal.accent);
     }
 
     /** 只有"连着目标"的驱动器才收物品（对应原版 acceptItem）。 */
@@ -142,8 +171,9 @@ public class MassDriver extends Block{
         }
 
         float angle = tile.angleTo(target);
-        float x = tile.worldx() + tilesize / 2f + Angles.trnsx(angle, translation);
-        float y = tile.worldy() + tilesize / 2f + Angles.trnsy(angle, translation);
+        //出弹点同 drawLayer：以方块几何中心为基准（原版 tile.drawx()）
+        float x = centerX(tile) + Angles.trnsx(angle, translation);
+        float y = centerY(tile) + Angles.trnsy(angle, translation);
 
         Bullet.create(Bullets.driverBolt, e, e.getTeam(), x, y, angle, 1f, 1f, data);
 

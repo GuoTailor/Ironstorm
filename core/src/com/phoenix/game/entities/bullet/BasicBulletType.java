@@ -38,7 +38,8 @@ public class BasicBulletType extends BulletType{
         despawnSound = Sounds.pew;
     }
 
-    protected void load(){
+    @Override
+    public void load(){
         //atlas 可能在构造后才就绪，所以懒加载；换过 bulletSprite 要重新取
         if(loaded && bulletSprite.equals(loadedSprite)) return;
         loaded = true;

@@ -6,8 +6,6 @@ import com.phoenix.game.entities.Effects;
 import com.phoenix.game.entities.Units;
 import com.phoenix.game.game.EventType;
 import com.phoenix.game.game.Team;
-import com.phoenix.game.world.Tile;
-import com.phoenix.game.world.meta.BlockFlag;
 
 /**
  * 最小实现：游戏逻辑主循环。参照 Mindustry mindustry.core.Logic 移植。
@@ -19,6 +17,23 @@ public class Logic {
     public static void update(){
         Time.update();
         Effects.update();
+
+        //实体组的延迟 add/remove 队列（对应原版 Logic.update 里各 group.update() 开头的 updateEvents）。
+        //⚠ 本项目仿真仍以 Units.units / Bullet.all / Puddle.all 等静态数组为准，所以这里**只 flush 队列**、
+        //   不调用 group.update()（否则实体会被重复 update 一遍）。
+        if(Vars.entities != null){
+            for(int i = 0; i < Vars.entities.all().size; i++){
+                Vars.entities.all().get(i).updateEvents();
+            }
+        }
+
+        //特效实体组（对应原版 Logic.update 里的 effectGroup.update()，排在 unitGroup 之前）：
+        //⚠ 这是唯一**必须**调 group.update() 的组 —— ItemTransfer 这类特效实体不在任何静态数组里，
+        //   只能靠组每帧 update（生命周期结束时 remove() → removed() 里执行"物品真正入库"的回调）。
+        //   其余组仍只 flush 队列（上面那段），仿真以 Units.units / Bullet.all 等静态数组为准。
+        if(Vars.effectGroup != null){
+            Vars.effectGroup.update();
+        }
 
         //游玩时长（存档元数据用）：只在真正游玩时累加，回菜单后停止
         if(!Vars.state.isMenu()){
@@ -49,9 +64,27 @@ public class Logic {
         //燃烧（对应原版 Logic.update 里 tileGroup 之后的 fireGroup.update）
         com.phoenix.game.entities.effect.Fire.updateAll();
 
+        //液体水洼（对应原版 Logic.update 里 puddleGroup.update）
+        com.phoenix.game.entities.effect.Puddle.updateAll();
+        //地面残骸贴花（对应原版 Logic.update 里 groundEffectGroup.update 的 BelowLiquidTrait 那部分）
+        com.phoenix.game.entities.effect.Decal.updateAll();
+
         //玩家：同步位置 + 重生计时（原版玩家本身是单位，随单位一起更新）
         if(Vars.player != null){
             Vars.player.update();
+        }
+
+        //远端玩家头顶发言气泡的计时衰减：原版每个 Player 都是实体、随 playerGroup 一起 update()，
+        //本项目只 update 本地玩家（上面那行），远端玩家不跑 Player.update() → 气泡会一直挂着。
+        //这里只补 textFadeTime 的衰减（远端玩家的重生逻辑仍由服务端权威，绝不能在这里调 Player.update()）。
+        if(Vars.playerGroup != null){
+            com.badlogic.gdx.utils.Array<com.phoenix.game.entities.type.Player> players = Vars.playerGroup.all();
+            for(int i = 0; i < players.size; i++){
+                com.phoenix.game.entities.type.Player p = players.get(i);
+                if(p != null && p != Vars.player && p.textFadeTime > 0f){
+                    p.textFadeTime -= Time.delta() / (60 * 5);
+                }
+            }
         }
 
         //单位：倒序遍历，允许更新过程中移除自身
@@ -79,7 +112,8 @@ public class Logic {
             }
         }
 
-        if(!Vars.isClient()){
+        //规则可关闭胜负判定（对应原版 !net.client() && ... && state.rules.canGameOver）
+        if(!Vars.isClient() && Vars.state.rules.canGameOver){
             checkGameOver();
         }
     }
@@ -120,41 +154,80 @@ public class Logic {
         Vars.state.wave++;
         Vars.state.wavetime = Vars.state.rules.waveSpacing;
 
+        //每波重置玩家重生次数（对应原版 WaveEvent 监听器里的 p.respawns = state.rules.respawns）
+        if(Vars.player != null){
+            Vars.player.respawns = Vars.state.rules.respawns;
+        }
+
         System.out.println("第 " + Vars.state.wave + " 波开始");
         Events.fire(new EventType.WaveEvent());
     }
 
     /**
-     * 胜负判定：任一队伍核心全毁且仍存活的队伍只剩一支，则该队胜。
-     * 仅当还存活两支及以上队伍时检查；胜出后回菜单。
+     * 胜负判定（对应原版 {@code Logic.checkGameOver}，按原版分两支）。
+     * <ul>
+     *   <li><b>非 attack 模式</b>：只有"**玩家核心全毁**"才 gameOver（判负，胜方记为波次阵营）。
+     *       区域图（survival，如 {@code groundZero}）走这一支 —— 地图里只有玩家核心，敌人从 spawn 点刷出。</li>
+     *   <li><b>attack 模式</b>：遍历各队，只剩一支有核心 → 该队胜。</li>
+     * </ul>
+     * ⚠ 本项目此前实现成"只剩一支队伍有核心即判胜"（**不分模式**）→ 在只有玩家核心的区域图里
+     * **每帧立刻误判玩家获胜**（`playZone` 后直接弹结算框，见区域链路批的实测）。
+     * 原版非 attack 分支根本不看"有几支队伍有核心"，故已按原版重写。
      */
     private static void checkGameOver(){
-        if(Vars.state.gameOver || Vars.world == null) return;
+        if(Vars.state.gameOver || Vars.world == null || Vars.state.rules == null) return;
 
-        int alive = 0;
-        Team winner = null;
+        if(!Vars.state.rules.attackMode){
+            //非 attack：玩家核心全毁 = 失败（对应原版 state.teams.playerCores().size == 0）
+            if(hasCore(Vars.state.rules.defaultTeam)) return;
+
+            Vars.state.gameOver = true;
+            //结算统计（对应原版 Logic.onGameOver 里的 state.stats.wavesLasted = state.wave）
+            Vars.state.stats.wavesLasted = Vars.state.wave;
+            System.out.println("胜负判定：玩家核心被全部摧毁");
+
+            //原版：Events.fire(new GameOverEvent(waveTeam)) → Control 的监听器调 Logic.onGameOver
+            //      → ui.restart.show(winner)（GameOverDialog 内部按胜负发 Win/LoseEvent，
+            //        点它的"菜单"按钮才回菜单）。本项目没有 GameOverEvent 与对应监听器，
+            //        这里直接弹结算框；没有 UI 设施时退回旧行为（发 WinEvent + 直接回菜单）。
+            if(Vars.ui != null && Vars.ui.restart != null){
+                Vars.ui.restart.show(Vars.state.rules.waveTeam);
+            }else{
+                Events.fire(new EventType.WinEvent());
+                Vars.control.menu();
+            }
+            return;
+        }
+
+        //attack 模式：只剩一支队伍有核心 → 该队胜
+        Team alive = null;
         for(Team team : Team.base()){
             if(hasCore(team)){
-                alive++;
-                winner = team;
+                if(alive != null) return;   //两支及以上还活着 → 继续打
+                alive = team;
             }
         }
 
-        if(alive == 1 && winner != null){
+        if(alive != null && !Vars.state.gameOver){
             Vars.state.gameOver = true;
-            System.out.println("胜负判定：" + winner.name + " 获胜（核心被全部摧毁）");
-            Events.fire(new EventType.WinEvent());
-            Vars.control.menu();
+            Vars.state.stats.wavesLasted = Vars.state.wave;
+            System.out.println("胜负判定：" + alive.name + " 获胜（其余队伍核心被摧毁）");
+
+            //原版：区域图里若玩家队获胜，等价于"发射成功"（Call.launchZone）；
+            //本项目区域发射/存档/解锁链未移植 → 统一按普通胜利弹结算框。
+            if(Vars.ui != null && Vars.ui.restart != null){
+                Vars.ui.restart.show(alive);
+            }else{
+                Events.fire(new EventType.WinEvent());
+                Vars.control.menu();
+            }
         }
     }
 
-    /** @return 该队伍是否还有存活核心（多格核心只统计有实体的中心瓦片）。 */
+    /** @return 该队伍是否还有存活核心（已接线 S3：直接查 {@code Teams} 的核心列表）。 */
+    //原版 Logic.java:110/152 team.hasCore()；本项目 Teams 已有核心列表（S3 批次）→ 直接用
     private static boolean hasCore(Team team){
-        for(Tile tile : Vars.world.tiles){
-            if(tile != null && tile.block().flags.contains(BlockFlag.core) && tile.getTeam() == team && tile.entity != null){
-                return true;
-            }
-        }
-        return false;
+        return Vars.state != null && Vars.state.teams != null && Vars.state.teams.hasCore(team);
     }
+
 }

@@ -15,6 +15,37 @@ public abstract class Consume{
     /** false 表示不需要每帧 update。 */
     protected boolean update = true;
 
+    /**
+     * 把"本消耗器接受的物品"登记进位图（对应原版 {@code Consume.applyItemFilter}）。
+     * <p>位图下标 = {@code Item.id}。默认什么都不做。
+     */
+    public void applyItemFilter(com.badlogic.gdx.utils.Bits filter){
+    }
+
+    /**
+     * 把"本消耗器接受的液体"登记进位图（对应原版 {@code Consume.applyLiquidFilter}）。
+     * <p>位图下标 = {@code Liquid.id}。默认什么都不做。
+     */
+    public void applyLiquidFilter(com.badlogic.gdx.utils.Bits filter){
+    }
+
+    /**
+     * 在配置界面里加出"本消耗器接受什么"的选择项（对应原版 {@code Consume.build(Tile, Table)}）。
+     * <p>刻意降级：原版是 {@code abstract}；本项目尚无"消耗器配置界面"的调用路径（{@code Block.buildConfiguration}
+     * 未接消耗器），故给空实现，需要配置界面的子类（{@link ConsumeLiquid} / {@link ConsumeLiquidFilter} /
+     * {@link ConsumeItemFilter}）自行覆写。
+     */
+    public void build(com.phoenix.game.world.Tile tile, com.badlogic.gdx.scenes.scene2d.ui.Table table){
+    }
+
+    /**
+     * @return 配置界面用的图标名（对应原版 {@code Consume.getIcon()}）。
+     * <p>刻意降级：同 {@link #build}，无调用路径；原版是 {@code abstract}，这里退化成返回 null。
+     */
+    public String getIcon(){
+        return null;
+    }
+
     public Consume optional(boolean optional, boolean boost){
         this.optional = optional;
         this.booster = boost;
@@ -55,4 +86,11 @@ public abstract class Consume{
 
     /** @return 当前是否满足消耗条件（不足则方块不能工作）。 */
     public abstract boolean valid(TileEntity entity);
+
+    /**
+     * 把本消耗器显示到方块统计里（对应原版 {@code Consume.display}）。
+     * <p>默认什么都不做；物品/电力消耗器覆写它，让内容信息对话框显示"输入 / 能量使用"。
+     */
+    public void display(com.phoenix.game.world.meta.BlockStats stats){
+    }
 }

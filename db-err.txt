@@ -1,0 +1,36 @@
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by net.rubygrapefruit.platform.internal.NativeLibraryLoader in an unnamed module (file:/C:/Users/GYH/.gradle/wrapper/dists/gradle-9.7.1-bin/1w1c7tv4s851m17nbqdsro2tv/gradle-9.7.1/lib/native-platform-0.22-milestone-29.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+读取存档元数据失败 -1.msav: java.io.IOException: 不支持的存档版本: 4（当前 5）
+读取存档元数据失败 0.msav: java.io.IOException: 不支持的存档版本: 3（当前 5）
+Exception in thread "main" java.lang.NullPointerException: Cannot read field "texture" because "region" is null
+	at com.badlogic.gdx.graphics.g2d.SpriteBatch.draw(SpriteBatch.java:612)
+	at com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable.draw(TextureRegionDrawable.java:50)
+	at com.badlogic.gdx.scenes.scene2d.ui.Image.draw(Image.java:135)
+	at com.badlogic.gdx.scenes.scene2d.Group.drawChildren(Group.java:124)
+	at com.badlogic.gdx.scenes.scene2d.Group.draw(Group.java:58)
+	at com.badlogic.gdx.scenes.scene2d.ui.WidgetGroup.draw(WidgetGroup.java:168)
+	at com.badlogic.gdx.scenes.scene2d.ui.Table.draw(Table.java:126)
+	at com.badlogic.gdx.scenes.scene2d.Group.drawChildren(Group.java:97)
+	at com.badlogic.gdx.scenes.scene2d.Group.draw(Group.java:58)
+	at com.badlogic.gdx.scenes.scene2d.ui.WidgetGroup.draw(WidgetGroup.java:168)
+	at com.badlogic.gdx.scenes.scene2d.ui.Table.draw(Table.java:126)
+	at com.badlogic.gdx.scenes.scene2d.Group.drawChildren(Group.java:111)
+	at com.badlogic.gdx.scenes.scene2d.ui.ScrollPane.draw(ScrollPane.java:546)
+	at com.badlogic.gdx.scenes.scene2d.Group.drawChildren(Group.java:124)
+	at com.badlogic.gdx.scenes.scene2d.Group.draw(Group.java:58)
+	at com.badlogic.gdx.scenes.scene2d.ui.WidgetGroup.draw(WidgetGroup.java:168)
+	at com.badlogic.gdx.scenes.scene2d.ui.Table.draw(Table.java:126)
+	at com.badlogic.gdx.scenes.scene2d.Group.drawChildren(Group.java:111)
+	at com.badlogic.gdx.scenes.scene2d.ui.Table.draw(Table.java:117)
+	at com.badlogic.gdx.scenes.scene2d.ui.Window.draw(Window.java:257)
+	at com.badlogic.gdx.scenes.scene2d.Group.drawChildren(Group.java:111)
+	at com.badlogic.gdx.scenes.scene2d.Group.draw(Group.java:58)
+	at com.badlogic.gdx.scenes.scene2d.Stage.draw(Stage.java:133)
+	at com.phoenix.game.ClientLauncher.render(ClientLauncher.java:545)
+	at com.badlogic.gdx.backends.lwjgl3.Lwjgl3Window.update(Lwjgl3Window.java:435)
+	at com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application.loop(Lwjgl3Application.java:181)
+	at com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application.<init>(Lwjgl3Application.java:153)
+	at com.phoenix.game.DesktopLauncher.main(DesktopLauncher.java:29)

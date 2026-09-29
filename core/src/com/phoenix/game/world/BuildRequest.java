@@ -23,12 +23,32 @@ public class BuildRequest{
     public boolean stuck;
     /** 上一次读到的进度。 */
     public float progress;
+    /** 绘制缩放（移动端"先摆后确认"队列里用来做淡入淡出动画，对应原版 BuilderTrait.BuildRequest.animScale）。 */
+    public float animScale = 1f;
+
+    /** 复制一份（移动端确认建造时用：原请求留在队列里淡出，副本真正入建造队列）。 */
+    public BuildRequest copy(){
+        BuildRequest req = new BuildRequest(x, y, rotation, block);
+        req.breaking = breaking;
+        req.hasConfig = hasConfig;
+        req.config = config;
+        req.animScale = animScale;
+        return req;
+    }
+
 
     public BuildRequest(int x, int y, int rotation, Block block){
         this.x = x;
         this.y = y;
         this.rotation = rotation;
         this.block = block;
+    }
+
+    /** 设置配置值（对应原版 {@code BuildRequest.configure(int)}）。 */
+    public BuildRequest configure(int config){
+        this.config = config;
+        this.hasConfig = true;
+        return this;
     }
 
     /** 拆除请求。 */

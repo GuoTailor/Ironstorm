@@ -30,6 +30,8 @@ public class Bar extends Actor{
     private float lastValue;
     private float blink;
     private final Color blinkColor = new Color();
+    /** 是否已被 {@link #blink(Color)} 显式指定过闪烁目标色（显式指定的不被动态色 provider 覆盖）。 */
+    private boolean explicitBlink;
 
     /**
      * 创建一个固定名称/颜色的进度条。
@@ -42,6 +44,8 @@ public class Bar extends Actor{
         this.colorProvider = () -> color;
         this.fractionProvider = fraction;
         this.lastValue = this.value = clamp(fraction.get());
+        //对应原版 Bar(String,Color,Floatp) 里的 `blinkColor.set(color)`：不显式 blink(...) 时闪烁色 = 填充色
+        this.blinkColor.set(color);
         setColor(color);
     }
 
@@ -58,6 +62,18 @@ public class Bar extends Actor{
         return Math.max(0f, Math.min(1f, v));
     }
 
+    /**
+     * 指定"数值变化时闪烁到的目标色"（对应原版 {@code Bar.blink(Color)}）。
+     * <p>⚠ 本项目原实现里 {@code act()} 每帧都把 {@code blinkColor} 刷成动态色 provider 的返回值 →
+     * 填充色与闪烁色永远相同、**闪不起来**。这里加 {@code explicitBlink} 标记：显式 blink(...) 之后
+     * 不再被 provider 覆盖（与原版"String 构造器只在构造时设一次 blinkColor"的语义一致）。
+     */
+    public Bar blink(Color color){
+        blinkColor.set(color);
+        explicitBlink = true;
+        return this;
+    }
+
     @Override
     public void act(float delta){
         super.act(delta);
@@ -70,7 +86,7 @@ public class Bar extends Actor{
         if(colorProvider != null){
             Color next = colorProvider.get();
             if(next != null){
-                blinkColor.set(next);
+                if(!explicitBlink) blinkColor.set(next);
                 setColor(next);
             }
         }

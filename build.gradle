@@ -9,21 +9,28 @@ buildscript {
         google()
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:8.1.2'
-        classpath 'com.mobidevelop.robovm:robovm-gradle-plugin:2.3.21'
-        classpath "com.badlogicgames.gdx:gdx-tools:1.12.1"
+        classpath 'com.android.tools.build:gradle:8.9.3'
+        classpath 'com.mobidevelop.robovm:robovm-gradle-plugin:2.3.23'
+        classpath "com.badlogicgames.gdx:gdx-tools:1.14.2"
 
     }
 }
 
 allprojects {
     apply plugin: "eclipse"
+    apply plugin: 'idea'
 
-    version = '1.0'
+    idea {
+        module {
+            outputDir = file('build/classes/java/main')
+            testOutputDir = file('build/classes/java/test')
+        }
+    }
+    version = "$projectVersion"
     ext {
         appName = "phoenix"
-        gdxVersion = '1.12.1'
-        roboVMVersion = '2.3.21'
+        gdxVersion = '1.14.2'
+        roboVMVersion = '2.3.23'
         box2DLightsVersion = '1.5'
         ashleyVersion = '1.7.4'
         aiVersion = '1.8.2'
@@ -41,8 +48,8 @@ allprojects {
     }
 
     tasks.withType(JavaCompile) {
-        targetCompatibility = JavaVersion.VERSION_21
-        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_17
+        sourceCompatibility = JavaVersion.VERSION_17
         options.encoding = "UTF-8"
         options.compilerArgs += ["-Xlint:deprecation"]
 
@@ -61,15 +68,16 @@ allprojects {
 
 configure(project(":annotations")) {
     tasks.withType(JavaCompile) {
-        targetCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_17
         sourceCompatibility = 8
         options.fork = true
     }
 }
 //compile with java 8 compatibility for everything except the annotation project
-configure(subprojects - project(":annotations")) {
+//:android 也要排除：加 --release 会把 bootclasspath 换成 JDK 的 ct.sym，android.jar 里的类全部找不到
+configure(subprojects - project(":annotations") - project(":android")) {
     tasks.withType(JavaCompile) {
-        options.compilerArgs.addAll(['--release', '21'])
+        options.compilerArgs.addAll(['--release', '17'])
     }
 
     tasks.withType(Javadoc) {
@@ -87,6 +95,8 @@ project(":desktop") {
 
     dependencies {
         implementation project(":core")
+        //桌面端运行时需要 lwjgl3 后端（:core 里只是 compileOnly）
+        api "com.badlogicgames.gdx:gdx-backend-lwjgl3:$gdxVersion"
         api "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-desktop"
         api "com.badlogicgames.gdx:gdx-bullet-platform:$gdxVersion:natives-desktop"
         api "com.badlogicgames.gdx:gdx-freetype-platform:$gdxVersion:natives-desktop"
@@ -110,6 +120,10 @@ project(":android") {
         natives "com.badlogicgames.gdx:gdx-bullet-platform:$gdxVersion:natives-arm64-v8a"
         natives "com.badlogicgames.gdx:gdx-bullet-platform:$gdxVersion:natives-x86"
         natives "com.badlogicgames.gdx:gdx-bullet-platform:$gdxVersion:natives-x86_64"
+        natives "com.badlogicgames.gdx:gdx-freetype-platform:$gdxVersion:natives-armeabi-v7a"
+        natives "com.badlogicgames.gdx:gdx-freetype-platform:$gdxVersion:natives-arm64-v8a"
+        natives "com.badlogicgames.gdx:gdx-freetype-platform:$gdxVersion:natives-x86"
+        natives "com.badlogicgames.gdx:gdx-freetype-platform:$gdxVersion:natives-x86_64"
         api "com.badlogicgames.gdx:gdx-ai:$aiVersion"
 
     }
@@ -124,7 +138,7 @@ project(":ios") {
         implementation project(":core")
         api "com.mobidevelop.robovm:robovm-rt:$roboVMVersion"
         api "com.mobidevelop.robovm:robovm-cocoatouch:$roboVMVersion"
-        api "com.badlogicgames.gdx:gdx-backend-robovm:$gdxVersion"
+        api "com.badlogicgames.gdx:gdx-backend-robovm-metalangle:$gdxVersion"
         api "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-ios"
         api "com.badlogicgames.gdx:gdx-bullet-platform:$gdxVersion:natives-ios"
 
@@ -136,7 +150,6 @@ project(":core") {
 
     compileJava.options.fork = true
     dependencies {
-        api "com.badlogicgames.gdx:gdx-backend-lwjgl3:$gdxVersion"
         api "com.badlogicgames.gdx:gdx:$gdxVersion"
         api "com.badlogicgames.gdx:gdx-bullet:$gdxVersion"
         api "com.badlogicgames.gdx:gdx-ai:$aiVersion"
@@ -172,7 +185,7 @@ project(":tools"){
 project(":server") {
     apply plugin: "java"
 
-    sourceCompatibility = 21
+    //Gradle 9 已移除 project 级 sourceCompatibility，字节码版本统一由上面的 JavaCompile 配置（17）决定
     sourceSets.main.java.srcDirs = [ "src/" ]
     sourceSets.main.resources.srcDirs = ["../assets"]
 
@@ -214,12 +227,32 @@ project(":server") {
 
 import com.badlogic.gdx.tools.texturepacker.TexturePacker
 
-task texturePacker {
-    project.ext.texturePacker = ["core/assets-raw/sprites/", "core/assets/sprites/", "sprites"]
+tasks.register('texturePacker') {
+    //⚠ 必须用绝对路径：doLast 在 Gradle daemon 里执行，daemon 的工作目录是 $GRADLE_USER_HOME/daemon/<版本>/，
+    //  相对路径会被解析到那里（读空目录、写到仓库外），导致任务"成功"但图集根本没变
+    //⚠⚠ 输入/输出目录（2026-09-27 修正）：运行期资源根是 `<repo>/assets`（desktop/server/android 三端的
+    //  assetsDir 都是 `../assets`），而**完整**的打包输入是 `core/assets-raw/sprites_out/`（1071 张，含
+    //  `generated/` 与 ui/icons 的变体）——`core/assets-raw/sprites/` 只有 785 张手绘源图，
+    //  直接拿它打包会丢掉 287 个生成出来的区域（`icon-*-small/smaller/tiny` 等），**把运行期图集打坏**。
+    //  旧配置（sprites/ → core/assets/sprites/）两头都是错的：输入不完整、输出目录三端都不用。
+    project.ext.texturePacker = [file('core/assets-raw/sprites_out/').absolutePath,
+                                 file('assets/sprites/').absolutePath, "sprites"]
     doLast {
         if (project.ext.has('texturePacker')) {
             logger.info "Calling TexturePacker: " + texturePacker
             TexturePacker.process(texturePacker[0], texturePacker[1], texturePacker[2])
         }
     }
+}
+
+tasks.register('spriteGen', JavaExec) {
+    //构建期贴图生成器（对应原版 tools 的 Generators）：生成 cracks-* / floor-*-edge 到
+    //core/assets-raw/sprites/blocks/environment/。**生成完必须再跑 `gradlew texturePacker`** 才会进图集。
+    dependsOn ':tools:classes'
+    group = 'phoenix'
+    description = '生成 cracks-* / floor-*-edge 贴图（之后需跑 texturePacker）'
+    classpath = project(':tools').sourceSets.main.runtimeClasspath
+    mainClass = 'io.anuke.mindustry.Generators'
+    //⚠ workingDir 必须是仓库根：Generators 里的输出路径是相对仓库根的
+    workingDir = projectDir
 }

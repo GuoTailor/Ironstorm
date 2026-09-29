@@ -2,15 +2,23 @@ package com.phoenix.game.world.blocks.production;
 
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
+import com.phoenix.game.Vars;
 import com.phoenix.game.content.Items;
 import com.phoenix.game.core.Core;
 import com.phoenix.game.core.Draw;
+import com.phoenix.game.core.Strings;
 import com.phoenix.game.core.Time;
 import com.phoenix.game.entities.type.TileEntity;
 import com.phoenix.game.math.Mathf;
 import com.phoenix.game.type.Item;
+import com.phoenix.game.ui.Cicon;
 import com.phoenix.game.world.Block;
 import com.phoenix.game.world.Tile;
+import com.phoenix.game.world.meta.BlockStat;
+import com.phoenix.game.world.meta.I18n;
+import com.phoenix.game.world.meta.StatUnit;
+
+import static com.phoenix.game.Vars.tilesize;
 
 /**
  * 采集钻头。参照 Mindustry mindustry.world.blocks.production.Drill 移植。
@@ -22,10 +30,10 @@ import com.phoenix.game.world.Tile;
 public class Drill extends Block{
     /** 能采集的矿物硬度上限（对应原版 Drill.tier）。 */
     public int tier;
-    /** 每点硬度增加的基础帧数（对应原版 hardnessDrillMultiplier；原版 50，按本项目 drillTime 数值体系折算）。 */
-    public float hardnessDrillMultiplier = 4f;
-    /** 每采集 1 个所需的基础帧数。 */
-    public float drillTime = 60f;
+    /** 每点硬度增加的基础帧数（对应原版 Drill.hardnessDrillMultiplier）。 */
+    public float hardnessDrillMultiplier = 50f;
+    /** 每采集 1 个所需的基础帧数（对应原版 Drill.drillTime）。 */
+    public float drillTime = 300f;
     /** 液体加速倍率上限（对应原版 liquidBoostIntensity）；<=1 表示无加速。 */
     public float liquidBoostIntensity = 1.6f;
     /** 启动速度：每帧 warmup 增长量（对应原版 warmupSpeed）。 */
@@ -34,6 +42,8 @@ public class Drill extends Block{
     public float rotateSpeed = 2f;
     /** 是否绘制发热外圈（对应原版 drawRim）。 */
     public boolean drawRim = false;
+    /** 是否在钻头中心叠加主产出矿物的着色圆盘（对应原版 {@code Drill.drawMineItem}）。 */
+    public boolean drawMineItem = false;
     /** 外圈发热颜色。 */
     public Color heatColor = Color.valueOf("ff5512");
 
@@ -48,7 +58,8 @@ public class Drill extends Block{
         super(name);
         update = true;
         solid = true;
-        health = 80;
+        //不写 health：原版 Drill.java 构造器没有 health → 走 Block.init() 的 size*size*40
+        //（mechanical/pneumatic size2 → 160、laser size3 → 360、blast size4 → 640）
         hasItems = true;
         itemCapacity = 10;
         //液体模块用于"液体加速"（原版 liquidBoostIntensity）
@@ -57,6 +68,16 @@ public class Drill extends Block{
         //不在这里写 hasPower/powerConsumption：需要电的钻头由 Blocks 里声明 consumes.power(...) 开启，
         //机械钻头（原版无电）因此不会平白多出一个电力模块（否则没接电网就 speed=0，完全不产出）
         entityType = DrillEntity::new;
+    }
+
+    @Override
+    public void setStats(){
+        super.setStats();
+
+        //对应原版 Drill.setStats 的 drillSpeed（"可钻探矿物"drillTier 依赖按硬度列出地板，本项目未移植）
+        if(drillTime > 0f){
+            stats.add(BlockStat.drillSpeed, 60f / drillTime * size * size, StatUnit.itemsSecond);
+        }
     }
 
     @Override
@@ -100,6 +121,87 @@ public class Drill extends Block{
         table.row();
     }
 
+    /**
+     * 放置预览（对应原版 {@code Drill.drawPlace}）：
+     * 有可采矿时显示"预计采集速度"文字 + 矿物小图标；没矿但覆盖面里存在硬度超过本钻头的矿时，
+     * 提示需要更好的钻头（{@code bar.drilltierreq}）。
+     * <p><b>与原版的差异</b>：
+     * <ul>
+     *     <li>原版 {@code Core.bundle.formatFloat(key, value, 2)} → 本项目 {@code Strings.format(I18n.get(key, 默认), Strings.fixed(value, 2))}
+     *         （{@code bar.drillspeed} 键在 bundle 里存在）。</li>
+     *     <li>原版 {@code Draw.mixcol(Color.darkGray, 1f)} 画深色阴影 → 本项目没有 {@code mixcol}，
+     *         用 {@code Draw.color(Color.DARK_GRAY)} 等价替代（同 {@code Pump.drawPlace}）。</li>
+     *     <li>原版 {@code tile.getLinkedTilesAs(this, tempTiles)} 复用缓存数组 → 本项目用等价的私有
+     *         {@link #linkedTiles(Tile)}。</li>
+     * </ul>
+     * <p>图标落点公式（{@code x*tilesize + offset() - width/2 - 4} 等）与 {@code drawPlaceText} 的排版口径一致，
+     * 故照抄（{@code drawPlaceText} 的居中线本身也是 {@code x*tilesize + offset()}，见 {@code Block.drawPlaceText}）。
+     */
+    @Override
+    public void drawPlace(int x, int y, int rotation, boolean valid){
+        Tile tile = Vars.world == null ? null : Vars.world.tile(x, y);
+        if(tile == null) return;
+
+        countOre(tile);
+
+        if(returnItem != null){
+            //预计产量：每秒 = 60 / (基础帧数 + 硬度×倍率) × 矿格数
+            float width = drawPlaceText(Strings.format(I18n.get("bar.drillspeed", "Drill Speed: {0}/s"),
+                Strings.fixed(60f / (drillTime + hardnessDrillMultiplier * returnItem.hardness) * returnCount, 2)), x, y, valid);
+            float dx = x * tilesize + offset() - width / 2f - 4f, dy = y * tilesize + offset() + size * tilesize / 2f + 5;
+
+            TextureRegion icon = returnItem.icon(Cicon.small);
+            if(icon != null){
+                Draw.color(Color.DARK_GRAY);
+                Draw.rect(icon, dx, dy - 1f);
+                Draw.color();
+                Draw.rect(icon, dx, dy);
+            }
+        }else{
+            //本钻头采不了：若覆盖面里有"硬度超过 tier"的矿，提示换更高级的钻头
+            for(Tile other : linkedTiles(tile)){
+                Item drop = other.drop();
+                if(drop != null && drop.hardness > tier){
+                    drawPlaceText(I18n.get("bar.drilltierreq", "Better Drill Required"), x, y, valid);
+                    break;
+                }
+            }
+        }
+    }
+
+    /**
+     * 悬停时在钻头左上角显示"主产出矿物"小图标（对应原版 {@code Drill.drawSelect}）。
+     * <p><b>与原版的差异（坐标口径）</b>：原版 {@code tile.drawx()/drawy()} 是贴图中心；本项目改用
+     * {@link Block#centerX}/{@link Block#centerY}，并先 {@code link()} 到锚点瓦片（钻头可能是多格，光标可能落在卫星瓦片上）。
+     * <p>原版 {@code Draw.mixcol(Color.darkGray, 1f)} 的深色阴影同样用 {@code Draw.color(Color.DARK_GRAY)} 替代。
+     */
+    @Override
+    public void drawSelect(Tile tile){
+        Tile anchor = tile.link();
+        if(!(anchor.entity instanceof DrillEntity)) return;
+
+        DrillEntity entity = (DrillEntity)anchor.entity;
+        if(entity.dominantItem == null) return;
+
+        TextureRegion icon = entity.dominantItem.icon(Cicon.small);
+        if(icon == null) return;
+
+        float dx = centerX(anchor) - size * tilesize / 2f, dy = centerY(anchor) + size * tilesize / 2f;
+        Draw.color(Color.DARK_GRAY);
+        Draw.rect(icon, dx, dy - 1f);
+        Draw.color();
+        Draw.rect(icon, dx, dy);
+    }
+
+    /**
+     * 空覆写以屏蔽基类的裂纹绘制（对应原版 {@code Drill.drawCracks(Tile){}}）：
+     * 钻头的 {@link #draw(Tile)} 是自定义的，裂纹必须夹在底座与发热外圈之间自己调 {@code super.drawCracks(tile)}，
+     * 不能让 {@code Renderer} 在 {@code draw()} **之后**再补一次（那样裂纹会压在旋转钻头上面）。
+     */
+    @Override
+    public void drawCracks(Tile tile){
+    }
+
     /** 绘制钻头：底座 + 发热外圈 + 旋转钻头 + 上层（对应原版 Drill.draw）。 */
     @Override
     public void draw(Tile tile){
@@ -109,6 +211,10 @@ public class Drill extends Block{
         float s = 0.3f, ts = 0.6f;
 
         drawBase(tile);
+
+        //原版 Drill.draw 里 `Draw.rect(region, ...)` 之后紧跟 `super.drawCracks(tile)`
+        //（裂纹要压在底座上、发热外圈/旋转钻头之下）
+        super.drawCracks(tile);
 
         if(drawRim && rimRegion != null && entity != null){
             Draw.color(heatColor);
@@ -131,6 +237,19 @@ public class Drill extends Block{
     public void drawLayer(Tile tile){
         if(topRegion != null){
             drawRegionCentered(topRegion, tile);
+        }
+
+        //主产出矿物的着色圆盘（对应原版 Drill.draw 末尾的 drawMineItem 分支）：
+        //原版 Draw.rect("drill-top", ...) 用矿物颜色染一层，让玩家一眼看出钻头在采什么
+        if(drawMineItem && tile.entity instanceof DrillEntity){
+            DrillEntity entity = (DrillEntity)tile.entity;
+            TextureRegion mine = Core.atlas == null ? null : Core.atlas.findRegion("drill-top");
+            if(entity.dominantItem != null && mine != null){
+                Draw.color(entity.dominantItem.color);
+                //原版用 Draw.rect("drill-top", x, y, 1f) —— 按贴图原始尺寸绘制（不随钻头尺寸放大）
+                Draw.rect(mine, centerX(tile), centerY(tile));
+                Draw.color();
+            }
         }
     }
 
@@ -273,6 +392,17 @@ public class Drill extends Block{
     public Item resultFor(Tile tile){
         countOre(tile);
         return returnItem;
+    }
+
+    /**
+     * 钻头是纯产出方，不接受任何物品输入（对应原版 {@code Block.acceptItem} 默认返回 false）。
+     * <p>本项目的 {@link Block#acceptItem} 默认实现是"有库存空间就收"，而钻头 {@code hasItems = true}，
+     * 不覆写的话相邻钻头之间会互相灌物品：几个钻头挤在一起时物品在它们之间循环，
+     * 谁都不往传送带送，最后每个钻头库存都满 10 个、挖掘速度归零。
+     */
+    @Override
+    public boolean acceptItem(Item item, Tile tile, Tile source){
+        return false;
     }
 
     @Override

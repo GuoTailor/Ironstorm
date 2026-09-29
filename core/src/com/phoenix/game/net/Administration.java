@@ -267,4 +267,20 @@ public class Administration {
             this.id = id;
         }
     }
+
+    /**
+     * 玩家追踪信息（对应原版 {@code Administration.TraceInfo}）。
+     * <p>管理员对某玩家执行 trace 时，服务端把该玩家的 IP / uuid / 是否改版客户端 / 是否移动端回传给发起者。
+     */
+    public static class TraceInfo {
+        public String ip, uuid;
+        public boolean modded, mobile;
+
+        public TraceInfo(String ip, String uuid, boolean modded, boolean mobile){
+            this.ip = ip;
+            this.uuid = uuid;
+            this.modded = modded;
+            this.mobile = mobile;
+        }
+    }
 }

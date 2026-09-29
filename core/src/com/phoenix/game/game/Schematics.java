@@ -2,6 +2,7 @@ package com.phoenix.game.game;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.utils.Array;
+import com.badlogic.gdx.utils.Base64Coder;
 import com.badlogic.gdx.utils.IntMap;
 import com.badlogic.gdx.utils.ObjectMap;
 import com.phoenix.game.Vars;
@@ -11,7 +12,9 @@ import com.phoenix.game.world.BuildRequest;
 import com.phoenix.game.world.Pos;
 import com.phoenix.game.world.Tile;
 import com.phoenix.game.world.blocks.BuildBlock;
+import com.phoenix.game.world.blocks.storage.CoreBlock;
 
+import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.File;
@@ -34,7 +37,8 @@ import java.util.zip.InflaterInputStream;
  *     byte  方块字典长度, 每项 UTF 方块名
  *     int   瓦片数, 每项 (byte 字典下标, int Pos 打包坐标, int 配置, byte 朝向)
  * </pre>
- * <p>未移植：预览图生成（原版用 FrameBuffer 渲染一张 png）、创意工坊发布、目录监听。
+ * <p>未移植（刻意降级）：创意工坊发布、蓝图目录的实时监听。
+ * <p>预览图生成（原版 {@code getBuffer/getPreview/savePreview}）本项目已实现（走 FrameBuffer + glReadPixels）。
  */
 public class Schematics{
     /** 文件明文头（ASCII "msch"）。 */
@@ -45,6 +49,8 @@ public class Schematics{
     private static final String SCHEMATIC_DIR = "schematics";
     /** 蓝图文件扩展名（不含点）。 */
     public static final String schematicExtension = "msch";
+    /** base64 蓝图前缀（对应原版 {@code Schematics.base64Header}）：用于区分"内联 base64 蓝图"与"文件路径"。 */
+    public static final String base64Header = "bXNjaAB";
     /** 单张蓝图的最大边长（格），与原版一致。 */
     public static final int maxSchematicSize = 128;
 
@@ -102,6 +108,22 @@ public class Schematics{
         //顺手导出一张预览 PNG（同名 .png），这样蓝图目录里能直接看到长什么样。
         //原版只在内存里缓存预览、发布到创意工坊时才写 PNG；这里落盘是为了让文件系统可见。
         savePreview(schematic, previewFile(schematic));
+    }
+
+    /**
+     * 移除一张蓝图（对应原版 {@code Schematics.remove}）：从列表删掉、删磁盘文件、释放预览 FBO，再重排。
+     * <p>本项目 {@code all} 是 libgdx 的 {@link Array}（无 arc 的 {@code remove(T)}）→ 用 {@code removeValue(s, true)} 按身份删。
+     */
+    public void remove(Schematic schematic){
+        all.removeValue(schematic, true);
+        if(schematic.file != null){
+            schematic.file.delete();
+        }
+
+        com.badlogic.gdx.graphics.glutils.FrameBuffer buffer = previews.remove(schematic);
+        if(buffer != null) buffer.dispose();
+
+        all.sort((a, b) -> a.name().compareTo(b.name()));
     }
 
     /** @return 蓝图对应的预览图文件（与 .msch 同目录同名，扩展名 png）。 */
@@ -215,6 +237,50 @@ public class Schematics{
         return requests;
     }
 
+    /**
+     * 把蓝图里的开局蓝图放到 (x, y)（对应原版 {@code Schematics.placeLoadout}）。
+     * <p>原版逻辑：找到蓝图里的核心格对齐到 (x, y)，逐格 {@code tile.set(block, state.rules.defaultTeam)}
+     * + {@code tile.rotation(...)}，再 {@code configureAny(...)} 下发配置。
+     * <p><b>刻意降级</b>（与原版的差异）：
+     * <ul>
+     *   <li>{@code tile.set(...)} 会连血量/队伍一起写；本项目只有
+     *       {@link Tile#setBlock(Block, Team, int)} → 用后者（队伍取 {@code state.rules.defaultTeam}）。</li>
+     *   <li>{@code configureAny(...)}（不下发 UI 事件的配置）本项目没有 → 用 {@link Tile#configure(int)}；
+     *       且 {@code st.block.posConfig}（配置值是相对坐标、需要平移）的分支跳过（配置语义未确认）。</li>
+     *   <li>原版对蓝图里的钻头会 {@code tile.getLinkedTiles(t -> t.setOverlay(Blocks.oreCopper))} 铺矿；
+     *       本项目 {@code Tile} 没有 {@code getLinkedTiles} → 跳过该分支。</li>
+     * </ul>
+     */
+    public void placeLoadout(Schematic schem, int x, int y){
+        if(schem == null || Vars.world == null) return;
+
+        //找到蓝图里的核心格，把它对齐到 (x, y)（对应原版 placeLoadout 的 ox/oy 计算）
+        Schematic.Stile coreTile = null;
+        for(int i = 0; i < schem.tiles.size; i++){
+            Schematic.Stile st = schem.tiles.get(i);
+            if(st.block instanceof CoreBlock){
+                coreTile = st;
+                break;
+            }
+        }
+        if(coreTile == null) throw new IllegalArgumentException("Schematic has no core tile. Exiting.");
+
+        int ox = x - coreTile.x, oy = y - coreTile.y;
+        Team team = Vars.state.rules.defaultTeam;
+
+        for(int i = 0; i < schem.tiles.size; i++){
+            Schematic.Stile st = schem.tiles.get(i);
+            Tile tile = Vars.world.tile(st.x + ox, st.y + oy);
+            if(tile == null) continue;
+
+            tile.setBlock(st.block, team, st.rotation);
+
+            if(st.config >= 0 && !st.block.posConfig){
+                tile.configure(st.config);
+            }
+        }
+    }
+
     // ---- 文件读写（格式与原版 .msch 一致） ----
 
     /** 从文件读一张蓝图（对应原版 {@code Schematics.read(Fi)}）。 */
@@ -274,6 +340,30 @@ public class Schematics{
             }
 
             return new Schematic(tiles, tags, width, height);
+        }
+    }
+
+    /** 从 base64 字符串读一张蓝图（对应原版 {@code Schematics.readBase64}）。 */
+    public static Schematic readBase64(String schematic){
+        try{
+            return read(new ByteArrayInputStream(Base64Coder.decode(schematic.trim())));
+        }catch(IOException e){
+            throw new RuntimeException(e);
+        }
+    }
+
+    /**
+     * 把蓝图转成 base64（对应原版 {@code Schematics.writeBase64}）。
+     * <p>原版是实例方法 + 复用内部缓冲；本项目 {@code write(Schematic, OutputStream)} 已是静态方法，
+     * 所以这里也做成静态，内部走 {@code ByteArrayOutputStream}。结果同样以 {@link #base64Header} 开头。
+     */
+    public static String writeBase64(Schematic schematic){
+        try{
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            write(schematic, out);
+            return new String(Base64Coder.encode(out.toByteArray()));
+        }catch(IOException e){
+            throw new RuntimeException(e);
         }
     }
 
@@ -451,8 +541,9 @@ public class Schematics{
                 float px = padding / 2f + ccx;
                 float py = padding / 2f + (schematic.height - ccy);
 
+                //贴图基准朝向"右"，rotation 0=上/1=右/2=下/3=左，libgdx 角度逆时针为正，故 (1 - rotation) * 90
                 batch.draw(region, px - size / 2f, py - size / 2f, size / 2f, size / 2f,
-                    size, size, 1f, 1f, block.rotate ? stile.rotation * 90f : 0f);
+                    size, size, 1f, 1f, block.rotate ? (1 - (stile.rotation & 3)) * 90f : 0f);
             }
 
             batch.flush();

@@ -10,14 +10,16 @@ import com.phoenix.game.entities.Effects;
 import com.phoenix.game.entities.Units;
 import com.phoenix.game.entities.effect.Lightning;
 import com.phoenix.game.content.StatusEffects;
+import com.phoenix.game.entities.traits.HealthTrait;
 import com.phoenix.game.entities.traits.TargetTrait;
 import com.phoenix.game.ctype.ContentType;
 import com.phoenix.game.math.Angles;
 import com.phoenix.game.math.Mathf;
 import com.phoenix.game.type.StatusEffect;
+import com.phoenix.game.world.Tile;
 import io.anuke.mindustry.gen.Sounds;
 
-public abstract class BulletType {
+public abstract class BulletType extends com.phoenix.game.ctype.Content {
     public float lifetime;
     public float speed;
     public float damage;
@@ -112,6 +114,12 @@ public abstract class BulletType {
         return true;
     }
 
+    /** @return 子弹是否会被该瓦片拦截（对应原版 {@code BulletType.collides(Bullet, Tile)}）。
+     * <p>由 {@code Bullet.update} 的瓦片射线回调调用；返回 false 时子弹穿过该瓦片（如治疗弹穿过满血友方建筑）。 */
+    public boolean collides(Bullet bullet, Tile tile){
+        return true;
+    }
+
     public void hitTile(Bullet b){
         hit(b);
     }
@@ -160,12 +168,11 @@ public abstract class BulletType {
     }
 
     public void init(Bullet b){
-        //TODO: 需要 HealthTrait 支持后才能生效
-        /*
+        //自爆单位：发射时杀掉射手（原版由 content/UnitTypes 的 crawler 内联弹药设置 killShooter；
+        //本项目等价物是 Bullets.bombCrawler，已设 killShooter = true，HealthTrait 具备 kill()）
         if(killShooter && b.getOwner() instanceof HealthTrait){
             ((HealthTrait)b.getOwner()).kill();
         }
-        */
 
         if(instantDisappear){
             b.time(lifetime);

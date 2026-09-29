@@ -6,6 +6,8 @@ import com.phoenix.game.content.Items;
 import com.phoenix.game.entities.Effects;
 import com.phoenix.game.type.Item;
 import com.phoenix.game.world.Tile;
+import com.phoenix.game.world.meta.BlockStat;
+import com.phoenix.game.world.meta.StatUnit;
 
 /**
  * 发射台。参照 Mindustry mindustry.world.blocks.storage.LaunchPad 移植。
@@ -14,17 +16,26 @@ import com.phoenix.game.world.Tile;
  * <p>原版要求 {@code world.isZone()}（只有战役区域能发射），本项目简化为总是允许。
  */
 public class LaunchPad extends StorageBlock{
-    /** 发射间隔（帧）。 */
-    public float launchTime = 60f * 20f;
+    /** 发射间隔（帧）；原版类里无默认值，由 Blocks.java 给（launch-pad 60*16、launch-pad-large 60*14）。 */
+    public float launchTime;
 
     public LaunchPad(String name){
         super(name);
         update = true;
         hasItems = true;
         solid = true;
-        itemCapacity = 100;
-        health = 350;
+        //不写 itemCapacity / health：原版 LaunchPad 类都不设，由 Blocks.java 给
+        //（itemCapacity：100 / 250；health：size3 默认 360 / size4 默认 640。
+        // ⚠ 本项目 StorageBlock 硬编码 health = 120，size 默认不可达 → health 由 Blocks 显式给）
         entityType = LaunchPadEntity::new;
+    }
+
+    @Override
+    public void setStats(){
+        super.setStats();
+
+        //对应原版 LaunchPad.setStats
+        stats.add(BlockStat.launchTime, launchTime / 60f, StatUnit.seconds);
     }
 
     /**
@@ -52,6 +63,8 @@ public class LaunchPad extends StorageBlock{
             launchTimer += delta();
 
             if(Vars.data == null || items.total() < itemCapacity) return;
+            //原版 LaunchPad.java:76：无电不发射（cons.valid()）
+            if(!cons.valid()) return;
             if(launchTimer < launchTime) return;
 
             launchTimer = 0f;
@@ -66,7 +79,7 @@ public class LaunchPad extends StorageBlock{
                 items.remove(item, used);
             }
 
-            Effects.effect(Fx.explosion, tile.drawx(), tile.drawy(), 0f);
+            Effects.effect(Fx.explosion, centerX(tile), centerY(tile), 0f);
         }
     }
 }

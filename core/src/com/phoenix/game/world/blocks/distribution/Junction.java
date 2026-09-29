@@ -18,13 +18,14 @@ public class Junction extends Block{
     /** 穿过本交叉器所需的帧数。 */
     public float speed = 26f;
     /** 每个方向的队列容量。 */
-    public int capacity = 6;
+    public int capacity = 12;   //原版 Blocks.java:926 capacity = 12
 
     public Junction(String name){
         super(name);
         update = true;
         solid = true;
         unloadable = false;
+        health = 30;   //原版 Blocks.java:927 health = 30（显式值，非 size 默认）
         entityType = JunctionEntity::new;
     }
 

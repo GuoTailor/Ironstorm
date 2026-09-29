@@ -12,6 +12,7 @@ import com.phoenix.game.core.Time;
 import com.phoenix.game.core.Tmp;
 import com.phoenix.game.entities.bullet.BulletType;
 import com.phoenix.game.game.Team;
+import com.phoenix.game.graphics.Pal;
 import com.phoenix.game.entities.traits.DamageTrait;
 import com.phoenix.game.entities.traits.Entity;
 import com.phoenix.game.entities.traits.SolidTrait;
@@ -65,6 +66,11 @@ public class Bullet extends SolidEntity implements Pool.Poolable, VelocityTrait,
     /** 指定队伍与速度倍率创建子弹。 */
     public static Bullet create(BulletType type, Entity owner, Team team, float x, float y, float angle, float velocityScl){
         return create(type, owner, team, x, y, angle, velocityScl, 1f, null);
+    }
+
+    /** 指定队伍、速度倍率与存活期倍率创建子弹（对应原版 {@code Bullet.create(type, owner, team, x, y, angle, velocityScl, lifetimeScl)}）。 */
+    public static Bullet create(BulletType type, Entity owner, Team team, float x, float y, float angle, float velocityScl, float lifetimeScl){
+        return create(type, owner, team, x, y, angle, velocityScl, lifetimeScl, null);
     }
 
     public static Bullet create(BulletType type, Bullet parent, float x, float y, float angle){
@@ -233,6 +239,10 @@ public class Bullet extends SolidEntity implements Pool.Poolable, VelocityTrait,
                         //只有实心方块会阻挡子弹（与原版一致：传送带等非实心建筑不阻挡）
                         if(!tile.solid()) return false;
 
+                        //瓦片级拦截判定（对应原版 type.collides(this, tile)）：
+                        //返回 false 时子弹穿过该瓦片（如治疗弹穿过满血友方建筑）
+                        if(tile.entity != null && !type.collides(this, tile)) return false;
+
                         if(tile.entity != null){
                             //先给方块一次拦截机会（护盾/反射墙）；被拦截的子弹不再造成伤害
                             tile.block().handleBulletHit(tile.entity, this);
@@ -241,7 +251,7 @@ public class Bullet extends SolidEntity implements Pool.Poolable, VelocityTrait,
                             if(!deflected && team.isEnemy(tile.getTeam())){
                                 tile.entity.handleDamage(type.damage);
                                 //受击火花反馈
-                                com.phoenix.game.entities.Effects.effect(com.phoenix.game.content.Fx.spark, tile.drawx(), tile.drawy(), rot());
+                                com.phoenix.game.entities.Effects.effect(com.phoenix.game.content.Fx.spark, tile.block().centerX(tile), tile.block().centerY(tile), rot());
                             }
                         }
 
@@ -313,9 +323,18 @@ public class Bullet extends SolidEntity implements Pool.Poolable, VelocityTrait,
         type.init(this);
     }
 
-    /** 绘制自身（对应原版 DrawTrait.draw，待 DrawTrait 移植后可加回 @Override）。 */
+    /**
+     * 绘制自身（对应原版 {@code Bullet.draw}，见原版 Bullet.java:286-292；待 DrawTrait 移植后可加回 @Override）。
+     * <p>原版顺序是 {@code type.draw(this); renderer.lights.add(x, y, 16f, Pal.powerLight, 0.3f);}
+     * —— 第二行已接线（S5b 批次）。原版没判空；本项目 {@code remove()} 会把 {@code type} 清空，
+     * 所以第一行保留 {@code type != null} 守卫（否则 NPE）。光斑登记不碰 {@code type}，只判 {@code renderer}。
+     */
     public void draw(){
         if(type != null) type.draw(this);
+
+        if(Vars.renderer != null){
+            Vars.renderer.lights.add(x, y, 16f, Pal.powerLight, 0.3f);
+        }
     }
 
     /** 生命周期进度（对应原版 Scaled.fin，待 Scaled 移植后可加回 @Override）。 */

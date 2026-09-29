@@ -159,7 +159,7 @@ public class Damage{
         if(!hitTiles.add(tile.pos())) return;
 
         tile.entity.handleDamage(hitter.getBulletType().damage);
-        Effects.effect(effect, tile.drawx(), tile.drawy());
+        Effects.effect(effect, tile.block().centerX(tile), tile.block().centerY(tile));
     }
 
     /** @return 点 (px,py) 到线段 (x1,y1)-(x2,y2) 的最短距离。 */

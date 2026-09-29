@@ -36,19 +36,35 @@ public class DesktopInput extends InputHandler{
             Vars.hud.minimapFragment().toggle();
         }
 
+        //T 键开关蓝图库（对应原版 Binding.schematic_menu = KeyCode.T → ui.schematics 的显隐切换）
+        if(keyTap(Input.Keys.T)){
+            toggleSchematics();
+        }
+
         //全屏小地图打开时让出输入：本类是轮询式（Gdx.input.isButtonPressed），
         //光靠 Stage 消费事件拦不住，不加这一步拖拽平移地图会误建造/误开火。
         //（原版靠 arc 的 scene.hasScroll() + 事件式输入实现，phoenix 没有等价物。）
         if(Vars.hud != null && Vars.hud.minimapFullShown()){
+            //建造预览（InputHandler.drawTop）读的是 targetX/targetY，这里也要刷新一次，
+            //否则小地图打开期间预览会停在上一帧的位置
+            updateTarget();
             scroll(); //丢弃本帧累积的滚轮量，否则关闭地图后相机会突然缩放
             if(player != null) player.isShooting = false;
             return;
         }
 
-        //视角缩放（对应 Mindustry 的 Binding.zoom + renderer.scaleCamera）
+        //滚轮：正在放置可旋转方块时旋转朝向，否则缩放相机。
+        //原版 Binding.rotate 与 Binding.zoom 都绑在滚轮轴上（Binding.java 的 rotate(new Axis(SCROLL)) / zoom(new Axis(SCROLL))），
+        //靠"是否在放置可旋转方块"区分——原版 zoom 分支的条件里带 !isPlacing() || !block.rotate。
         float zoomAmount = scroll();
-        if(Math.abs(zoomAmount) > 0.0001f && Vars.renderer != null){
-            Vars.renderer.scaleCamera(zoomAmount);
+        if(Math.abs(zoomAmount) > 0.0001f){
+            if(isPlacing() && buildBlock != null && buildBlock.rotate){
+                //原版 rotation 序列是逆时针（0=右/1=上/2=左/3=下），上滚 = +1 就是逆时针；
+                //本项目序列是顺时针（0=上/1=右/2=下/3=左），逆时针要 -1（等价 +3）
+                buildRotation = Mathf.mod(buildRotation + (zoomAmount > 0 ? 3 : 1), 4);
+            }else if(Vars.renderer != null){
+                Vars.renderer.scaleCamera(zoomAmount);
+            }
         }
 
         //鼠标世界坐标（瞄准与建造共用）
@@ -110,9 +126,21 @@ public class DesktopInput extends InputHandler{
             }
         }
 
-        //Esc 退出命令模式
-        if(keyTap(Input.Keys.ESCAPE) && commandMode){
-            exitCommandMode();
+        //Esc（对应原版 Binding.menu = KeyCode.ESCAPE）。原版在 Control.update() 里处理：
+        //  1) 有对话框/输入焦点/结算框时不响应（scene.hasDialog()/hasKeyboard()/ui.restart.isShown()）
+        //  2) 否则 ui.paused.show()（PausedDialog 的 shouldPause 会把状态切成 paused）
+        //本项目在此基础上还要保住既有的两个 Esc 用途（原版这两个分别绑在鼠标右键与 v8 的命令模式）：
+        //  1) 命令模式 → 退出命令模式
+        //  2) 建造/拆除预览 → 取消
+        //  3) 否则 → 打开暂停菜单
+        if(keyTap(Input.Keys.ESCAPE)){
+            if(commandMode){
+                exitCommandMode();
+            }else if(isPlacing()){
+                clearBuild();
+            }else{
+                openPauseMenu();
+            }
         }
 
         if(commandMode){
@@ -178,21 +206,38 @@ public class DesktopInput extends InputHandler{
             Vars.state.set(Vars.state.isPaused() ? GameState.State.playing : GameState.State.paused);
         }
 
-        //Tab 切换 HUD 建造菜单，Esc 取消当前建造/拆除（对应 Mindustry toggle_menus/deselect）
-        if(keyTap(Input.Keys.TAB) && Vars.hud != null){
-            Vars.hud.toggleMenus();
-        }
-        if(keyTap(Input.Keys.ESCAPE) && isPlacing()){
-            clearBuild();
+        //Tab 打开玩家列表（对应原版 DesktopInput 的 `net.active() && keyTap(Binding.player_list)` → `ui.listfrag.toggle()`；
+        //原版守卫 net.active()，本项目 Vars.net 恒 null → 用 Vars.isClient()/isServer() 判"联机中"）
+        if(keyTap(Input.Keys.TAB) && Vars.ui != null && Vars.ui.listfrag != null
+            && (Vars.isClient() || Vars.isServer())){
+            Vars.ui.listfrag.toggle();
         }
 
-        //R 键切换放置朝向
+        //C 切换 HUD 建造菜单（对应原版 Binding.toggle_menus = KeyCode.C，原版在 HudFragment.update 里处理）。
+        //守卫照原版：有对话框 / 输入框有焦点时不响应（原版还判 !ui.chatfrag.shown()，本项目 ChatFragment
+        //由 ClientLauncher 私有持有、没有 shown() 接口 → 该条未接）
+        com.badlogic.gdx.scenes.scene2d.Stage keyStage = com.phoenix.game.ui.dialogs.FloatingDialog.scene;
+        if(keyTap(Input.Keys.C) && Vars.hud != null && !hasDialog()
+            && !(keyStage != null && keyStage.getKeyboardFocus() instanceof com.badlogic.gdx.scenes.scene2d.ui.TextField)){
+            Vars.hud.toggleMenus();
+        }
+
+        //F7 切换电力激光显隐（对应原版 Binding.toggle_power_lines = KeyCode.F7）：关掉时记下偏好值，
+        //再按一次还原（设置页拖动 lasersopacity 滑块也会同步更新偏好值）
+        if(keyTap(Input.Keys.F7)){
+            if(Core.settings.getInt("lasersopacity", 100) == 0){
+                Core.settings.put("lasersopacity", Core.settings.getInt("preferredlaseropacity", 100));
+            }else{
+                Core.settings.put("preferredlaseropacity", Core.settings.getInt("lasersopacity", 100));
+                Core.settings.put("lasersopacity", 0);
+            }
+            Core.settings.save();
+        }
+
+        //R 键切换放置朝向（与滚轮旋转等价，保留为键盘替代操作）
         if(keyTap(Input.Keys.R)){
             buildRotation = (buildRotation + 1) % 4;
         }
-
-        //按住 Ctrl 强制直线连线（否则可旋转方块会走 L 形路径、自动拐弯）
-        straightLine = keyDown(Input.Keys.CONTROL_LEFT) || keyDown(Input.Keys.CONTROL_RIGHT);
 
         //拖拽中：按当前鼠标位置刷新连线路径（对应原版每帧检查 cursor 变化后 updateLine）
         if(lineMode){
@@ -211,7 +256,7 @@ public class DesktopInput extends InputHandler{
                 lastBreakX = tx;
                 lastBreakY = ty;
             }else if(tx != lastBreakX || ty != lastBreakY){
-                int count = buildPath(lastBreakX, lastBreakY, tx, ty, true);
+                int count = buildPath(lastBreakX, lastBreakY, tx, ty);
                 for(int i = 0; i < count; i++){
                     breakWorld(pathX[i], pathY[i]);
                 }
@@ -285,6 +330,8 @@ public class DesktopInput extends InputHandler{
 
             if(tappedTile != null && tappedTile.entity != null && tappedTile.block().configurable){
                 //再点同一格就关掉（方便快速收起面板）
+                //原版对非库存分支一律收起库存面板（tileTapped 末尾的 inv.hide），这里提前返回前同样处理
+                if(Vars.hud != null) Vars.hud.inv.hide();
                 configTile = configTile == tappedTile ? null : tappedTile;
                 return false;
             }
@@ -292,6 +339,25 @@ public class DesktopInput extends InputHandler{
             configTile = null;
 
             if(tappedTile != null && tappedTile.block().tapped(tappedTile, Vars.player)){
+                if(Vars.hud != null) Vars.hud.inv.hide();
+                return false;
+            }
+
+            //库存面板（对应原版 InputHandler.tileTapped 的 inv 分支）：
+            //点核心/容器等有物品的可存取方块 → 弹出物品列表；点其他方块/空地 → 收起
+            if(tileTapped(tappedTile)){
+                return false;
+            }
+
+            //点自己 → 进入"投递物品"状态（对应原版 DesktopInput 里 `!tryTapPlayer(mouseWorld.x, mouseWorld.y)`）。
+            //之后按住鼠标拖到目标方块再松开，由 touchUp 里的 tryDropItems 结算
+            if(tryTapPlayer(mouseWorldX(screenX), mouseWorldY(screenY))){
+                return false;
+            }
+
+            //采矿（对应原版 DesktopInput 里 `!tryBeginMine(selected) && player.getMineTile() == null`）：
+            //点可采瓦片 → 开始/取消开采（本次点击不开火）；已有采矿目标时也不开火
+            if(tryBeginMine(tappedTile) || Vars.player.getMineTile() != null){
                 return false;
             }
         }
@@ -320,6 +386,19 @@ public class DesktopInput extends InputHandler{
                     Sounds.place.play(1f);
                 }
             }
+
+            //松开左键：结算"投递物品"（对应原版 keyRelease(select) 里的
+            //`if(selected != null) tryDropItems(selected.link(), mouseWorld.x, mouseWorld.y)`）：
+            //光标下的方块能收就存进去，不能收就丢弃
+            if(Vars.world != null && Vars.player != null){
+                com.phoenix.game.world.Tile dropTile = Vars.world.tile(
+                    Vars.world.toTile(mouseWorldX(screenX)), Vars.world.toTile(mouseWorldY(screenY)));
+                if(dropTile != null){
+                    tryDropItems(dropTile.link() != null ? dropTile.link() : dropTile,
+                        mouseWorldX(screenX), mouseWorldY(screenY));
+                }
+            }
+
             if(Vars.player != null){
                 Vars.player.isShooting = false;
             }
@@ -411,6 +490,56 @@ public class DesktopInput extends InputHandler{
         }else{
             Gdx.graphics.setFullscreenMode(Gdx.graphics.getDisplayMode());
         }
+    }
+
+    /**
+     * 打开暂停菜单（对应原版 {@code Control.update()} 里 {@code Binding.menu} 的那个分支）。
+     * <p>原版守卫：{@code !scene.hasDialog() && !scene.hasKeyboard() && !ui.restart.isShown()}，
+     * 满足则 {@code ui.paused.show(); state.set(State.paused);}。
+     * <p>本项目 {@link com.phoenix.game.ui.dialogs.PausedDialog} 的 {@code shouldPause = true}，
+     * {@code show()} 内部（FloatingDialog 的 shown 回调）已经会把状态切成 paused → 这里不再重复 state.set。
+     * <p>TODO 原版还判 {@code !ui.minimapfrag.shown()}：本项目全屏小地图是
+     * {@code Vars.hud.minimapFullShown()}，但 {@link #update()} 开头遇到它就提前 return 了，走不到这里。
+     * <p>TODO 原版还判 {@code !scene.hasKeyboard()}（有文本焦点时不响应）：libgdx 的 Stage 用
+     * {@code getKeyboardFocus()} 表达，但输入框弹在自己的 Dialog 里（已被 hasDialog 覆盖）→ 未单独实现。
+     */
+    private void openPauseMenu(){
+        if(Vars.ui == null || Vars.ui.paused == null) return;
+        if(hasDialog()) return;
+        Vars.ui.paused.show();
+    }
+
+    /**
+     * 开关蓝图库（对应原版 {@code DesktopInput} 里 {@code Binding.schematic_menu} 的分支：
+     * 已开就 hide，否则 show）。
+     * <p>原版守卫 {@code !Core.scene.hasKeyboard()}；这里换成 {@code !hasDialog()}——
+     * 蓝图库自己开着时走 hide 分支，不会被守卫挡住。
+     */
+    private void toggleSchematics(){
+        if(Vars.ui == null || Vars.ui.schematics == null) return;
+        if(Vars.ui.schematics.getStage() != null){
+            Vars.ui.schematics.hide();
+        }else if(!hasDialog()){
+            Vars.ui.schematics.show();
+        }
+    }
+
+    /**
+     * @return 当前 stage 上是否还有打开的对话框（对应原版 {@code Core.scene.hasDialog()}）。
+     * <p>判定依据：{@code FloatingDialog.hide()} 走 {@code remove()}，从 stage 上摘掉后
+     * {@code getStage()} 变成 null；遮罩是 {@code Image}（不是 {@code Dialog}），不会误判。
+     */
+    private static boolean hasDialog(){
+        com.badlogic.gdx.scenes.scene2d.Stage stage = com.phoenix.game.ui.dialogs.FloatingDialog.scene;
+        if(stage == null) return false;
+        com.badlogic.gdx.utils.Array<com.badlogic.gdx.scenes.scene2d.Actor> children = stage.getActors();
+        for(int i = 0; i < children.size; i++){
+            com.badlogic.gdx.scenes.scene2d.Actor actor = children.get(i);
+            if(actor instanceof com.badlogic.gdx.scenes.scene2d.ui.Dialog && actor.getStage() != null && actor.isVisible()){
+                return true;
+            }
+        }
+        return false;
     }
 
 }

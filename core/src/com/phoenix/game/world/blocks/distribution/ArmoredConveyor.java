@@ -14,8 +14,10 @@ import com.phoenix.game.world.Tile;
 public class ArmoredConveyor extends Conveyor{
     public ArmoredConveyor(String name){
         super(name);
-        speed = 0.03f;
-        health = 180;
+        speed = 0.08f;   //原版 Blocks.java:919 speed = 0.08f
+        //展示用速度（对应原版 armoredConveyor 的 displayedSpeed = 10f）
+        displayedSpeed = 10f;
+        health = 180;    //原版 Blocks.java:918 health = 180
     }
 
     @Override

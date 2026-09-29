@@ -1,6 +1,5 @@
 package com.phoenix.game.core;
 
-import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.IntMap;
 import com.phoenix.game.Vars;
 import com.phoenix.game.content.UnitTypes;
@@ -35,8 +34,21 @@ public class NetClient {
     /** 上次连接参数（断线重连用）。 */
     private String lastIp, lastName;
     private int lastPort;
+    /**
+     * 本机玩家的唯一 id（对应原版 {@code Player.uuid}）。
+     * <p>每次连接/重连都用**同一个** uuid（原版按安装持久化；这里至少做到单次会话稳定），
+     * 否则重连会被服务端当成新玩家（丢管理员/封禁记录），且本地玩家无法在玩家列表快照里认出自己。
+     */
+    private final String clientUuid = UUID.randomUUID().toString();
     /** 远端玩家单位代理（服务器实体 id → 本地代理单位）。 */
     private final IntMap<BaseUnit> remoteUnits = new IntMap<>();
+    /**
+     * 客户端已知的远程玩家（uuid → Player）。
+     * <p>刻意**不靠 {@code playerGroup} 查存在性**：{@code EntityGroup.add()} 是延迟提交
+     * （进 {@code entitiesToAdd}，下一帧才进 {@code all()}），同一帧收到多个 PlayerListSync 时
+     * 刚建的玩家在 {@code all()} 里还看不到 → 按 uuid 找不到会重复创建（实测客户端出现 5 个玩家而非 3 个）。
+     */
+    private final java.util.HashMap<String, Player> remotePlayers = new java.util.HashMap<>();
     /** 最近一次上报输入的时间（节流，tick）。 */
     private float inputTimer;
     /** 聊天回调（UI 层设置；null 仅打印）。 */
@@ -73,10 +85,10 @@ public class NetClient {
 
             //握手（在任何用数据包前先标记为未加载，世界数据是关键包会先处理）
             Packets.ConnectPacket cp = new Packets.ConnectPacket();
-            cp.version = 126;
+            cp.version = Version.build;
             cp.versionType = "phoenix";
             cp.name = name;
-            cp.uuid = UUID.randomUUID().toString();
+            cp.uuid = clientUuid;
             cp.usid = "";
             net.send(cp, Net.SendMode.tcp);
 
@@ -185,10 +197,10 @@ public class NetClient {
                 net.setClientConnected();
                 lastReceiveTick = tickCounter;
                 Packets.ConnectPacket cp = new Packets.ConnectPacket();
-                cp.version = 126;
+                cp.version = Version.build;
                 cp.versionType = "phoenix";
                 cp.name = lastName;
-                cp.uuid = UUID.randomUUID().toString();
+                cp.uuid = clientUuid;
                 cp.usid = "";
                 net.send(cp, Net.SendMode.tcp);
                 System.out.println("[客户端] 重连成功，重新握手");
@@ -252,6 +264,15 @@ public class NetClient {
             pi.aimY = Vars.player.pointerY;
             net.send(pi, Net.SendMode.udp);
         }
+    }
+
+    /** 发送管理员操作请求（对应原版 {@code Call.onAdminRequest}；服务端鉴权后执行）。 */
+    public void sendAdminRequest(String uuid, Packets.AdminAction action){
+        if(!connected || uuid == null) return;
+        Packets.AdminRequest ar = new Packets.AdminRequest();
+        ar.uuid = uuid;
+        ar.action = (byte)action.ordinal();
+        net.send(ar, Net.SendMode.tcp);
     }
 
     /** 发送聊天。 */
@@ -325,6 +346,86 @@ public class NetClient {
     // ---- 远端单位代理 ----
 
     /** 每帧把远端代理单位的显示位置向最近一次快照目标插值（对应原版 SyncTrait.interpolate）。 */
+    /**
+     * 应用服务端下发的玩家列表快照（F13g）。
+     * <p>重建 {@code playerGroup} 里的**远程**玩家（本地玩家 {@code Vars.player} 不动，它由 SpawnPlayer 建）；
+     * 不在快照里的远程玩家被移除（断线）。原版每个客户端都有全部玩家的 Player 实体（随实体同步走），
+     * 本项目远程玩家只存在于服务端 → 用整表快照补齐客户端视角。
+     */
+    private void applyPlayerList(Packets.PlayerListSync sync){
+        if(Vars.playerGroup == null) return;
+
+        //1) 移除已不在快照里的远程玩家（靠 remotePlayers 而不是 playerGroup.all()，理由见字段注释）
+        java.util.Iterator<java.util.Map.Entry<String, Player>> it = remotePlayers.entrySet().iterator();
+        while(it.hasNext()){
+            java.util.Map.Entry<String, Player> en = it.next();
+            boolean found = false;
+            for(int j = 0; j < sync.uuids.length; j++){
+                if(en.getKey().equals(sync.uuids[j])){
+                    found = true;
+                    break;
+                }
+            }
+            if(!found){
+                Player p = en.getValue();
+                if(p.isAdded()) p.remove();
+                it.remove();
+            }
+        }
+
+        //2) 添加/更新远程玩家
+        for(int i = 0; i < sync.uuids.length; i++){
+            String uuid = sync.uuids[i];
+            if(uuid == null) continue;
+            if(clientUuid.equals(uuid)){
+                //是自己：不重建对象（由 SpawnPlayer 建），只同步服务端权威字段
+                //（管理员状态必须同步，否则客户端判定不了"我能否执行管理操作"）
+                if(Vars.player != null){
+                    if(sync.names[i] != null) Vars.player.name = sync.names[i];
+                    Vars.player.usid = sync.usids[i];
+                    Vars.player.isAdmin = sync.admins[i];
+                    Vars.player.team = Team.get(sync.teams[i] & 0xFF);
+                    if(sync.colors[i] != 0) Vars.player.color.set(sync.colors[i]);
+                }
+                continue;
+            }
+
+            Player target = remotePlayers.get(uuid);
+            if(target == null){
+                target = new Player();
+                target.uuid = uuid;
+                target.isLocal = false;
+                target.add();
+                remotePlayers.put(uuid, target);
+            }
+            target.name = sync.names[i] == null ? "noname" : sync.names[i];
+            target.usid = sync.usids[i];
+            target.isAdmin = sync.admins[i];
+            target.team = Team.get(sync.teams[i] & 0xFF);
+            if(sync.colors[i] != 0){
+                //服务端下发的是 RGBA8888 int（Color.toIntBits）
+                target.color.set(sync.colors[i]);
+            }
+        }
+    }
+
+    /**
+     * 应用服务端回传的追踪信息（对应原版 {@code NetClient.onTraceInfo}）。
+     * <p>原版 RPC 带的是目标 {@code Player} 实体引用，本项目包只带 uuid →
+     * 用 {@link #remotePlayers} 解析出目标玩家（目标是自己 / 已离开时解析不到，只打日志不崩）。
+     */
+    private void applyTraceInfo(Packets.TraceInfoPacket pkt){
+        if(pkt.info == null) return;
+        Player player = pkt.playerUuid == null ? null : remotePlayers.get(pkt.playerUuid);
+        if(player == null){
+            System.out.println("[客户端] 收到追踪信息，但本地没有该玩家 " + pkt.playerUuid);
+            return;
+        }
+        if(Vars.ui != null){
+            Vars.ui.traces.show(player, pkt.info);
+        }
+    }
+
     private void interpolateRemoteUnits(){
         for(IntMap.Entry<BaseUnit> e : remoteUnits.entries()){
             BaseUnit u = e.value;
@@ -343,6 +444,11 @@ public class NetClient {
             if(!u.isDead()) u.remove();
         }
         remoteUnits.clear();
+        //远程玩家一并清掉（断线/被踢后不该残留）
+        for(Player p : remotePlayers.values()){
+            if(p.isAdded()) p.remove();
+        }
+        remotePlayers.clear();
     }
 
     /** 按 id 找单位：远端代理单位 或 本机玩家单位。 */
@@ -362,7 +468,7 @@ public class NetClient {
             unit.isPlayer = false;
             unit.isRemoteProxy = true; //本地不跑 AI/物理，位置由服务器快照驱动
             unit.setTeam(Team.get(teamId));
-            Units.add(unit);
+            //注意：type.create() 内部已调 init() → Units.add，这里不能再加一次（否则同一单位在列表里出现两次）
             remoteUnits.put(id, unit);
             System.out.println("[客户端] 远端单位进入 id=" + id + " type=" + type.name);
         }
@@ -393,8 +499,16 @@ public class NetClient {
             if(onWorldLoaded != null) onWorldLoaded.run();
         });
 
+        //F13g：玩家列表快照（服务端 → 全体）：重建本地 playerGroup 里的远程玩家
+        net.handleClient(Packets.PlayerListSync.class, this::applyPlayerList);
+
+        //S8：管理员 trace 响应（服务端 → 发起者），对应原版 NetClient.onTraceInfo
+        net.handleClient(Packets.TraceInfoPacket.class, this::applyTraceInfo);
+
         net.handleClient(Packets.SpawnPlayer.class, sp -> {
-            System.out.println("[客户端] 获得玩家单位 id=" + sp.id + " team=" + sp.teamId);
+            UnitType spawnType = sp.typeId >= 0 && sp.typeId < UnitTypes.all.size ? UnitTypes.all.get(sp.typeId) : null;
+            System.out.println("[客户端] 获得玩家单位 id=" + sp.id + " team=" + sp.teamId
+                + " type=" + (spawnType == null ? "?" : spawnType.name));
             playerUnitId = sp.id;
 
             //单位快照（UDP）可能先于本包（TCP）到达，那时自己的单位已被当成远端代理创建过 → 先移除避免重复
@@ -408,11 +522,14 @@ public class NetClient {
             unit.set(sp.x, sp.y);
             unit.rotation = sp.rotation;
             unit.health(unit.maxHealth());
-            Units.add(unit);
+            //注意：type.create() 内部已 Units.add，不要再加一次
 
             if(Vars.player == null){
                 Vars.player = new Player();
             }
+            Vars.player.isLocal = true; //客户端本地玩家（对应原版 Player.isLocal）
+            Vars.player.uuid = clientUuid; //与握手用的 uuid 一致，玩家列表快照才能认出"自己"
+            Vars.player.add(); //登记进 playerGroup（add() 内部已判重，重复调用安全）
             Vars.player.team = Team.get(sp.teamId);
             Vars.player.unit(unit);
         });
@@ -468,6 +585,14 @@ public class NetClient {
         net.handleClient(Packets.ChatMessage.class, cm -> {
             System.out.println("[" + cm.name + "] " + cm.message);
             if(onChat != null) onChat.accept(cm.name, cm.message);
+
+            //对应原版 NetClient.sendMessage:144-147：把发言挂到发送者玩家身上 → 头顶气泡
+            //（原版是直接拿到 playersender 对象；本项目聊天包只带名字，只能按名字匹配，找不到就跳过）
+            Player sender = findPlayerByName(cm.name);
+            if(sender != null){
+                sender.lastText = cm.message;
+                sender.textFadeTime = 1f;
+            }
         });
 
         net.handleClient(Packets.Kick.class, k -> {
@@ -626,5 +751,30 @@ public class NetClient {
         }catch(Exception e){
             throw new RuntimeException(e);
         }
+    }
+
+    /**
+     * 按名字在 {@link Vars#playerGroup} 里找玩家（对应原版 {@code NetClient.sendMessage} 直接拿到的
+     * {@code playersender} 参数）。
+     * <p>本项目聊天包（{@code Packets.ChatMessage}）只带名字，所以只能按名字匹配：先精确比一次，
+     * 再去掉颜色标记比一次（玩家名可自带 {@code [red]} 这类标记，见 {@code PlayerListFragment} 的同款做法）。
+     * <p>⚠ {@code EntityGroup.add()} 是延迟提交，刚建的玩家同一帧可能还不在 {@code all()} 里 → 找不到就返回
+     * null（调用方跳过气泡，原版也有判空）。
+     *
+     * @return 匹配到的玩家；没有返回 null。
+     */
+    private Player findPlayerByName(String name){
+        if(Vars.playerGroup == null || name == null) return null;
+
+        com.badlogic.gdx.utils.Array<Player> players = Vars.playerGroup.all();
+        String stripped = Strings.stripColors(name);
+        for(int i = 0; i < players.size; i++){
+            Player p = players.get(i);
+            if(p == null || p.name == null) continue;
+            if(p.name.equals(name) || Strings.stripColors(p.name).equals(stripped)){
+                return p;
+            }
+        }
+        return null;
     }
 }

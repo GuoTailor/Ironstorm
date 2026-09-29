@@ -124,6 +124,24 @@ public class WaveSpawner{
         return best;
     }
 
+    /**
+     * @return 玩家（非波次阵营）是否站在某个地面出生点的空投区内（对应原版 {@code WaveSpawner.playerNear}）。
+     * <p>⚠ 原版用 {@code groundSpawns.contains(pred)}；本项目该数组是 libgdx {@code Array}（无谓词重载），
+     * 改为下标循环。坐标口径照抄原版：出生点取格坐标 * tilesize（左下角）。
+     */
+    public boolean playerNear(){
+        if(Vars.player == null || Vars.state == null || Vars.state.rules == null) return false;
+
+        for(int i = 0; i < groundSpawns.size; i++){
+            Tile g = groundSpawns.get(i);
+            if(Mathf.dst(g.x * Vars.tilesize, g.y * Vars.tilesize, Vars.player.x, Vars.player.y) < Vars.state.rules.dropZoneRadius
+                && Vars.player.getTeam() != Vars.state.rules.waveTeam){
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** 飞行单位出生方向（只存角度，与原版一致）。 */
     private static class FlyerSpawn{
         float angle;

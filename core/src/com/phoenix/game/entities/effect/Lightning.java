@@ -16,6 +16,9 @@ import static com.phoenix.game.Vars.tilesize;
  * 最小实现：闪电特效。参照 Mindustry mindustry.entities.effect.Lightning 移植。
  */
 public class Lightning{
+    /** 闪电存活帧数（对应原版 {@code Lightning.lifetime}）。供子弹类（如 {@code Bullets.damageLightning}）取用。 */
+    public static final float lifetime = 10f;
+
     private static long lastSeed;
 
     /** 折线闪电特效。data 里存的是段数（Integer）。 */

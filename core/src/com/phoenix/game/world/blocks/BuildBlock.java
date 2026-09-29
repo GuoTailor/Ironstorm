@@ -4,8 +4,10 @@ import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.phoenix.game.Vars;
 import com.phoenix.game.content.Blocks;
 import com.phoenix.game.core.Core;
+import com.phoenix.game.core.Events;
 import com.phoenix.game.core.Time;
 import com.phoenix.game.entities.type.TileEntity;
+import com.phoenix.game.game.EventType;
 import com.phoenix.game.game.Team;
 import com.phoenix.game.math.Mathf;
 import com.phoenix.game.type.ItemStack;
@@ -24,6 +26,9 @@ import static com.phoenix.game.Vars.tilesize;
  * <p>按尺寸分档是因为占位方块必须和目标同尺寸（多格建筑要占满同样多的格子）。
  * <p>未移植：建造粒子（原版 Fx.placeBlock/breakBlock）、进度用的 blockbuild shader
  * （这里退化成按进度给目标贴图加不透明度）、取消/改配置的网络同步。
+ * <p>与原版的差异：{@link #constructed}/{@link #deconstructFinish} 派发 {@link EventType.BlockBuildEndEvent}
+ * 时第 3 个参数固定传 {@code null} —— 原版传的是 {@code playerGroup.getByID(builderID)}，而本项目这两个方法
+ * 没有 {@code builderID} 形参（建造者身份没往下传）。监听方（{@code Control}）只用 {@code e.team}，不影响统计。
  */
 public class BuildBlock extends Block{
     /** 支持的最大尺寸（与原版一致）。 */
@@ -74,9 +79,9 @@ public class BuildBlock extends Block{
 
     /** 详情面板图标同样跟随目标方块（对应原版 {@code BuildBlock.getDisplayIcon}）。 */
     @Override
-    public TextureRegion getDisplayIcon(Tile tile){
+    public TextureRegion[] getDisplayIcons(Tile tile){
         Block target = targetOf(tile);
-        return target != null ? target.getDisplayIcon(tile) : super.getDisplayIcon(tile);
+        return target != null ? target.getDisplayIcons(tile) : super.getDisplayIcons(tile);
     }
 
     /** 实心与否跟随它代表的方块（在建的建筑不该比目标更"实"）。 */
@@ -124,8 +129,9 @@ public class BuildBlock extends Block{
         float cy = tile.worldy() + block.offset() + tilesize / 2f;
 
         Core.batch.setColor(1f, 1f, 1f, alpha);
+        //贴图基准朝向"右"，本项目 rotation 0=上/1=右/2=下/3=左，libgdx 角度逆时针为正，故 (1 - rotation) * 90
         Core.batch.draw(region, cx - size / 2f, cy - size / 2f, size / 2f, size / 2f,
-            size, size, 1f, 1f, block.rotate ? tile.rotation() * 90f : 0f);
+            size, size, 1f, 1f, block.rotate ? (1 - (tile.rotation() & 3)) * 90f : 0f);
         Core.batch.setColor(1f, 1f, 1f, 1f);
     }
 
@@ -158,6 +164,10 @@ public class BuildBlock extends Block{
         if(Vars.isServer()){
             Vars.netServer.broadcastBlockState(tile);
         }
+
+        //建造完成事件（对应原版 Events.fire(new BlockBuildEndEvent(tile, playerGroup.getByID(builderID), team, false))）。
+        //⚠ 本项目没有 builderID 形参 → player 传 null；监听方（Control）只用 e.team，不影响统计
+        Events.fire(new EventType.BlockBuildEndEvent(tile, null, team, false));
     }
 
     /** 拆除完成：清掉这一格。 */
@@ -165,6 +175,11 @@ public class BuildBlock extends Block{
         if(tile == null) return;
         Block block = tile.block();
         float cx = block.centerX(tile), cy = block.centerY(tile);
+
+        //拆除完成事件：必须在 tile.remove() **之前**派发（原版 onDeconstructFinish 也是先发事件再移除）。
+        //⚠ player 传 null 的理由同 constructed()
+        Events.fire(new EventType.BlockBuildEndEvent(tile, null, tile.getTeam(), true));
+
         tile.remove();
         com.phoenix.game.entities.Effects.effect(com.phoenix.game.content.Fx.breakBlock, block.color, cx, cy, block.size);
 
@@ -215,7 +230,7 @@ public class BuildBlock extends Block{
             float maxProgress = checkRequired(inventory, amount, false);
 
             for(int i = 0; i < cblock.requirements.length; i++){
-                int reqamount = cblock.requirements[i].amount;
+                int reqamount = Math.round(costMult() * cblock.requirements[i].amount);
                 accumulator[i] += Math.min(reqamount * maxProgress, reqamount - totalAccumulator[i] + 0.00001f);
                 totalAccumulator[i] = Math.min(totalAccumulator[i] + reqamount * maxProgress, reqamount);
             }
@@ -244,7 +259,7 @@ public class BuildBlock extends Block{
                 float clamped = Math.min(amount, progress);
 
                 for(int i = 0; i < requirements.length; i++){
-                    int reqamount = requirements[i].amount;
+                    int reqamount = Math.round(costMult() * requirements[i].amount);
                     accumulator[i] += Math.min(clamped * refund * reqamount, refund * reqamount - totalAccumulator[i]);
                     totalAccumulator[i] = Math.min(totalAccumulator[i] + reqamount * clamped * refund, reqamount);
 
@@ -274,7 +289,7 @@ public class BuildBlock extends Block{
             if(inventory == null) return maxProgress;
 
             for(int i = 0; i < cblock.requirements.length; i++){
-                int reqamount = cblock.requirements[i].amount;
+                int reqamount = Math.round(costMult() * cblock.requirements[i].amount);
                 int required = (int)accumulator[i];
 
                 if(inventory.get(cblock.requirements[i].item) == 0 && reqamount != 0){
@@ -323,10 +338,17 @@ public class BuildBlock extends Block{
             this.totalAccumulator = new float[previous.requirements.length];
         }
 
-        /** @return 本帧的进度推进量（对应原版 {@code 1f / buildCost * delta * buildPower}）。 */
+        /** @return 本帧的进度推进量（对应原版 {@code 1f / buildCost * delta * buildPower * buildSpeedMultiplier}）。 */
         public float progressStep(float buildPower){
             float cost = buildCost <= 0.01f ? 1f : buildCost;
-            return Time.delta() * buildPower / cost;
+            //建造速度倍率（对应原版 BuilderTrait 里的 * state.rules.buildSpeedMultiplier）
+            float speed = Vars.state == null || Vars.state.rules == null ? 1f : Vars.state.rules.buildSpeedMultiplier;
+            return Time.delta() * buildPower / cost * speed;
+        }
+
+        /** @return 当前建造花费倍率（对应原版 {@code Math.round(state.rules.buildCostMultiplier * amount)} 里的倍率）。 */
+        private float costMult(){
+            return Vars.state == null || Vars.state.rules == null ? 1f : Vars.state.rules.buildCostMultiplier;
         }
 
         @Override

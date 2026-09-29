@@ -16,6 +16,12 @@ import java.util.*;
 public class AssetsAnnotationProcessor extends AbstractProcessor{
     /** Name of the base package to put all the generated classes. */
     private static final String packageName = "io.anuke.mindustry.gen";
+    /**
+     * 音频占位对象（MockSound / MockMusic）所在的包。
+     * <p>不用 libgdx 自带的 {@code com.badlogic.gdx.backends.lwjgl3.audio.mock.*}：那会把整个桌面后端
+     * 拖进 core 的依赖，Android 上 {@code Sounds.<clinit>} 会直接 NoClassDefFoundError。
+     */
+    private static final String MOCK_PACKAGE = "com.phoenix.game.core.";
     private String path;
     private int round;
 
@@ -144,14 +150,14 @@ public class AssetsAnnotationProcessor extends AbstractProcessor{
 
             loadBegin.addStatement("com.phoenix.game.core.Core.assets.load("+filename +", "+rtype+".class)");
 
-            updateBegin.addStatement(name + " = com.phoenix.game.core.Core.assets.get(" + filename + ", com.badlogic.gdx.backends.lwjgl3.audio.mock.Mock" + rtype.substring(rtype.lastIndexOf(".") + 1) + ".class)");
+            updateBegin.addStatement(name + " = com.phoenix.game.core.Core.assets.get(" + filename + ", " + MOCK_PACKAGE + "Mock" + rtype.substring(rtype.lastIndexOf(".") + 1) + ".class)");
             dispose.addStatement(name + ".dispose()");
             dispose.addStatement(name + " = null");
-            type.addField(FieldSpec.builder(ClassName.bestGuess(rtype), name, Modifier.STATIC, Modifier.PUBLIC).initializer("new com.badlogic.gdx.backends.lwjgl3.audio.mock.Mock" + rtype.substring(rtype.lastIndexOf(".") + 1)+ "()").build());
+            type.addField(FieldSpec.builder(ClassName.bestGuess(rtype), name, Modifier.STATIC, Modifier.PUBLIC).initializer("new " + MOCK_PACKAGE + "Mock" + rtype.substring(rtype.lastIndexOf(".") + 1)+ "()").build());
         });
 
         if(classname.equals("Sounds")){
-            type.addField(FieldSpec.builder(ClassName.bestGuess(rtype), "none", Modifier.STATIC, Modifier.PUBLIC).initializer("new com.badlogic.gdx.backends.lwjgl3.audio.mock.Mock" + rtype.substring(rtype.lastIndexOf(".") + 1)+ "()").build());
+            type.addField(FieldSpec.builder(ClassName.bestGuess(rtype), "none", Modifier.STATIC, Modifier.PUBLIC).initializer("new " + MOCK_PACKAGE + "Mock" + rtype.substring(rtype.lastIndexOf(".") + 1)+ "()").build());
         }
 
         type.addMethod(loadBegin.build());

@@ -6,6 +6,7 @@ import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.MulticastSocket;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 
 /**
@@ -87,6 +88,20 @@ public final class Discovery {
                 try{
                     DatagramPacket packet = new DatagramPacket(buf, buf.length);
                     socket.receive(packet);
+
+                    //原版 ArcNetProvider.java:69-74：组播发现用的是 2 字节二进制魔术包，应答是 writeServerData() 的二进制负载。
+                    //本项目保留下面的文本协议（MenuFragment 在用），同时兼容原版二进制包 → Net.discoverServers 才有生产者。
+                    if(packet.getLength() == 2
+                        && packet.getData()[packet.getOffset()] == (byte)0xFE
+                        && packet.getData()[packet.getOffset() + 1] == 0x01){
+                        ByteBuffer data = NetworkIO.writeServerData();
+                        data.position(0);
+                        byte[] out = new byte[data.remaining()];
+                        data.get(out);
+                        socket.send(new DatagramPacket(out, out.length, packet.getAddress(), packet.getPort()));
+                        continue;
+                    }
+
                     String msg = new String(packet.getData(), packet.getOffset(), packet.getLength(), charset).trim();
                     if(!msg.equals(MAGIC)) continue;
 

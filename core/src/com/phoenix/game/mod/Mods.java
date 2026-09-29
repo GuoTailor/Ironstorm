@@ -2,6 +2,7 @@ package com.phoenix.game.mod;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.utils.Array;
+import com.phoenix.game.Vars;
 
 import java.io.File;
 import java.io.InputStream;
@@ -17,6 +18,9 @@ import java.util.function.Consumer;
  * <p>扫描 {@code mods/} 目录下的 {@code .jar}/ {@code .zip}，读取入口描述文件
  * （{@code mod.json}/ {@code plugin.json}）里的 {@code main} 类名，用独立 URLClassLoader 加载并实例化。
  * 实例若是 {@link Plugin} 则标记隐藏（不加入"普通模组"）。脚本/动态内容不在本阶段范围。
+ * <p>T19 追加 {@link #removeMod(LoadedMod)}（删文件 + 从列表移除），消费点见 {@code ui/dialogs/ModsDialog}
+ * 的卡片"移除"按钮；原版的启用/停用（{@code setEnabled}/{@code enabled}）与内容重载（{@code reloadContent}）
+ * 仍缺 —— 没有 reload 机制时停用无实际效果，故不落地。
  */
 public class Mods {
     /** 模组目录（应用本地目录下）。 */
@@ -45,8 +49,7 @@ public class Mods {
     }
 
     /** 加载单个模组文件（jar/zip）。 */
-    public void loadMod(File file) throws Exception {
-        String mainClass = findMainClass(file);
+    public void loadMod(File file) throws Exception {        String mainClass = findMainClass(file);
         if(mainClass == null) return;
 
         URLClassLoader loader = new URLClassLoader(new URL[]{ file.toURI().toURL() }, getClass().getClassLoader());
@@ -58,6 +61,42 @@ public class Mods {
         mods.add(mod);
 
         System.out.println((plugin ? "已加载插件 " : "已加载模组 ") + file.getName() + " (main=" + mainClass + ")");
+    }
+
+    /**
+     * 把模组文件拷进 {@code mods/} 目录（对应原版 {@code Mods.importMod(Fi)}）。
+     * <p>原版只做拷贝、不立即加载（由 {@code mods.requiresReload()} 提示用户重启）；
+     * 本项目没有 reload 机制 → **额外返回拷贝后的文件**，让调用方可以立刻 {@link #loadMod(File)}，
+     * 本次会话即可见（同时因为已落盘，下次启动也会被 {@link #load()} 扫到）。
+     * @return 拷贝到 {@code mods/} 下的目标文件
+     */
+    public File importMod(File file) throws java.io.IOException{
+        File dir = Gdx.files.local(MODS_DIR).file();
+        if(!dir.exists()) dir.mkdirs();
+
+        File dest = new File(dir, file.getName());
+        Files.copy(file.toPath(), dest.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        return dest;
+    }
+
+    /**
+     * 删除一个模组文件并把它从列表移除。对应原版 {@code Mods.removeMod(LoadedMod)}。
+     * <p>原版删完会置 {@code requiresReload = true} 让界面提示重启；本项目没有 reload 机制
+     * → 已加载的类无法从 JVM 卸载，删除同样要**重启后才彻底生效**（文件已删、列表已更新）。
+     * @return 是否删除成功（文件被占用等会返回 false）
+     */
+    public boolean removeMod(LoadedMod mod){
+        File file = mod.file;
+        boolean deleted = file.isDirectory()
+            ? Gdx.files.absolute(file.getAbsolutePath()).deleteDirectory()
+            : file.delete();
+
+        if(!deleted){
+            if(Vars.ui != null) Vars.ui.showErrorMessage("$mod.delete.error");
+            return false;
+        }
+        mods.removeValue(mod, true);
+        return true;
     }
 
     /** 从 jar/zip 内查找入口描述文件的 main 类名。 */

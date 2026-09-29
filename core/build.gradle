@@ -1,6 +1,10 @@
-sourceCompatibility = 21
+//字节码版本由 root build.gradle 的 JavaCompile 配置统一决定（Gradle 9 已移除 project 级 sourceCompatibility）
 [compileJava, compileTestJava]*.options*.encoding = 'UTF-8'
 
 sourceSets.main.java.srcDirs = [ "src/" ]
 
 eclipse.project.name = appName + "-core"
+
+jar {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}

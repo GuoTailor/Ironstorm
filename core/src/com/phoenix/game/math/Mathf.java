@@ -79,6 +79,14 @@ public class Mathf {
         return clamp((f - min) / (max - min));
     }
 
+    /**
+     * 把 f 从 [0,max] 归一化到 [0,1]（超出范围夹住），对应 arc 的 {@code Mathf.curve(f, max)}。
+     * <p>等价于 {@code curve(f, 0f, max)}（原版 Decal/Player 用的就是两参重载）。
+     */
+    public static float curve(float f, float max){
+        return curve(f, 0f, max);
+    }
+
     public static float lerp(float from, float to, float progress){
         return MathUtils.lerp(from, to, progress);
     }
@@ -121,6 +129,11 @@ public class Mathf {
     /** @return a random float between -amount and amount. */
     public static float range(float amount){
         return random(-amount, amount);
+    }
+
+    /** @return a random int between -amount and amount (inclusive)，对应 arc 的 {@code Mathf.range(int)}。 */
+    public static int range(int amount){
+        return random.nextInt(amount * 2 + 1) - amount;
     }
 
     /** @return true with the specified chance (0-1). */
@@ -176,8 +189,46 @@ public class Mathf {
         return (float)Math.sin(x / y) * scl;
     }
 
-    public static float absin(float time, float speed){
-        return absin(time, speed, 1f);
+    /** @return sin(x)，对应 arc 的 Mathf.sin(float)。 */
+    public static float sin(float x){
+        return (float)Math.sin(x);
+    }
+
+    /** @return cos(x)，对应 arc 的 Mathf.cos(float)。 */
+    public static float cos(float x){
+        return (float)Math.cos(x);
+    }
+
+    /** @return cos(x / y)，对应 arc 的 Mathf.cos(x, y)。 */
+    public static float cos(float x, float y){
+        return (float)Math.cos(x / y);
+    }
+
+    /** @return cos(x / y) * scl，对应 arc 的 Mathf.cos(x, y, scl)。 */
+    public static float cos(float x, float y, float scl){
+        return (float)Math.cos(x / y) * scl;
+    }
+
+    /** 角度转弧度，对应 arc 的 Mathf.degRad。 */
+    public static float degRad(float degrees){
+        return degrees * MathUtils.degreesToRadians;
+    }
+
+    /** 弧度转角度，对应 arc 的 Mathf.radDeg。 */
+    public static float radDeg(float radians){
+        return radians * MathUtils.radiansToDegrees;
+    }
+
+    /**
+     * 对应 arc 的 {@code Mathf.absin(scl, mag)}：以 {@code Time.time} 为时间轴的脉动，振幅 {@code mag}、周期 {@code scl}。
+     * <p>⚠ <b>S5b 修正</b>：此前误实现为 {@code absin(time, speed)}（把第一个参数当时间、振幅恒 1）——
+     * 于是所有**照抄原版两参写法**的调用（原版 `Tutorial.java:293`、`ItemLiquidGenerator.java:180`、
+     * `NuclearReactor.java:157`）传入常量 `scl` 后**恒为 0**（脉动消失，例如核反应堆光源半径恒定 90）。
+     * arc 的原意就是"两参版自动取 `Time.time`" → 这里对齐 arc。
+     * <p>需要自定义时间轴时用三参版 {@link #absin(float, float, float)}。
+     */
+    public static float absin(float scl, float mag){
+        return absin(Time.time, scl, mag);
     }
 
     public static float len(float x, float y){
@@ -194,6 +245,11 @@ public class Mathf {
 
     public static float round(float value){
         return MathUtils.round(value);
+    }
+
+    /** 四舍五入到 {@code step} 的整数倍（对应原版 {@code Mathf.round(float, int)}，T4 补）。 */
+    public static int round(float value, int step){
+        return (int)(Math.round(value / step) * step);
     }
 
     public static float floor(float value){

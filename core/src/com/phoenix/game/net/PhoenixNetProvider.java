@@ -12,12 +12,16 @@ import java.io.OutputStream;
 import java.net.BindException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.function.Consumer;
 
 /**
  * Java 阻塞 socket 的网络传输实现。对应原版 ArcNetProvider 的 arc.net 传输层，但替换为纯 JDK。
@@ -27,6 +31,9 @@ import java.util.concurrent.LinkedBlockingQueue;
  * 收到的包统一投递到入站线程安全队列，由主循环顺次派发，保证游戏状态只被单线程修改。
  */
 public class PhoenixNetProvider implements Net.NetProvider {
+    /** 原版 discovery 魔术包：2 字节 {0xFE, 0x01}（原版 ArcNetProvider.java:185 的 new byte[]{-2, 1}）。 */
+    private static final byte[] PING_MAGIC = {(byte)0xFE, 0x01};
+
     private ServerSocket serverSocket;
     private DatagramSocket udpSocket;
     private Socket clientSocket;
@@ -84,6 +91,73 @@ public class PhoenixNetProvider implements Net.NetProvider {
     @Override
     public void disconnectClient(){
         cleanup();
+    }
+
+    /**
+     * 探测单台服务器（对应原版 ArcNetProvider.java:181-200）：后台线程发 2 字节魔术包、收应答，
+     * 再经 {@code Gdx.app.postRunnable} 回主线程回调（本项目惯例，见 MenuFragment:317-320）。
+     */
+    @Override
+    public void pingHost(String address, int port, Consumer<Host> valid, Consumer<Exception> failed){
+        Thread t = new Thread(() -> {
+            try(DatagramSocket socket = new DatagramSocket()){
+                socket.send(new DatagramPacket(PING_MAGIC.clone(), 2, InetAddress.getByName(address), port));
+                socket.setSoTimeout(2000);
+
+                byte[] buf = new byte[512];
+                DatagramPacket packet = new DatagramPacket(buf, buf.length);
+                socket.receive(packet);
+
+                Host host = NetworkIO.readServerData(packet.getAddress().getHostAddress(),
+                    ByteBuffer.wrap(packet.getData(), packet.getOffset(), packet.getLength()));
+
+                com.badlogic.gdx.Gdx.app.postRunnable(() -> valid.accept(host));
+            }catch(Exception e){
+                com.badlogic.gdx.Gdx.app.postRunnable(() -> failed.accept(e));
+            }
+        }, "Net Ping");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /**
+     * 局域网发现（对应原版 ArcNetProvider.java:202-219）：把魔术包发到组播地址，收集 3 秒内的应答。
+     * <p>⚠ 原版用 {@code client.discoverHosts(...)} 并额外判 {@code isLocal}；本项目手写 DatagramSocket，
+     * 只用"地址去重"（未移植 isLocal，见报告 ③）。
+     */
+    @Override
+    public void discoverServers(Consumer<Host> callback, Runnable done){
+        Thread t = new Thread(() -> {
+            List<InetAddress> foundAddresses = new ArrayList<>();
+            try(DatagramSocket socket = new DatagramSocket()){
+                socket.send(new DatagramPacket(PING_MAGIC.clone(), 2,
+                    InetAddress.getByName(com.phoenix.game.Vars.multicastGroup), com.phoenix.game.Vars.multicastPort));
+                socket.setSoTimeout(500);
+
+                long deadline = System.currentTimeMillis() + 3000;
+                byte[] buf = new byte[512];
+                while(System.currentTimeMillis() < deadline){
+                    try{
+                        DatagramPacket packet = new DatagramPacket(buf, buf.length);
+                        socket.receive(packet);
+                        if(foundAddresses.contains(packet.getAddress())) continue;
+                        foundAddresses.add(packet.getAddress());
+
+                        Host host = NetworkIO.readServerData(packet.getAddress().getHostAddress(),
+                            ByteBuffer.wrap(packet.getData(), packet.getOffset(), packet.getLength()));
+                        com.badlogic.gdx.Gdx.app.postRunnable(() -> callback.accept(host));
+                    }catch(java.net.SocketTimeoutException e){
+                        //超时继续等，直到 deadline
+                    }
+                }
+            }catch(Exception e){
+                //原版这里只 printStackTrace，不回调 failed（discoverServers 没有失败回调）
+                e.printStackTrace();
+            }
+            com.badlogic.gdx.Gdx.app.postRunnable(done);
+        }, "Net Discover");
+        t.setDaemon(true);
+        t.start();
     }
 
     @Override
@@ -211,7 +285,18 @@ public class PhoenixNetProvider implements Net.NetProvider {
                 udpSocket.receive(packet);
                 InetSocketAddress addr = new InetSocketAddress(packet.getAddress(), packet.getPort());
                 ServerNetConnection con = udpMap.get(addr);
-                if(con == null) continue; //未注册 UDP 来源，忽略（阶段 3 做注册握手）
+                if(con == null){
+                    //原版 ArcNetProvider.java:69-74：kryonet 的 discovery handler 对 2 字节魔术包回 writeServerData()
+                    //本项目在同一个游戏 UDP 端口上做同样的应答（这样 Net.pingHost(ip, 游戏端口) 才通）
+                    if(isPingPacket(packet)){
+                        ByteBuffer data = NetworkIO.writeServerData();
+                        data.position(0);
+                        byte[] out = new byte[data.remaining()];
+                        data.get(out);
+                        udpSocket.send(new DatagramPacket(out, out.length, packet.getAddress(), packet.getPort()));
+                    }
+                    continue; //未注册 UDP 来源，忽略（阶段 3 做注册握手）
+                }
                 Object obj = PacketSerializer.read(ByteBuffer.wrap(packet.getData(), packet.getOffset(), packet.getLength()));
                 post(con, obj);
             }catch(Exception e){
@@ -219,6 +304,13 @@ public class PhoenixNetProvider implements Net.NetProvider {
                 if(!closed) System.out.println("Server UDP read error: " + e);
             }
         }
+    }
+
+    /** @return 该数据报是否为原版 ping 魔术包（2 字节 {0xFE,0x01}）。 */
+    private static boolean isPingPacket(DatagramPacket packet){
+        return packet.getLength() == 2
+            && packet.getData()[packet.getOffset()] == (byte)0xFE
+            && packet.getData()[packet.getOffset() + 1] == 0x01;
     }
 
     private void clientUdpReadLoop(){

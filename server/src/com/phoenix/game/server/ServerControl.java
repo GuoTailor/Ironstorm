@@ -11,6 +11,7 @@ import com.phoenix.game.core.Events;
 import com.phoenix.game.core.GameState;
 import com.phoenix.game.core.Logic;
 import com.phoenix.game.core.Time;
+import com.phoenix.game.core.Version;
 import com.phoenix.game.core.World;
 import com.phoenix.game.entities.Effects;
 import com.phoenix.game.entities.Units;
@@ -55,6 +56,9 @@ public class ServerControl extends ApplicationAdapter {
     /** headless 启动：初始化单例并启动世界。对应原版 ServerLauncher.init。 */
     @Override
     public void create(){
+        //照原版在启动早期初始化版本信息（本项目 Version.init() 是空实现，字段已在声明处硬编码）
+        Version.init();
+
         //headless 后端提供了 Gdx.app/files/graphics，填充 Core 静态单例（Core 是 arc.Core 的替代层）
         Core.app = Gdx.app;
         Core.graphics = Gdx.graphics;
@@ -66,18 +70,39 @@ public class ServerControl extends ApplicationAdapter {
         Core.atlas = new com.badlogic.gdx.graphics.g2d.TextureAtlas();
 
         //UnitType 构造会读 Core.bundle 做本地化名称（如单位显示名），需要加载 bundle
+        //（bundle 是裁剪过的，必须关掉"缺键抛异常"，否则内容构造会直接抛 MissingResourceException）
+        com.badlogic.gdx.utils.I18NBundle.setExceptionOnMissingKey(false);
         Core.bundle = com.badlogic.gdx.utils.I18NBundle.createBundle(
             Gdx.files.internal("i18n/bundle"), java.util.Locale.getDefault());
 
         Vars.headless = true;
         Vars.loadLocales = false; //headless 不加载本地化，避免依赖资源文件
 
+        //内容定义（Content 框架：ContentLoader 负责创建全部内容并分配 id，
+        //顺序与 ClientLauncher 一致 —— content 必须先于 Vars.init()）
+        Vars.content.createBaseContent();
+        Vars.content.init();
+        Vars.content.load();
+
+        //实体系统 / mod 文件树 / 方块索引（对应原版 Vars.init 里的三处实例化）：
+        //headless 端同样跑完整仿真，且 mods.load() 要用文件树 → 与 ClientLauncher 一样在 Vars.init() 之前建好。
+        //（服务端没有 UI，所以这里只有这三个；Vars.hud / Vars.ui 在服务端本就为 null）
+        //组 id 与原版一致（player/tile/bullet/effect/groundEffect/puddle/shield/fire/unit 共 9 个）
+        Vars.entities = new com.phoenix.game.entities.Entities();
+        Vars.playerGroup = Vars.entities.add(com.phoenix.game.entities.type.Player.class).enableMapping();
+        Vars.entities.add(com.phoenix.game.entities.type.TileEntity.class, false);
+        Vars.entities.add(com.phoenix.game.entities.type.Bullet.class).enableMapping();
+        Vars.entities.add(com.phoenix.game.entities.type.EffectEntity.class, false);
+        Vars.entities.add(com.phoenix.game.entities.traits.DrawTrait.class, false);
+        Vars.puddleGroup = Vars.entities.add(com.phoenix.game.entities.effect.Puddle.class).enableMapping();
+        Vars.entities.add(com.phoenix.game.world.blocks.defense.ForceProjector.ShieldEntity.class, false);
+        Vars.fireGroup = Vars.entities.add(com.phoenix.game.entities.effect.Fire.class).enableMapping();
+        Vars.entities.add(com.phoenix.game.entities.type.BaseUnit.class).enableMapping();
+        Vars.tree = new com.phoenix.game.core.FileTree();
+        Vars.indexer = new com.phoenix.game.ai.BlockIndexer();
+
         //初始化单例：collisions / pathfinder / spawner / saves
         Vars.init();
-
-        //内容定义
-        Blocks.load();
-        new com.phoenix.game.content.UnitTypes().load();
 
         //网络服务端
         Vars.netServer = new com.phoenix.game.core.NetServer();
@@ -211,8 +236,8 @@ public class ServerControl extends ApplicationAdapter {
         }
         //选一张不同于当前名字的地图
         String current = currentMapName();
-        com.phoenix.game.maps.Maps.Map next = null;
-        for(com.phoenix.game.maps.Maps.Map m : Vars.maps.all()){
+        com.phoenix.game.maps.Map next = null;
+        for(com.phoenix.game.maps.Map m : Vars.maps.all()){
             if(!m.name.equals(current)){ next = m; break; }
         }
         if(next == null) next = Vars.maps.all().first();
@@ -227,7 +252,7 @@ public class ServerControl extends ApplicationAdapter {
     }
 
     /** 从指定 Map 读档替换世界（替换后触发世界加载事件与网络重发）。 */
-    private void loadMapFromFile(com.phoenix.game.maps.Maps.Map map){
+    private void loadMapFromFile(com.phoenix.game.maps.Map map){
         try{
             Vars.maps.loadMap(map);
             afterWorldLoad(map.name);
@@ -383,7 +408,7 @@ public class ServerControl extends ApplicationAdapter {
                         break;
                     }
                     System.out.println("可用地图（" + Vars.maps.all().size + "）：");
-                    for(com.phoenix.game.maps.Maps.Map m : Vars.maps.all()){
+                    for(com.phoenix.game.maps.Map m : Vars.maps.all()){
                         System.out.println("  " + m.name);
                     }
                     break;
@@ -391,7 +416,7 @@ public class ServerControl extends ApplicationAdapter {
                 case "exportmap": {
                     try{
                         java.io.File f = Vars.maps.nextMapFile();
-                        com.phoenix.game.maps.Maps.Map m = Vars.maps.exportCurrent(f);
+                        com.phoenix.game.maps.Map m = Vars.maps.exportCurrent(f);
                         System.out.println("已导出地图 " + m.name + " -> " + f);
                     }catch(Exception e){
                         System.err.println("导出地图失败: " + e);
@@ -460,7 +485,7 @@ public class ServerControl extends ApplicationAdapter {
                         System.out.println("用法: load <mapname>");
                         break;
                     }
-                    com.phoenix.game.maps.Maps.Map m = Vars.maps.byName(parts[1]);
+                    com.phoenix.game.maps.Map m = Vars.maps.byName(parts[1]);
                     if(m == null){
                         System.out.println("未找到地图: " + parts[1] + "（先 exportmap 或用 maps 查看）");
                         break;

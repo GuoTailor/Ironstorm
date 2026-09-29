@@ -62,7 +62,8 @@ public class Door extends Wall{
         public void update(){
             //有友方单位贴到门口就开门（原版由玩家点击切换）
             boolean near = false;
-            float cx = tile.worldx() + tilesize / 2f, cy = tile.worldy() + tilesize / 2f;
+            //用方块几何中心：door-large 是 2×2，只取锚点瓦片中心会偏半格
+            float cx = this.cx(), cy = this.cy();
             float range = tilesize * 1.5f;
 
             for(int i = 0; i < Units.units.size; i++){

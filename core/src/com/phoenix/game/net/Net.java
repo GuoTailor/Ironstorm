@@ -88,6 +88,16 @@ public class Net {
         active = false;
     }
 
+    /** 探测单台服务器（对应原版 Net.java:276-278）。 */
+    public void pingHost(String address, int port, Consumer<Host> valid, Consumer<Exception> failed){
+        provider.pingHost(address, port, valid, failed);
+    }
+
+    /** 局域网发现（对应原版 Net.java:173-175）。 */
+    public void discoverServers(Consumer<Host> callback, Runnable done){
+        provider.discoverServers(callback, done);
+    }
+
     public void disconnect(){
         provider.disconnectClient();
         server = false;
@@ -239,6 +249,12 @@ public class Net {
 
         /** 客户端断开。 */
         void disconnectClient();
+
+        /** 探测单台服务器（对应原版 NetProvider.pingHost，原版 Net.java:330）。 */
+        void pingHost(String address, int port, Consumer<Host> valid, Consumer<Exception> failed);
+
+        /** 局域网发现（对应原版 NetProvider.discoverServers，原版 Net.java:327）。 */
+        void discoverServers(Consumer<Host> callback, Runnable done);
 
         /** 服务端监听端口。 */
         void hostServer(int port) throws IOException;

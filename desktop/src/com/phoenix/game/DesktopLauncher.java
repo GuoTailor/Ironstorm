@@ -18,8 +18,11 @@ public class DesktopLauncher {
 		config.setForegroundFPS(60);
 		config.setTitle("phoenix");
 		//窗口尺寸与 Mindustry 桌面端一致：默认 900x700，启动时最大化
-		config.setWindowedMode(DesktopInput.defaultWidth, DesktopInput.defaultHeight);
-		config.setMaximized(true);
+		//调试钩子：PHOENIX_MOBILE_PORTRAIT=1 时以手机竖屏窗口启动（480x800、不最大化），
+		//配合 PHOENIX_MOBILE=1 验证移动端竖屏布局。窗口尺寸必须在 GL 初始化前定好 —— 所以放在这里而不是 ClientLauncher。
+		boolean portrait = System.getenv("PHOENIX_MOBILE_PORTRAIT") != null;
+		config.setWindowedMode(portrait ? 480 : DesktopInput.defaultWidth, portrait ? 800 : DesktopInput.defaultHeight);
+		config.setMaximized(!portrait);
 		config.setResizable(true);
 		//Mindustry 的窗口配置里 depth / stencil 都是 0
 		config.setBackBufferConfig(8, 8, 8, 8, 0, 0, 0);

@@ -17,44 +17,124 @@ import static com.phoenix.game.Vars.tilesize;
 
 /**
  * 最小实现：地图/世界。参照 Mindustry mindustry.core.World 移植。
- * 目前支持程序化生成地图、瓦片查询与射线遍历，暂不支持存档读写。
+ * 目前支持程序化生成地图、瓦片查询与射线遍历；存档读写由 {@link com.phoenix.game.io.SaveIO} 负责（自有 PHNX 格式）。
  */
 public class World {
     public Tile[] tiles = {};
     public int width, height;
     private boolean generating;
 
-    /** 程序化生成一张地图。 */
+    /** 当前加载的地图；程序化生成的图没有 Map 对象，保持 null（对应原版 {@code World.currentMap}，原版 World.java:27）。 */
+    private com.phoenix.game.maps.Map currentMap;
+
+    /** @return 当前地图；程序化生成的图为 null（对应原版 {@code World.getMap()}，原版 World.java:61-63）。 */
+    public com.phoenix.game.maps.Map getMap(){
+        return currentMap;
+    }
+
+    /** 设置当前地图（对应原版 {@code World.setMap(Map)}，原版 World.java:65-67）。 */
+    public void setMap(com.phoenix.game.maps.Map map){
+        this.currentMap = map;
+    }
+
+    /** 程序化生成一张地图（内部走 {@link #createTiles} + {@link #generateTerrain}）。 */
     public void createMap(int width, int height){
         generating = true;
-        this.width = width;
-        this.height = height;
-        this.tiles = new Tile[width * height];
+        Tile[][] grid = createTiles(width, height);
+        generateTerrain(grid, width, height);
+        generating = false;
+        rebuildPowerGraphs();
+    }
 
-        for(int y = 0; y < height; y++){
-            for(int x = 0; x < width; x++){
+    /**
+     * 建立 w×h 的空瓦片网格（对应原版 {@code World.createTiles}）。
+     * <p>本项目的一维 {@link #tiles} 是权威存储，二维网格是**同一批 Tile 对象的视图**；
+     * 生成器若在 {@code generate} 里 {@code new Tile(...)} 替换对象，必须由
+     * {@link #endMapLoad(Tile[][])} 展平回一维（{@code Generator} 类注释已预告这一点）。
+     * @return 二维视图（索引一律 {@code grid[x][y]}，与原版 {@code Generator.generate(Tile[][])} 的契约一致）
+     */
+    public Tile[][] createTiles(int w, int h){
+        this.width = w;
+        this.height = h;
+        this.tiles = new Tile[w * h];
+
+        Tile[][] grid = new Tile[w][h];
+        for(int x = 0; x < w; x++){
+            for(int y = 0; y < h; y++){
                 Tile tile = new Tile(x, y);
-                Floor floor = floorAt(x, y);
-                tile.setFloor(floor);
+                grid[x][y] = tile;
+                tiles[y * w + x] = tile;
+            }
+        }
+        return grid;
+    }
+
+    /** 生成前：挂起逐瓦片通知（对应原版 {@code World.beginMapLoad}）。 */
+    public void beginMapLoad(){
+        generating = true;
+    }
+
+    /**
+     * 生成后收尾（对应原版 {@code World.endMapLoad}）：把二维网格展平回一维 {@link #tiles} 并重建电网。
+     * <p>⚠ <b>必须先展平</b>：{@code BasicGenerator} 系列会 {@code tiles[x][y] = new Tile(...)} **替换对象**，
+     * 一维数组里的旧引用就失效了。
+     * <p>原版还会在这里做 {@code prepareTiles}（铺多格 BlockPart）/遮蔽/实体组 resize；本项目这些由
+     * {@code Tile.setBlock} 自身与各系统在 {@code WorldLoadEvent} 里完成，故只保留展平 + 电网重建。
+     */
+    public void endMapLoad(Tile[][] grid){
+        for(int x = 0; x < width; x++){
+            for(int y = 0; y < height; y++){
+                tiles[y * width + x] = grid[x][y];
+            }
+        }
+        generating = false;
+        rebuildPowerGraphs();
+    }
+
+    /**
+     * 用生成器加载一张地图（对应原版 {@code World.loadGenerator(Generator)}）。
+     * <p>顺序照原版逐字：{@code beginMapLoad} → {@code createTiles(w, h)} → {@code generator.generate(grid)} → {@code endMapLoad}。
+     */
+    public void loadGenerator(com.phoenix.game.maps.generators.Generator generator){
+        beginMapLoad();
+        Tile[][] grid = createTiles(generator.width, generator.height);
+        generator.generate(grid);
+        endMapLoad(grid);
+    }
+
+    /**
+     * 本项目的地形生成：边界墙 + 零星岩壁 + 矿脉 + 出生点。
+     * <p>原版这一步由各 {@code Generator} 子类负责（`MapGenerator` 是"加载内置 .msav"）；
+     * 本项目读不了原版 `.msav`（见 转换.md 324）→ 把 {@code createMap} 原有的程序化生成抽到这里，
+     * 供 {@link #createMap} 与 {@code MapGenerator} 的退化分支共用。
+     * <p>⚠ 会同时填 {@code grid} 与一维 {@link #tiles}（两者共享同一批对象）。
+     */
+    public void generateTerrain(Tile[][] grid, int w, int h){
+        this.width = w;
+        this.height = h;
+        if(this.tiles.length != w * h) this.tiles = new Tile[w * h];
+
+        for(int y = 0; y < h; y++){
+            for(int x = 0; x < w; x++){
+                Tile tile = grid[x][y] != null ? grid[x][y] : new Tile(x, y);
+                grid[x][y] = tile;
+                tiles[y * w + x] = tile;
+
+                tile.setFloor(floorAt(x, y));
 
                 //边界墙：原版拿 darkMetal 当地图边缘（实心、不可拆），顺便防止单位跑出地图
-                if(x == 0 || y == 0 || x == width - 1 || y == height - 1){
+                if(x == 0 || y == 0 || x == w - 1 || y == h - 1){
                     tile.setBlock(Blocks.darkMetal);
                 }else if(wallAt(x, y)){
                     //零星的自然岩壁：种类与所在地表匹配（对应原版按生物群系挑 StaticWall）
-                    Block rock = rockFor(floor);
+                    Block rock = rockFor(tile.floor());
                     if(rock != null) tile.setBlock(rock);
                 }
-
-                tiles[y * width + x] = tile;
             }
         }
 
         generateOres();
         placeSpawnPoints();
-
-        generating = false;
-        rebuildPowerGraphs();
     }
 
     /**
@@ -137,7 +217,11 @@ public class World {
         if(n < 0.60f) return Blocks.grass;
         if(n < 0.74f) return Blocks.stone;
         if(n < 0.86f) return Blocks.darksand;
-        return Blocks.shale;
+        if(n < 0.92f) return Blocks.shale;
+        //测试图的热源带：原版热源地板是 hotrock（shale 只带油、不带地热）。
+        //此前用「给 shale 加热」占位，T5 已按原版撤掉占位 → 这里补一条 hotrock 带，
+        //保证地热发电机在测试图上仍可验证（而不是靠污染的 shale 属性）。
+        return Blocks.hotrock;
     }
 
     /** 少量散布的岩壁。 */
@@ -171,6 +255,14 @@ public class World {
 
     public Tile tile(int x, int y){
         if(x < 0 || y < 0 || x >= width || y >= height) return null;
+        return tiles[y * width + x];
+    }
+
+    /**
+     * 不做越界检查的瓦片取用（对应原版 {@code World.rawTile(int,int)}，原版 World.java:104-106 是 {@code tiles[x][y]}）。
+     * <p>⚠ 本项目一维存储的索引是 {@code y * width + x}；**刻意不加越界守卫**（与原版一致，调用方自负责）。
+     */
+    public Tile rawTile(int x, int y){
         return tiles[y * width + x];
     }
 
@@ -221,6 +313,20 @@ public class World {
         return generating;
     }
 
+    /** @return 本局是否属于某个战役区域（对应原版 {@code World.isZone()}）。 */
+    public boolean isZone(){
+        return getZone() != null;
+    }
+
+    /**
+     * @return 本局对应的战役区域（对应原版 {@code World.getZone()}，实现就是 {@code state.rules.zone}）。
+     * <p>注意本项目 {@code state} 是 {@link Vars#state} 的静态字段，规则重置时 {@code rules} 会被整体替换
+     * （{@code Control.play()} 里 {@code Vars.state.rules = new Rules()}）→ 这里必须每次现读，不能缓存。
+     */
+    public com.phoenix.game.type.Zone getZone(){
+        return Vars.state == null || Vars.state.rules == null ? null : Vars.state.rules.zone;
+    }
+
     /**
      * 批量加载/生成期间挂起逐瓦片通知（对应原版 WorldContext.begin/end 的 generating 标记）。
      * <p>读档时先打开，逐格 setBlock 才不会触发 O(瓦片数²) 的电网重建与寻路网格刷新；
@@ -239,6 +345,9 @@ public class World {
                 tile.entity.updateTimeScale();
                 //先刷新消耗状态：方块逻辑要用 cons.valid() 判断能否工作
                 if(tile.entity.cons != null) tile.entity.cons.update();
+                //液体模块的每帧平滑（对应原版 TileEntity.update 里的 liquids.update()）：
+                //本项目 liquids.update() 此前从未被调用 → smoothLiquid 恒为 0（Conduit/LiquidBlock 的液面绘制失真）
+                if(tile.entity.liquids != null) tile.entity.liquids.update();
                 tile.entity.update();
             }
         }

@@ -33,6 +33,15 @@ public class Units {
     }
 
     /**
+     * 玩家能否操作该瓦片上的建筑（对应原版 {@code Units.canInteract(Player, Tile)}）：
+     * 玩家/瓦片为空视为可操作，否则要求瓦片对玩家阵营可互通（同队）。
+     * <p>消费点：{@code world.blocks.logic.MessageBlock.setMessageBlockText} 的权限校验。
+     */
+    public static boolean canInteract(com.phoenix.game.entities.type.Player player, Tile tile){
+        return player == null || tile == null || tile.interactable(player.getTeam());
+    }
+
+    /**
      * Validates a target.
      * @return whether the target is invalid
      */

@@ -127,11 +127,16 @@ public class MinimapRenderer implements Disposable{
             float rx = !withLabels ? (unit.x - rect.x) / rect.width * w : unit.x / (Vars.world.unitWidth()) * w;
             float ry = !withLabels ? (unit.y - rect.y) / rect.width * h : unit.y / (Vars.world.unitHeight()) * h;
 
+            //贴图缺失的单位（图集里没有该单位名的 region）图标取不到，直接跳过：
+            //世界渲染器 GroundUnit.draw() 对 null region 也是跳过（单位隐形），小地图必须同样防御，否则 Draw.rect NPE
+            TextureRegion icon = unit.getIconRegion();
+            if(icon == null) continue;
+
             //原版用 Draw.mixcol(team.color, 1f) 把单位图标染成阵营色（arc 的 mixcol 是整体替换色）；
             //phoenix 的 Draw 没有 mixcol，用 libgdx 的 batch.setColor 做同等的染色
             Core.batch.setColor(unit.getTeam().color);
             float scale = Scl.scl(1f) / 2f * scaling * 32f;
-            Draw.rect(unit.getIconRegion(), x + rx, y + ry, scale, scale, unit.rotation - 90);
+            Draw.rect(icon, x + rx, y + ry, scale, scale, unit.rotation - 90);
             Core.batch.setColor(Color.WHITE);
 
             if(withLabels && unit.isPlayer){
@@ -219,7 +224,9 @@ public class MinimapRenderer implements Disposable{
 
     /**
      * 取瓦片的小地图颜色（对应原版 {@code MinimapRenderer.colorFor}）。
-     * <p>原版还会按 {@code block.cacheLayer == CacheLayer.walls} 用朝向压暗；phoenix 没有 CacheLayer，省略该步。
+     * <p>原版还会按 {@code block.cacheLayer == CacheLayer.walls} 用朝向压暗；本项目 {@code graphics/CacheLayer}
+     * 类<b>存在</b>（enum，water/tar/normal/walls 四层），但 {@code Block} 没有 {@code cacheLayer} 字段
+     * （{@code beginShader/endShader} 仍是 TODO 空壳）→ 省略该步。
      */
     private int colorFor(Tile tile){
         if(tile == null) return 0;

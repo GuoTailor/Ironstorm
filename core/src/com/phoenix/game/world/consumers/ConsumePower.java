@@ -34,10 +34,39 @@ public class ConsumePower extends Consume{
         return entity.power == null ? 1f : entity.power.status;
     }
 
+    /**
+     * @return 本方块本帧申请的电量（对应原版 {@code ConsumePower.requestedPower}）。
+     * <p>储能型按"还差多少充满"申请；直接耗电型按 {@code shouldConsume} 决定本帧要不要申请
+     * （不生产时不占电网需求，与原版一致）。
+     * <p>调用点：{@code Block.getPowerNeeded(Tile)} —— 即 {@code PowerGraph} 每帧统计耗电的入口。
+     * <p>⚠ 本项目的电池充放电由 {@code PowerGraph} 单独处理，所以 {@code Block.getPowerNeeded}
+     * 只会用到非储能分支；储能分支保留以对齐原版（供未来 PowerGraph 收敛用）。
+     */
+    public float requestedPower(TileEntity entity){
+        if(entity == null || entity.tile == null) return 0f;
+        if(buffered){
+            return (1f - status(entity)) * capacity;
+        }else{
+            return usage * (entity.block().shouldConsume(entity.tile) ? 1f : 0f);
+        }
+    }
+
     @Override
     public boolean valid(TileEntity entity){
         //储能型不参与"能否工作"的判定
         if(buffered) return true;
         return status(entity) > 0.0001f;
+    }
+
+    @Override
+    public void display(com.phoenix.game.world.meta.BlockStats stats){
+        //储能型显示"能量容量"，耗电型显示"能量使用"（每秒 = 每帧 × 60，对应原版 usage * 60f）
+        if(buffered){
+            stats.add(com.phoenix.game.world.meta.BlockStat.powerCapacity, capacity,
+                com.phoenix.game.world.meta.StatUnit.none);
+        }else{
+            stats.add(com.phoenix.game.world.meta.BlockStat.powerUse, usage * 60f,
+                com.phoenix.game.world.meta.StatUnit.powerSecond);
+        }
     }
 }

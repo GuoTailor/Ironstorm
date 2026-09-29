@@ -2,6 +2,7 @@ package com.phoenix.game.world.blocks.sandbox;
 
 import com.phoenix.game.entities.type.TileEntity;
 import com.phoenix.game.world.Block;
+import com.phoenix.game.world.meta.BuildVisibility;
 
 /**
  * 电力虚空（沙盒）。参照 Mindustry mindustry.world.blocks.sandbox.PowerVoid 移植：把电网里多余的电吃掉。
@@ -16,7 +17,9 @@ public class PowerVoid extends Block{
 
     public PowerVoid(String name){
         super(name);
-        sandboxOnly = true;
+        //沙盒可见性（对应原版 Blocks.java:1829 requirements(Category.power, BuildVisibility.sandboxOnly, ...)；
+        //类别/解锁在 content.Blocks 里设）。T2 批：替代原先的 sandboxOnly 布尔补丁。
+        buildVisibility = BuildVisibility.sandboxOnly;
         update = true;
         solid = true;
         destructible = true;

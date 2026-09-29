@@ -12,6 +12,9 @@ public class Statuses{
     /** 最多同时存在的状态数量 */
     public static final int maxEffects = 8;
 
+    /** 状态转移结算的临时对象（对应原版 {@code globalResult}）。 */
+    private static final StatusEntry globalResult = new StatusEntry();
+
     private final Array<StatusEntry> effects = new Array<>();
 
     public void clear(){
@@ -32,14 +35,25 @@ public class Statuses{
         }
     }
 
-    /** 施加状态（已存在则取时间更长的那个）。 */
+    /** 施加状态（已存在则取时间更长的那个；与已有状态"相克"时走转移结算）。 */
     public void handleApply(BaseUnit unit, StatusEffect effect, float duration){
-        if(effect == null || effect == com.phoenix.game.content.StatusEffects.none) return;
+        if(effect == null || effect == com.phoenix.game.content.StatusEffects.none || unit.isImmune(effect)) return;
 
         for(StatusEntry entry : effects){
             if(entry.effect == effect){
+                //同种状态：延长到较长时长
                 if(duration > entry.time){
                     entry.time = duration;
+                }
+                return;
+            }else if(entry.effect.reactsWith(effect)){
+                //相克状态：交给转移处理器决定结果（可能保留原状态、换成新状态或第三种状态）
+                globalResult.effect = entry.effect;
+                entry.effect.getTransition(unit, effect, entry.time, duration, globalResult);
+                entry.time = globalResult.time;
+
+                if(globalResult.effect != entry.effect){
+                    entry.effect = globalResult.effect;
                 }
                 return;
             }

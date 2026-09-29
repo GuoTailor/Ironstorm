@@ -11,6 +11,9 @@ public class ServerLauncher {
 
     /** 服务端入口。所有参数透传给 {@link ServerControl}。 */
     public static void main(String[] args){
+        //照原版在启动早期初始化版本信息（本项目 Version.init() 是空实现，字段已在声明处硬编码）
+        com.phoenix.game.core.Version.init();
+
         //headless 后端不渲染，World/Logic/单位/子弹等纯逻辑照常 tick
         new HeadlessApplication(new ServerControl(args));
     }

@@ -1,5 +1,7 @@
 package com.phoenix.game.ui.fragments;
 import com.phoenix.game.game.EventType;
+import com.phoenix.game.ui.Label;
+import com.phoenix.game.ui.MobileButton;
 import com.phoenix.game.ui.Styles;
 
 
@@ -27,10 +29,32 @@ public class MenuFragment extends Fragment {
     private Table container, submenu;
     private Button currentMenu;
     private WidgetGroup group;
+    /** 主菜单背景渲染器（懒创建，见 {@link #renderer()}）。 */
+    private com.phoenix.game.graphics.MenuRenderer menuRenderer;
 
     public MenuFragment() {
         Core.assets.load("sprites/logo.png", Texture.class);
         Core.assets.finishLoading();
+    }
+
+    /**
+     * 主菜单背景渲染器（对应原版 {@code MenuFragment} 里 `parent.fill((x,y,w,h) -> renderer.render())` 用的
+     * {@code renderer} 字段）。
+     * <p>⚠ <b>必须懒创建</b>：本 Fragment 的构造发生在**内容加载之前**
+     * （{@code ClientLauncher} 里 {@code new MenuFragment()} 早于 {@code Vars.content.load()}），
+     * 而 {@code MenuRenderer} 的构造要用 {@code Blocks}/{@code UnitTypes}（那时还是 null）→ 会崩。
+     */
+    public com.phoenix.game.graphics.MenuRenderer renderer(){
+        if(menuRenderer == null) menuRenderer = new com.phoenix.game.graphics.MenuRenderer();
+        return menuRenderer;
+    }
+
+    /** 释放菜单背景占用的 FBO（对应原版 {@code MenuFragment.dispose()}）。 */
+    public void dispose(){
+        if(menuRenderer != null){
+            menuRenderer.dispose();
+            menuRenderer = null;
+        }
     }
 
     /** 隐藏整个菜单（进入游戏时调用）。 */
@@ -66,8 +90,24 @@ public class MenuFragment extends Fragment {
 
         container = table;
 
-        buildDesktop();
-        Events.on(EventType.ResizeEvent.class, event -> buildDesktop());
+        //桌面/移动端布局二选一（原版是 if(!mobile) buildDesktop() else buildMobile()）：
+        //Vars.mobile 由 Vars.init() 按平台算好，启动后不再变
+        if(!Vars.mobile){
+            buildDesktop();
+            Events.on(EventType.ResizeEvent.class, event -> buildDesktop());
+        }else{
+            buildMobile();
+            Events.on(EventType.ResizeEvent.class, event -> buildMobile());
+        }
+
+        //移动端专属角落按钮（对应原版 build() 里的 if(mobile) 段）：
+        //  parent.fill(c -> c.bottom().left().addButton("", Styles.infot, ui.about::show).size(84, 45))
+        //本项目没有 arc 的 Parent.fill(Cons)/addButton → 自建整屏 Table + TextButton + ClickListener。
+        //原版紧随其后的 else if(becontrol.active()) 更新提示按钮：本项目没有 becontrol → 不移植。
+        if(Vars.mobile){
+            addCornerButton(Styles.infot, Align.bottomLeft, () -> ui(u -> u.about.show()));
+            addCornerButton(Styles.discordt, Align.bottomRight, () -> ui(u -> u.discord.show()));
+        }
 
         String versionText = "[#fc8140aa]custom build 0";
 
@@ -93,6 +133,99 @@ public class MenuFragment extends Fragment {
         actor.setTouchable(Touchable.disabled);
     }
 
+    /**
+     * 移动端菜单布局（对应原版 MenuFragment.buildMobile()）。
+     * 120f 方形图标按钮：横屏两行（4 + 4，第二行嵌套 Table、colspan(4)），竖屏 2 列 × 4 行（末尾嵌套 Table 2 个、colspan(2)）。
+     */
+    private void buildMobile(){
+        container.clear();
+        container.setSize(Core.graphics.getWidth(), Core.graphics.getHeight());
+
+        float size = 120f;
+        container.defaults().size(size).pad(5).padTop(4f);
+
+        //文案必须显式 Core.bundle.get(键)：原版 MobileButton 收 "$campaign" 这类串、靠 arc 的 Table.add(String)
+        //自动解析 bundle，本项目的 MobileButton 是 new Label(text, ...)、一个字都不解析（传 "$campaign" 会显示 ???campaign???）。
+        //图标沿用桌面端已确立的替代约定（原版的 icon font 管线未移植，见 buildDesktop 里 mods 的注释）：
+        //  rightOpenOut(自定义游戏)→Icon.terrain、download(载入游戏)→Icon.load、book(模组)→Icon.folder。
+        //原版的 checkPlay(...) 包裹（mod 内容出错时拦截）本项目没有 → 直接调动作。
+        MobileButton
+            play   = new MobileButton(Icon.play,     Core.bundle.get("campaign"),   () -> { hide(); ui(u -> u.deploy.show()); }),
+            custom = new MobileButton(Icon.terrain,  Core.bundle.get("customgame"), () -> ui(u -> u.custom.show())),
+            maps   = new MobileButton(Icon.load,     Core.bundle.get("loadgame"),   this::showLoadDialog),
+            join   = new MobileButton(Icon.add,      Core.bundle.get("joingame"),   this::showJoinDialog),
+            editor = new MobileButton(Icon.terrain,  Core.bundle.get("editor"),     () -> ui(u -> u.maps.show())),
+            tools  = new MobileButton(Icon.settings, Core.bundle.get("settings"),   () -> ui(u -> u.settings.show())),
+            mods   = new MobileButton(Icon.folder,   Core.bundle.get("mods"),       () -> ui(u -> u.mods.show())),
+            exit   = new MobileButton(Icon.exit,     Core.bundle.get("quit"),       Core.app::exit);
+        //注：原版的 donate(website) 按钮在 126.2 里创建了却从没被 add（那行被注释掉）→ 不建，避免死变量
+
+        if(!isPortrait()){
+            //⚠ 适配：arc 的 Table.marginTop(N) 是"把整块内容下移 N"；libgdx 的 Table **没有 margin**，
+            //  改用 padTop(N)——居中布局下它把内容区上边收 N，内容实际下移 N/2（这里 30）。
+            //  视觉作用相同（给顶部 logo 让位），不再精算那 30px。
+            container.padTop(60f);
+            container.add(play);
+            container.add(join);
+            container.add(custom);
+            container.add(maps);
+            container.row();
+
+            //原版是 container.table(table -> { table.defaults().set(container.defaults()); ... }).colspan(4)：
+            //  arc 的 Table.table(Cons) 本项目没有 → 显式 new Table()；arc 的 Cell.set(Cell) 在 libgdx 里是
+            //  包级私有（Cell.java:934 void set(Cell)）→ 在嵌套表上把同样的 defaults 显式重写一遍
+            Table inner = new Table();
+            inner.defaults().size(size).pad(5).padTop(4f);
+            inner.add(editor);
+            inner.add(tools);
+            inner.add(mods);
+            inner.add(exit);
+            container.add(inner).colspan(4);
+        }else{
+            //原版这里写 marginTop(0f)（竖屏本来就有 4 行、不需要额外让位）→ 本项目不设 padTop 即为 0
+            container.add(play);
+            container.add(maps);
+            container.row();
+            container.add(custom);
+            container.add(join);
+            container.row();
+            container.add(editor);
+            container.add(tools);
+            container.row();
+
+            Table inner = new Table();
+            inner.defaults().size(size).pad(5).padTop(4f);
+            inner.add(mods);
+            inner.add(exit);
+            container.add(inner).colspan(2);
+        }
+    }
+
+    /**
+     * 移动端角落按钮：整屏 {@link Table}（{@code setFillParent(true)}）+ 单个按钮，按 {@code align} 贴角。
+     * 对应原版 {@code parent.fill(c -> c.bottom().left().addButton("", style, action).size(84, 45))}
+     * （{@code Align.bottomLeft} 即 libgdx 的 {@code table.bottom().left()}）。
+     */
+    private void addCornerButton(TextButton.TextButtonStyle style, int align, Runnable action){
+        Table corner = new Table();
+        corner.setFillParent(true);
+        corner.align(align);
+        TextButton button = new TextButton("", style);
+        button.addListener(new ClickListener(){
+            @Override
+            public void clicked(InputEvent event, float x, float y){
+                action.run();
+            }
+        });
+        corner.add(button).size(84f, 45f);
+        group.addActor(corner);
+    }
+
+    /** @return 是否竖屏（对应 arc 的 {@code Core.graphics.isPortrait()}，libgdx 的 Graphics 没有该方法）。 */
+    private static boolean isPortrait(){
+        return Core.graphics.getHeight() > Core.graphics.getWidth();
+    }
+
     private void buildDesktop() {
         container.clear();
         container.setSize(Core.graphics.getWidth(), Core.graphics.getHeight());
@@ -110,20 +243,31 @@ public class MenuFragment extends Fragment {
 
         buttons(table,
                 new Buttoni("play", Icon.play2,
-                        new Buttoni("campaign", Icon.play2, () -> {
-                            // 隐藏菜单并加载地图，进入战役模式
-                            hide();
-                            Vars.control.play();
-                        }),
-                        new Buttoni("joingame", Icon.add, this::showJoinDialog),
-                        new Buttoni("customgame", Icon.editor, () -> {}),
-                        new Buttoni("loadgame", Icon.load, this::showLoadDialog)
-                ),
-                new Buttoni("editor", Icon.editor, () -> {}),
-                new Buttoni("settings", Icon.tools, () -> {}),
-                new Buttoni("about.button", Icon.info, () -> {
-                    System.out.println("about.button===========");
+                new Buttoni("campaign", Icon.play2, () -> {
+                    //原版主菜单的"战役"打开区域选择界面（DeployDialog），而不是直接进程序生成图；
+                    //本项目的程序生成图入口保留为调试用（PHOENIX_AUTOPLAY 走 Vars.control.play()）
+                    hide();
+                    ui(u -> u.deploy.show());
                 }),
+                        new Buttoni("joingame", Icon.add, this::showJoinDialog),
+                        new Buttoni("customgame", Icon.terrain, () -> ui(u -> u.custom.show())),
+                        new Buttoni("loadgame", Icon.load, this::showLoadDialog),
+                        //教程入口（对应原版 new Buttoni("$tutorial", Icon.info, () -> checkPlay(control::playTutorial))；
+                        //原版 checkPlay 是 mod 内容出错时拦截，本项目 mods 无内容校验 → 直接进）
+                        new Buttoni("tutorial", Icon.info, () -> {
+                            hide();
+                            if(Vars.control != null) Vars.control.playTutorial();
+                        })
+                ),
+                new Buttoni("editor", Icon.terrain, () -> ui(u -> u.maps.show())),
+                //刻意降级：原版 mods 用的是 Icon.bookOpen（移动端还有 Icon.book），这两个图标来自
+                //  **icon font** —— 原版 core/assets-raw/fontgen/icons/book.svg 由 iconfont 生成字形，
+                //  再用 Fonts.getGlyph(Fonts.icon, ...) 取（见原版生成的 Icon.java）。
+                //  本项目整条 fontgen 图标字体管线未移植（连 core/assets-raw/fontgen/ 目录都没有），
+                //  Icon 只由 assets-raw/sprites/ui/icons/*.png 生成，没有 book/bookOpen → 用语义最近的 Icon.folder
+                new Buttoni("mods", Icon.folder, () -> ui(u -> u.mods.show())),
+                new Buttoni("settings", Icon.settings, () -> ui(u -> u.settings.show())),
+                new Buttoni("about.button", Icon.info, () -> ui(u -> u.about.show())),
                 new Buttoni("quit", Icon.exit, Core.app::exit)
         );
 
@@ -145,6 +289,15 @@ public class MenuFragment extends Fragment {
         submenu.clearActions();
         submenu.addAction(Actions.sequence(Actions.alpha(1f, 0.15f, Interpolation.fade)));
         System.out.println("fadeInMenu");
+    }
+
+    /**
+     * 打开 {@code Vars.ui} 上的某个对话框（对应原版菜单按钮里的 {@code ui.settings::show} 等）。
+     * <p>{@code Vars.ui} 由启动器在 {@code content.load()} 之后构造；这里加一层空守卫，
+     * 免得将来有人在 UI 就绪前点到菜单按钮时 NPE。
+     */
+    private static void ui(com.phoenix.game.func.Cons<com.phoenix.game.core.UI> action){
+        if(Vars.ui != null) action.get(Vars.ui);
     }
 
     /** 弹出读档对话框（与 HUD 共用同一实现；读档前先把菜单隐藏掉）。 */

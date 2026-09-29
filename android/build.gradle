@@ -1,7 +1,7 @@
 android {
     namespace "com.phoenix.game"
-    buildToolsVersion "33.0.2"
-    compileSdkVersion 33
+    //不指定 buildToolsVersion，交给 AGP 按 compileSdk 选（对齐 gdx_demo）
+    compileSdk 36
     sourceSets {
         main {
             manifest.srcFile 'AndroidManifest.xml'
@@ -14,13 +14,26 @@ android {
         }
 
     }
-    packagingOptions {
-        exclude 'META-INF/robovm/ios/robovm.xml'
+    packaging {
+        resources {
+            excludes += ['META-INF/robovm/ios/robovm.xml']
+        }
+        //与 manifest 的 android:extractNativeLibs="true" 配套，否则 AGP 8 会告警
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+    //Android 侧不能用 --release（会顶掉 android.jar 的 bootclasspath），字节码版本在这里定
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+        //coreLibraryDesugaring 依赖需要显式打开，否则 desugar 不生效
+        coreLibraryDesugaringEnabled = true
     }
     defaultConfig {
         applicationId "com.phoenix.game"
         minSdkVersion 24
-        targetSdkVersion 33
+        targetSdkVersion 36
         versionCode 1
         versionName "1.0"
     }
@@ -31,7 +44,17 @@ android {
         }
     }
 }
+dependencies {
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'
+    implementation "com.badlogicgames.gdx:gdx-backend-android:$gdxVersion"
+    implementation project(':core')
 
+    natives "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-arm64-v8a"
+    natives "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-armeabi-v7a"
+    natives "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-x86"
+    natives "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-x86_64"
+
+}
 
 // called every time gradle gets executed, takes the native dependencies of
 // the natives configuration, and extracts them to the proper libs/ folders

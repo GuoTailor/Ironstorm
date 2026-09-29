@@ -3,11 +3,13 @@ package com.phoenix.game.ui.fragments;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
+import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Group;
+import com.badlogic.gdx.scenes.scene2d.InputEvent;
+import com.badlogic.gdx.scenes.scene2d.Touchable;
 import com.badlogic.gdx.scenes.scene2d.ui.Button;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.ImageButton;
-import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Stack;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
@@ -17,17 +19,26 @@ import com.badlogic.gdx.utils.Array;
 import com.phoenix.game.Vars;
 import com.phoenix.game.content.Blocks;
 import com.phoenix.game.core.Core;
+import com.phoenix.game.core.Events;
 import com.phoenix.game.core.Scl;
+import com.phoenix.game.core.Time;
 import com.phoenix.game.game.Team;
 import com.phoenix.game.graphics.Pal;
+import com.phoenix.game.input.Binding;
+import com.phoenix.game.input.InputDevice;
 import com.phoenix.game.input.InputHandler;
+import com.phoenix.game.input.KeyBinds;
+import com.phoenix.game.math.Mathf;
 import com.phoenix.game.type.Category;
 import com.phoenix.game.ui.Cicon;
+import com.phoenix.game.ui.ContentDisplay;
+import com.phoenix.game.ui.Label;
 import com.phoenix.game.ui.Styles;
 import com.phoenix.game.world.Block;
 import com.phoenix.game.world.Build;
 import com.phoenix.game.world.Tile;
-import com.phoenix.game.world.blocks.production.Drill;
+import com.phoenix.game.world.meta.I18n;
+import io.anuke.mindustry.gen.Icon;
 import io.anuke.mindustry.gen.Tex;
 
 /**
@@ -52,8 +63,11 @@ public class PlacementFragment extends Fragment{
     private static final float GRID_FRAME_WIDTH = 232f;
     /** 分类列宽度：2 列 × 50 + 间距。 */
     private static final float CATEGORY_COLUMN_WIDTH = 106f;
-    /** 详情区高度（原版按内容自适应，这里给固定高度避免面板抖动）。 */
-    private static final float DETAIL_HEIGHT = 96f;
+    /** 详情区高度（原版按内容自适应，这里给固定高度避免面板抖动）。
+     * <p>S4b 起详情区多了"消耗什么"图标行（原版 {@code Block.display} 的 {@code displayConsumption}），
+     * 96 已被标题行 + {@link #BARS_MAX_HEIGHT}(84) 占满 → 图标行会被 Table 压成 0 高度（实测不显示），
+     * 故提到 160（标题 ~32 + bars ≤84 + 图标行 32 + 内边距）。 */
+    private static final float DETAIL_HEIGHT = 160f;
     /** 网格区高度，对应原版 pane(...).height(194f)。 */
     private static final float GRID_HEIGHT = 194f;
     /** 分类按钮尺寸，对应原版 categories.defaults().size(50f)。 */
@@ -65,6 +79,8 @@ public class PlacementFragment extends Fragment{
 
     private final Array<Block> blocks = new Array<>();
     private final Array<ImageButton> buttons = new Array<>();
+    /** 内容信息对话框（详情区问号按钮打开，对应原版 {@code ui.content}）。 */
+    private final com.phoenix.game.ui.dialogs.ContentInfoDialog contentInfo = new com.phoenix.game.ui.dialogs.ContentInfoDialog();
 
     private Table root;
     /** 详情区容器（对应原版 topTable）。 */
@@ -102,6 +118,20 @@ public class PlacementFragment extends Fragment{
     private Block lastDisplay;
     /** 上一帧悬停的建筑方块（null 表示未悬停建筑）。 */
     private Block lastGroundBlock;
+    /**
+     * 建造菜单里当前被鼠标悬停的方块按钮（对应原版 {@code hovered}）。
+     * <p>原版 {@code getSelected()} 的口径是"手持方块先取值，再被 hovered 覆盖"→ **悬停优先**；
+     * 这里由 {@link #updateDetail()} 消费，把悬停的方块显示到建造菜单顶部详情区。
+     */
+    private Block hovered;
+
+    // ---- 快捷选择键位（对应原版 blockSelect）----
+    /** 上一轮数字键组合是否已结束（原版语义：多位数组合的终止标记）。 */
+    private boolean blockSelectEnd;
+    /** 组合键首位数字（对应原版 {@code blockSelectSeq}）。 */
+    private int blockSelectSeq;
+    /** 上一次数字键的时间戳（毫秒；配 blockselecttimeout 判超时）。 */
+    private long blockSelectSeqMillis;
 
     @Override
     public void build(Group parent){
@@ -151,7 +181,13 @@ public class PlacementFragment extends Fragment{
         grid.top().left().pad(Scl.scl(5f));
         blockPane = new ScrollPane(grid, Styles.defaultPane);
         gridFrame.add(blockPane).growX().height(Scl.scl(GRID_HEIGHT)).row();
-        gridFrame.add(actionButtons()).growX();
+        //底部放置控件：桌面端是"拆除/取消建造"文字按钮；
+        //移动端换成触摸版按钮行（拆除/斜向/旋转/确认），由输入处理器多态提供（对应原版 control.input::buildPlacementUI）
+        if(Vars.mobile && input() != null){
+            input().buildPlacementUI(gridFrame);
+        }else{
+            gridFrame.add(actionButtons()).growX();
+        }
 
         body.add(gridFrame).width(Scl.scl(GRID_FRAME_WIDTH)).bottom();
         body.add(categories = buildCategories()).width(Scl.scl(CATEGORY_COLUMN_WIDTH)).bottom();
@@ -370,6 +406,8 @@ public class PlacementFragment extends Fragment{
         grid.clearChildren();
         blocks.clear();
         buttons.clear();
+        //旧按钮被销毁时不会触发 exit，这里显式清掉悬停记录，避免指向已不存在的方块
+        hovered = null;
 
         Array<Block> list = blocksOf(currentCategory);
         for(int i = 0; i < list.size; i++){
@@ -387,6 +425,23 @@ public class PlacementFragment extends Fragment{
                         //选了方块就退出蓝图粘贴模式（两者互斥）
                         input.pasteSchematic = null;
                     }
+                }
+
+                //悬停记录（对应原版 button.hovered(() -> hovered = block)）。
+                //libgdx 的 Actor 没有 hovered(...) → 改用 ClickListener 的 enter/exit；
+                //pointer == -1 表示鼠标（触屏的 enter/exit 不参与悬停判定）。
+                @Override public void enter(InputEvent event, float x, float y, int pointer, Actor fromActor){
+                    if(pointer == -1) hovered = block;
+                    super.enter(event, x, y, pointer, fromActor);
+                }
+
+                @Override public void exit(InputEvent event, float x, float y, int pointer, Actor toActor){
+                    //移到按钮内部的子 Actor（图标 Stack）时也会触发 exit，必须排除，
+                    //否则鼠标停在图标上时悬停详情会闪断
+                    if(pointer == -1 && hovered == block && (toActor == null || !toActor.isDescendantOf(button))){
+                        hovered = null;
+                    }
+                    super.exit(event, x, y, pointer, toActor);
                 }
             });
             buttons.add(button);
@@ -409,15 +464,18 @@ public class PlacementFragment extends Fragment{
      * <p>原版在打包期把 base/rotator/top 压成一张图；这里用 Stack 逐层叠加，视觉等价。
      */
     private void setIcon(ImageButton button, Block block){
-        Stack icon = new Stack();
-        TextureRegion[] layers = block.getGeneratedIcons();
-        for(TextureRegion layer : layers){
-            if(layer == null) continue;
-            Image image = new Image(layer);
-            image.setScaling(com.badlogic.gdx.utils.Scaling.fit);
-            icon.add(image);
+        button.add(ContentDisplay.iconStack(block.getGeneratedIcons())).size(Scl.scl(SLOT_SIZE * 0.85f));
+    }
+
+    /** 递归给按钮及其全部子 Actor 上色（对应原版 {@code button.forEach(elem -> elem.setColor(color))}）。 */
+    private static void tint(Actor actor, Color color){
+        actor.setColor(color);
+        if(actor instanceof Group){
+            Group group = (Group)actor;
+            for(int i = 0; i < group.getChildren().size; i++){
+                tint(group.getChildren().get(i), color);
+            }
         }
-        button.add(icon).size(Scl.scl(SLOT_SIZE * 0.85f));
     }
 
     private InputHandler input(){
@@ -429,12 +487,22 @@ public class PlacementFragment extends Fragment{
         if(root == null) return;
         root.setVisible(shown && Vars.state != null && !Vars.state.isMenu());
 
+        //面板收起（进菜单/手动隐藏）时把信息对话框一起关掉，否则会留在屏幕上
+        if(!root.isVisible() && contentInfo.isShown()) contentInfo.hide();
+
         for(int i = 0; i < buttons.size; i++){
             ImageButton button = buttons.get(i);
             Block block = blocks.get(i);
             button.setChecked(input() != null && input().buildBlock == block);
             //材料不足时灰显（对应原版 gray）
-            button.setColor(Build.canAfford(Team.sharded, block) ? Color.WHITE : Color.GRAY);
+            Color color = Build.canAfford(Team.sharded, block) ? Color.WHITE : Color.GRAY;
+            //禁建方块再覆盖为深灰（对应原版 button.update 里的 bannedBlocks 分支）
+            if(Vars.state != null && Vars.state.rules.bannedBlocks.contains(block)){
+                color = Color.DARK_GRAY;
+            }
+            //原版是 button.forEach(elem -> elem.setColor(color))；libgdx 的 Group 只把 alpha 传给子 Actor、
+            //RGB 不传播 → 必须递归给图标（Stack/Image）上色，否则灰显只落在透明的按钮背景上、看不出效果
+            tint(button, color);
         }
 
         //蓝图数量变了（新存了一张 / 重新扫描目录）就重建列表，否则新存的蓝图要重启才看得到
@@ -446,6 +514,7 @@ public class PlacementFragment extends Fragment{
         updateCategoryChecked();
         updateDetail();
         updateCommandMode();
+        updateBlockSelect();
     }
 
     /** 命令面板骨架：标题 + 动态内容区（对应原版 commandTable 的构建）。 */
@@ -627,7 +696,10 @@ public class PlacementFragment extends Fragment{
      */
     private void updateDetail(){
         InputHandler input = input();
-        Block selected = input == null ? null : input.buildBlock;
+        Block inHand = input == null ? null : input.buildBlock;
+        //对应原版 getSelected()：**建造菜单里悬停的方块优先于手持方块**（原版先取 control.input.block，
+        //再被 hovered 覆盖）→ 悬停按钮时详情区显示悬停的那个方块。
+        Block selected = hovered != null ? hovered : inHand;
 
         Tile hover = hoveredTile();
         Block groundBlock = hover == null ? null : hover.block();
@@ -674,7 +746,7 @@ public class PlacementFragment extends Fragment{
     private void addRecipeDetail(Block block){
         Table header = new Table();
         header.left();
-        header.add(new Image(block.icon(Cicon.medium))).size(Scl.scl(DETAIL_ICON_SIZE));
+        header.add(ContentDisplay.iconStack(block.getGeneratedIcons())).size(Scl.scl(DETAIL_ICON_SIZE));
         Label nameLabel = new Label(block.localizedName() + keyHint(block), Styles.outlineLabel);
         nameLabel.setWrap(true);
         header.add(nameLabel).left().width(Scl.scl(190f)).padLeft(Scl.scl(5f));
@@ -682,6 +754,16 @@ public class PlacementFragment extends Fragment{
 
         Button info = new Button(Styles.clearPartialt);
         info.add(new Label("?", Styles.defaultLabel)).pad(Scl.scl(2f));
+        //名字与原版一致，便于自动化测试定位该按钮
+        info.setName("blockinfo");
+        //问号：打开该方块的内容信息对话框（对应原版 PlacementFragment 的 addButton("?", ..., ...)）
+        info.addListener(new ClickListener(){
+            @Override
+            public void clicked(com.badlogic.gdx.scenes.scene2d.InputEvent event, float x, float y){
+                contentInfo.show(block, root.getStage());
+                Events.fire(new com.phoenix.game.game.EventType.BlockInfoEvent());
+            }
+        });
         header.add(info).size(Scl.scl(DETAIL_ICON_SIZE + 8f)).right();
         detail.add(header).growX().left().row();
 
@@ -703,13 +785,24 @@ public class PlacementFragment extends Fragment{
         if(!drillRate.isEmpty()){
             detail.add(new Label(drillRate, Styles.outlineLabel)).left().padTop(Scl.scl(2f)).row();
         }
+
+        //禁建方块提示（对应原版 topTable 的 bannedBlocks 分支：Icon.cancel + $banned）
+        if(Vars.state != null && Vars.state.rules.bannedBlocks.contains(block)){
+            Table banned = new Table();
+            banned.left();
+            Image cancel = new Image(Icon.cancel);
+            cancel.setColor(Color.SCARLET);
+            banned.add(cancel).size(Scl.scl(16f)).padRight(Scl.scl(2f));
+            banned.add(new Label(I18n.get("banned", "[scarlet]Banned"), Styles.defaultLabel)).left();
+            detail.add(banned).left().padTop(Scl.scl(2f)).row();
+        }
     }
 
     /** 显示悬停建筑：图标 + 名称，然后是该建筑的运行状态条（对应原版 getDisplayIcon + display）。 */
     private void addTileDetail(Block block, Tile tile){
         Table header = new Table();
         header.left();
-        header.add(new Image(block.getDisplayIcon(tile))).size(Scl.scl(DETAIL_ICON_SIZE));
+        header.add(ContentDisplay.iconStack(block.getDisplayIcons(tile))).size(Scl.scl(DETAIL_ICON_SIZE));
         Label nameLabel = new Label(block.getDisplayName(tile), Styles.outlineLabel);
         nameLabel.setWrap(true);
         header.add(nameLabel).left().width(Scl.scl(190f)).padLeft(Scl.scl(5f));
@@ -721,6 +814,12 @@ public class PlacementFragment extends Fragment{
             bars.defaults().growX();
             block.displayBars(tile, bars);
             detail.add(bars).growX().left().height(Scl.scl(BARS_MAX_HEIGHT)).maxHeight(Scl.scl(BARS_MAX_HEIGHT)).row();
+
+            //"消耗什么"图标行（原版 world/Block.java:688-690：状态条表之后接一个 growX 的消耗表）
+            Table ctable = new Table();
+            ctable.left();
+            block.displayConsumption(tile, ctable);
+            detail.add(ctable).growX().left().height(Scl.scl(DETAIL_ICON_SIZE)).maxHeight(Scl.scl(DETAIL_ICON_SIZE)).row();
         }
     }
 
@@ -749,20 +848,22 @@ public class PlacementFragment extends Fragment{
 
     /** @return 钻头每秒采集量文本；非钻头返回空串。 */
     private String drillRateText(Block block){
-        if(!(block instanceof Drill)) return "";
-        Drill drill = (Drill)block;
-        if(drill.drillTime <= 0f) return "";
+        float rate = ContentDisplay.drillSpeed(block);
         //对应原版 stats.add(BlockStat.drillSpeed, 60f / drillTime * size * size)
-        float rate = 60f / drill.drillTime * drill.size * drill.size;
-        return String.format("挖掘速度：%.2f/秒", rate);
+        return rate <= 0f ? "" : String.format("挖掘速度：%.2f/秒", rate);
     }
 
-    /** 生成原版 PlacementFragment 风格数字快捷键提示。 */
+    /** 生成数字快捷键提示（原版是"分类键+数字键"，本项目降级为纯数字键，见 {@link #updateBlockSelect()}）。 */
     private String keyHint(Block block){
+        if(Vars.mobile || !Core.settings.getBool("blockselectkeys", true)) return "";
         for(int i = 0; i < blocks.size; i++){
-            if(blocks.get(i) == block){
-                return " [" + (i / 10 + 1) + "," + (i % 10) + "]";
-            }
+            if(blocks.get(i) != block) continue;
+            //1-based 编号：index 0 → "1"，index 9 → "0"，index 11 → "12"
+            String digits = i == 9 ? "0" : String.valueOf(i + 1);
+            //TODO 原版：Core.bundle.format("placement.blockselectkeys", Core.keybinds.get(blockSelect[...]).key)
+            //     拼"分类键+数字键"提示；本项目 KeyBinds 无"Binding → 当前键码"查询表，降级为纯数字键，
+            //     且 bundle 裁剪掉了 placement.blockselectkeys（缺键返回 ???key???）→ 取前缀后直接拼数字
+            return I18n.get("placement.blockselectkeys", "\n[lightgray]Key: [") + digits + "]";
         }
         return "";
     }
@@ -778,19 +879,82 @@ public class PlacementFragment extends Fragment{
     }
 
     /**
-     * @return 是否出现在建造菜单里。
-     * <p>地板与自然岩壁（{@code Rock}/{@code StaticWall}）不可建造。
-     * 原版靠 {@code buildVisibility} + 解锁状态过滤（{@code PlacementFragment:424}），phoenix 两者都没有，按类型过滤。
+     * @return 是否出现在建造菜单里（对应原版 {@code PlacementFragment:424} 的 {@code block.isVisible()}）。
+     * <p>T2 批：改用 {@link Block#isVisible()}（= {@code buildVisibility.visible() && !isHidden()}，与原版同形），
+     * 替掉原先的"排除 Floor/Rock + sandboxOnly 布尔"补丁。地板/岩壁/树/推进器等本来就没有 requirements，
+     * buildVisibility 保持默认 hidden，自动被过滤。
+     * <p>解锁过滤（原版还有 {@code unlocked(block)}）属 S4b 批，本批只对齐可见性。
      */
     private boolean buildable(Block block){
-        if(block instanceof com.phoenix.game.world.Floor || block instanceof com.phoenix.game.world.blocks.Rock){
-            return false;
+        return block.isVisible();
+    }
+
+    // ---- 快捷选择键位（对应原版 blockSelect）----
+
+    /** 数字选择键（对应原版 blockSelect 的前 10 项；方向键部分见 {@link #updateBlockSelect()} 的 TODO）。 */
+    //TODO 原版：Binding[] blockSelect 分类组合键（本项目 KeyBinds 无该条目/Core.keybinds 缺失，降级为直接数字键）
+    private static final Binding[] BLOCK_SELECT_DIGITS = {
+        Binding.block_select_01, Binding.block_select_02, Binding.block_select_03, Binding.block_select_04,
+        Binding.block_select_05, Binding.block_select_06, Binding.block_select_07, Binding.block_select_08,
+        Binding.block_select_09, Binding.block_select_10
+    };
+
+    /**
+     * 数字键快速选中当前分类里的方块。
+     * <p>⚠ <b>降级</b>：原版是"分类键 + 数字键"的组合（{@code Core.input.keyTap(blockSelect[i])}，
+     * 键位由 {@code Core.keybinds.get(...)} 查表）；本项目 {@code Core} 没有 {@code keybinds} 查询表，
+     * 故只用数字键直接选<b>当前分类</b>里的第 N 个方块；两次数字键在 {@code blockselecttimeout} 毫秒内连按
+     * 则组成两位数（如 "1","2" → 第 12 个），沿用原版的超时与算式语义。
+     * <p>只在建造菜单可见、且没有输入框聚焦时响应（对应原版 {@code ui.chatfrag.shown() || Core.scene.hasKeyboard()} 守卫）。
+     */
+    private void updateBlockSelect(){
+        if(Vars.mobile || !Core.settings.getBool("blockselectkeys", true)) return;
+        if(root == null || !root.isVisible()) return;
+        if(root.getStage() != null
+            && root.getStage().getKeyboardFocus() instanceof com.badlogic.gdx.scenes.scene2d.ui.TextField) return;
+
+        for(int i = 0; i < BLOCK_SELECT_DIGITS.length; i++){
+            int key = defaultKey(BLOCK_SELECT_DIGITS[i]);
+            if(key < 0 || !Gdx.input.isKeyJustPressed(key)) continue;
+
+            int timeout = Core.settings.getInt("blockselecttimeout", 750);
+            if(blockSelectEnd || Time.timeSinceMillis(blockSelectSeqMillis) > timeout){
+                //本轮第一个数字
+                blockSelectSeq = i + 1;
+                blockSelectEnd = false;
+                selectBlockByIndex(i);
+            }else{
+                //超时窗口内的第二个数字：组成两位数（沿用原版 blockSelectSeq 的算式）
+                int index = i + (blockSelectSeq - (i != 9 ? 0 : 1)) * 10;
+                blockSelectEnd = true;
+                selectBlockByIndex(index);
+            }
+            blockSelectSeqMillis = Time.millis();
+            return;
         }
-        //沙盒方块只在沙盒模式下列出（对应原版 BuildVisibility.sandboxOnly）
-        if(block.sandboxOnly && !Vars.state.rules.sandbox){
-            return false;
+    }
+
+    /** 选中当前分类里第 index 个方块；越界则取消选择（对应原版 {@code input.block = i < blocks.size ? ... : null}）。 */
+    private void selectBlockByIndex(int index){
+        InputHandler input = input();
+        if(input == null) return;
+
+        Array<Block> list = blocksOf(currentCategory);
+        input.buildBlock = index >= 0 && index < list.size ? list.get(index) : null;
+        if(input.buildBlock != null){
+            input.breaking = false;
+            //选了方块就退出蓝图粘贴模式（与点击方块按钮一致）
+            input.pasteSchematic = null;
         }
-        return true;
+    }
+
+    /**
+     * @return Binding 的默认键码；本项目没有"Binding → 当前生效键码"的查询表
+     * （{@code Core.keybinds} 未移植），用 {@code defaultValue} 代替（无重绑定入口，两者等价）。
+     */
+    private static int defaultKey(Binding binding){
+        KeyBinds.KeybindValue value = binding.defaultValue(InputDevice.DeviceType.keyboard);
+        return value instanceof KeyBinds.KeyValue ? ((KeyBinds.KeyValue)value).key : -1;
     }
 
     private Tile hoveredTile(){

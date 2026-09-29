@@ -11,6 +11,8 @@ import com.phoenix.game.math.geom.Geometry;
 import com.phoenix.game.type.Item;
 import com.phoenix.game.world.Block;
 import com.phoenix.game.world.Tile;
+import com.phoenix.game.world.meta.BlockStat;
+import com.phoenix.game.world.meta.StatUnit;
 
 import static com.phoenix.game.Vars.tilesize;
 
@@ -47,6 +49,14 @@ public class Conveyor extends Block{
         hasItems = true;
         itemCapacity = capacity;
         entityType = ConveyorEntity::new;
+    }
+
+    @Override
+    public void setStats(){
+        super.setStats();
+
+        //对应原版 Conveyor.setStats：实际移动速度不是线性的，直接显示换算好的"每秒搬运几个"
+        stats.add(BlockStat.itemsMoved, displayedSpeed, StatUnit.itemsSecond);
     }
 
     /**
@@ -105,9 +115,10 @@ public class Conveyor extends Block{
         if(reg == null) return;
 
         float cx = tile.worldx() + tilesize / 2f, cy = tile.worldy() + tilesize / 2f;
-        //贴图基准朝向是"上"（conveyor-0-0 的带子长轴竖直，与原版一致），
-        //本项目 rotation 0=上/1=右/2=下/3=左，故角度 = rotation * 90
-        float angle = (tile.rotation() & 3) * 90f;
+        //贴图基准朝向是"右"（conveyor-0-0 的带子长轴水平、纹理沿 +x 流动，与原版 rotation 0 = +x 一致）。
+        //本项目 rotation 0=上/1=右/2=下/3=左，libgdx 的 batch.draw 角度逆时针为正，
+        //故角度 = (1 - rotation) * 90：rotation 0(上) 转 90°、1(右) 不转、2(下) 转 -90°、3(左) 转 -180°
+        float angle = (1 - (tile.rotation() & 3)) * 90f;
 
         Core.batch.draw(reg, cx - tilesize / 2f, cy - tilesize / 2f, tilesize / 2f, tilesize / 2f,
                 tilesize, tilesize, e.blendsclx, e.blendscly, angle);
@@ -152,11 +163,13 @@ public class Conveyor extends Block{
     }
 
     /**
-     * @param direction 相对朝向的方向：1=右侧，2=后方，3=左侧（对应原版 blends 的 direction）
+     * @param direction 相对朝向的方向：1=右手侧，2=正后方，3=左手侧（对应原版 blends 的 direction）
      * @return 该方向是否有可拼接的方块
      */
     private boolean blends(Tile tile, int rotation, int direction){
-        GridPoint2 dir = Geometry.d4[Mathf.mod(rotation - direction, 4)];
+        //原版 Geometry.d4 从 +x 起、逆时针（0=右/1=上/2=左/3=下），故原版写 rotation - direction；
+        //本项目 d4 从 +y 起、顺时针（0=上/1=右/2=下/3=左），索引旋向相反，同一个"右手侧"要用 + direction。
+        GridPoint2 dir = Geometry.d4[Mathf.mod(rotation + direction, 4)];
         Tile other = tile.getNearby(dir.x, dir.y);
         if(other == null || other.entity == null) return false;
 

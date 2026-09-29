@@ -36,6 +36,12 @@ public class Registrator {
         new ClassEntry(TileDamage.class, TileDamage::new),
         //RTS 命令系统：追加在末尾（1 字节包 ID = 数组下标，已有顺序不可调整）
         new ClassEntry(UnitCommandPacket.class, UnitCommandPacket::new),
+        //F13g 玩家列表同步：同样追加在末尾（**新增包必须加在这里**，否则 serialize 报
+        //"Unregistered packet type"，且异常会被网络层吞掉只打一行日志）
+        new ClassEntry(PlayerListSync.class, PlayerListSync::new),
+        new ClassEntry(AdminRequest.class, AdminRequest::new),
+        //S8 管理员 trace 响应包：同样追加在末尾（1 字节包 ID = 数组下标，已有顺序不可调整）
+        new ClassEntry(TraceInfoPacket.class, TraceInfoPacket::new),
     };
     private static final ObjectIntMap<Class<?>> ids = new ObjectIntMap<>();
     private static final IntMap<ClassEntry> byID = new IntMap<>();

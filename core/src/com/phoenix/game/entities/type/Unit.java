@@ -1,3 +1,8 @@
+//⚠ 本文件整类注释保留（原版 Unit 的参考代码，本项目没有 Unit 基类）。其中的能力现在落在：
+//   - 移动/血量/绘制/状态 → entities/type/BaseUnit（+ entities/traits/*）
+//   - 载物背包 acceptsItem/addItem/clearItem/item()/maxAccepted/getItemCapacity → BaseUnit（单位侧）
+//     与 Player（玩家侧，见 Player 的"背包"注释；原版这两者是同一个类，本项目拆成两份）
+//   - 死亡爆炸/焦痕 → BaseUnit.onDeath
 //package com.phoenix.game.entities.type;
 //
 //import java.io.DataInput;

@@ -3,10 +3,12 @@ package com.phoenix.game.game;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.utils.Array;
 import com.phoenix.game.Vars;
+import com.phoenix.game.core.Core;
 import com.phoenix.game.core.Time;
 import com.phoenix.game.io.SaveIO;
 import com.phoenix.game.io.SaveMeta;
 import com.phoenix.game.io.SavePreview;
+import com.phoenix.game.type.Zone;
 
 import java.io.File;
 import java.io.IOException;
@@ -20,12 +22,12 @@ import java.util.Date;
  *   <li>扫描/新建/删除存档槽（{@code saves/<n>.msav}）</li>
  *   <li>自动存档计时（仅玩家局、非菜单、非终局时触发）</li>
  *   <li>槽位元数据（波次/时长/存档时间/缩略图）—— 只读存档的 meta 区，不解析整张地图</li>
+ *   <li><b>区域存档槽</b>（{@code saves/-1.msav}）：战役进度自动落盘，见 {@link #zoneSave()} /
+ *       {@link #getZoneSlot()}；该槽在存档列表里隐藏（{@link SaveSlot#isHidden()}）</li>
  * </ul>
  * 未移植：导入导出、异步存档。
  */
 public class Saves{
-    /** 自动存档间隔（帧）。对应原版设置 saveinterval（默认 60s）。 */
-    public static final int autosaveInterval = 60 * 60;
     /** 存档目录（应用本地目录下）。 */
     private static final String SAVE_DIR = "saves";
     /** 存档文件扩展名。 */
@@ -63,19 +65,34 @@ public class Saves{
 
     /** 每帧驱动自动存档计时。由 Logic.update 调用。 */
     public void update(){
-        if(current == null || Vars.state.isMenu() || Vars.state.gameOver || !autosave){
+        //自动存档判据（T19 起）：① 全局总开关 {@link #autosave}（本项目特有，HUD 上的勾选框）；
+        //  ② 逐槽开关 {@link SaveSlot#isAutosave()}（原版语义，见 SaveDialog 卡片上的 Icon.save 按钮）。
+        //  原版只有②；本项目多保留①，两者都开才会自动存档。
+        //  ③ 教程局不自动存档（对应原版判据尾部的 `!state.rules.tutorial`）。
+        if(current == null || Vars.state.isMenu() || Vars.state.gameOver || !autosave || !current.isAutosave()
+            || (Vars.state.rules != null && Vars.state.rules.tutorial)){
             timer = 0f;
             return;
         }
 
         timer += Time.delta();
-        if(timer >= autosaveInterval){
+        //间隔取自设置 saveinterval（秒）：对应原版 Saves.update 的
+        //`time > Core.settings.getInt("saveinterval") * 60`。原版 Time.delta() 以秒计，
+        //而本项目它 ≈ 1.0/帧（timer 累加的是帧数）→ 同样 * 60 换算成帧数，口径一致。
+        if(timer >= Core.settings.getInt("saveinterval", 60) * 60){
             timer = 0f;
-            try{
-                saveCurrent();
-            }catch(Exception e){
-                System.err.println("自动存档失败: " + e);
-            }
+
+            //对应原版：先置"存档中"标记（HUD 的 $saveload 指示器据此显示），再延后 2 tick 执行保存 ——
+            //本项目存档是同步阻塞的，若在这里直接存完，指示器一帧都看不到。
+            saving = true;
+            Time.run(2f, () -> {
+                try{
+                    saveCurrent();
+                }catch(Exception e){
+                    System.err.println("自动存档失败: " + e);
+                }
+                saving = false;
+            });
         }
     }
 
@@ -103,6 +120,66 @@ public class Saves{
     /** 读档到指定槽。 */
     public void load(SaveSlot slot) throws IOException{
         slot.load();
+        current = slot;
+    }
+
+    /** @return 区域存档槽文件：**固定** {@code saves/-1.msav}（对应原版 {@code zoneFile}）。 */
+    private File zoneFile(){
+        return new File(Gdx.files.local(SAVE_DIR).file(), "-1." + EXT);
+    }
+
+    /**
+     * 把当前局写进**区域存档槽**（对应原版 {@code Saves.zoneSave()}）。
+     * <p>原版用的是**固定的单个文件** {@code saves/-1.msav}（不是每个区域一个）—— 战役一次只玩一个区域，
+     * 换区域时覆盖即可；槽位归属靠 meta 里的 {@code rules.zone}（见 {@link SaveSlot#getZone()}）。
+     * <p>⚠ 调用点必须在 {@code state.rules.zone} 已赋值**之后**：{@code SaveSlot.save()} 内部会
+     * {@code refreshMeta()}，而 meta 里的 {@code zoneName} 是写盘时由 {@code rules.zone} 生成的 ——
+     * 顺序反了 {@link #getZoneSlot()} 会恒为 null。{@code Control.playZone} 在 {@code enterWorld()} 之后调它。
+     * <p>同时把该槽设为"当前槽"：这样自动存档会持续刷新区域进度（与原版 {@code SaveSlot.save()}
+     * 在非菜单态设 {@code current = this} 的行为一致）。
+     */
+    public void zoneSave(){
+        try{
+            File file = zoneFile();
+            //同一个文件只保留一个槽对象
+            for(int i = slots.size - 1; i >= 0; i--){
+                if(slots.get(i).file.equals(file)){
+                    slots.removeIndex(i);
+                }
+            }
+            SaveSlot slot = new SaveSlot(file);
+            slot.name = "zone";
+            slots.add(slot);
+            slot.save();
+            current = slot;
+        }catch(Exception e){
+            System.err.println("区域存档失败: " + e);
+        }
+    }
+
+    /**
+     * @return 区域存档槽；没有（或该档的 {@code rules.zone} 解析不出来）时返回 null。
+     * <p>对应原版 {@code Saves.getZoneSlot()}：既要求文件是 {@code -1.msav}，也要求 meta 里能解出区域。
+     * 解析不出区域的 {@code -1.msav} 不算区域槽 → 它也不会被 {@link SaveSlot#isHidden()} 隐藏，
+     * 于是仍能在普通存档列表里看到并手动载入（比"文件在但找不到"要好）。
+     */
+    public SaveSlot getZoneSlot(){
+        File file = zoneFile();
+        for(int i = 0; i < slots.size; i++){
+            SaveSlot slot = slots.get(i);
+            if(slot.file.equals(file) && slot.getZone() != null){
+                return slot;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 把某个槽设为"当前槽"。
+     * <p>原版是在 {@code SaveSlot.save()} 里直接写 {@code current = this}；本项目 {@link SaveSlot}
+     * 是 static 嵌套类、拿不到外层实例，所以由调用方（{@code SaveDialog} 的覆盖保存）显式调这里。
+     */
+    public void setCurrent(SaveSlot slot){
         current = slot;
     }
 
@@ -137,6 +214,8 @@ public class Saves{
     public void resetCurrent(){
         current = null;
         timer = 0f;
+        //兜底：延后保存任务（Time.run）可能被 Time.clear() 取消，避免 $saveload 指示器卡在"保存中"
+        saving = false;
     }
 
     /** @return 当前槽位是否存在（供 UI 判断"保存"还是"另存为"）。 */
@@ -181,6 +260,27 @@ public class Saves{
         /** @return 是否有缩略图。 */
         public boolean hasPreview(){
             return SavePreview.hasPreview(file);
+        }
+
+        /**
+         * @return 本槽所属的战役区域（由 meta 里的 {@code rules.zoneName} 反查）；非区域槽返回 null。
+         * <p>对应原版 {@code SaveSlot.getZone()}（原版直接读 {@code meta.rules.zone} 对象，本项目存名字）。
+         * 区域在当前版本里被删掉时返回 null（读档时 {@code SaveIO.applyMeta} 也会 err 并退化成非区域局）。
+         */
+        public Zone getZone(){
+            if(meta == null || meta.rules == null
+                || meta.rules.zoneName == null || meta.rules.zoneName.isEmpty()){
+                return null;
+            }
+            return Vars.content.getByName(com.phoenix.game.ctype.ContentType.zone, meta.rules.zoneName);
+        }
+
+        /**
+         * @return 是否在存档列表里隐藏（区域槽隐藏，对应原版 {@code SaveSlot.isHidden()}）。
+         * <p>区域槽是自动维护的"继续战役"进度，不该混进玩家的手动存档列表里。
+         */
+        public boolean isHidden(){
+            return getZone() != null;
         }
 
         /** 从存档文件重新读元数据（只解压 meta 区，很便宜）。 */
@@ -235,6 +335,30 @@ public class Saves{
         public String playtimeText(){
             long seconds = playtime();
             return String.format("%02d:%02d:%02d", seconds / 3600, (seconds % 3600) / 60, seconds % 60);
+        }
+
+        /** @return 本槽索引（文件名去扩展名，如 {@code 0.msav} → {@code "0"}）；用于拼 per-slot 设置键。 */
+        private String index(){
+            String n = file.getName();
+            int dot = n.lastIndexOf('.');
+            return dot > 0 ? n.substring(0, dot) : n;
+        }
+
+        /**
+         * @return 本槽是否启用自动存档。对应原版 {@code SaveSlot.isAutosave()}。
+         * <p>⚠ per-slot 开关存在 {@code Core.settings} 的 {@code save-<index>-autosave} 键里（默认开），
+         * <b>不是</b>存档 meta 字段 —— 所以它既不需要改 {@code SaveMeta} 白名单，也不会随存档文件迁移。
+         * <p>消费点：{@code Saves.update()}（自动存档判据）、{@code SaveDialog} 的卡片开关、
+         * {@code PausedDialog} 的退出文案与退出保存判据。
+         */
+        public boolean isAutosave(){
+            return Core.settings.getBool("save-" + index() + "-autosave", true);
+        }
+
+        /** 设置本槽的自动存档开关并立即落盘（对应原版 {@code SaveSlot.setAutosave}）。 */
+        public void setAutosave(boolean save){
+            Core.settings.put("save-" + index() + "-autosave", save);
+            Core.settings.save();
         }
 
         @Override

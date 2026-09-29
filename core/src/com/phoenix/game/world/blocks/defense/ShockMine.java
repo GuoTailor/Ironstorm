@@ -20,11 +20,13 @@ public class ShockMine extends Block{
     /** 触发后的冷却（帧）。 */
     public float cooldown = 80f;
     /** 每次触发的自伤量。 */
-    public float tileDamage = 5f;
+    public float tileDamage = 5f;  //原版 ShockMine.java:15 类默认 5f；Blocks.java:894 覆盖为 7f
     /** 对单位的伤害。 */
-    public float damage = 13f;
+    public float damage = 13f;     //原版 ShockMine.java:16 类默认 13（int 字面量）；Blocks.java:893 覆盖为 11
     /** 闪电长度（像素）。 */
     public int length = 10;
+    /** 每次触发放出的闪电条数（原版 ShockMine.java:18 类默认 6；Blocks.java:896 覆盖为 5）。 */
+    public int tendrils = 6;
     /** 触发半径（世界单位）。 */
     public float range = 10f;
 
@@ -33,13 +35,18 @@ public class ShockMine extends Block{
         update = true;
         solid = true;
         destructible = true;
-        health = 50;
+        health = 40;   //原版 Blocks.java:892 health = 40
         entityType = MineEntity::new;
     }
 
     @Override
     public boolean outputsItems(){
         return false;
+    }
+
+    /** 地雷不画队伍色边框（对应原版 {@code ShockMine.drawTeam(Tile)} 的空覆写，原版注释就是 "no."）。 */
+    @Override
+    public void drawTeam(Tile tile){
     }
 
     public class MineEntity extends TileEntity{
@@ -60,10 +67,17 @@ public class ShockMine extends Block{
                 if(unit.isDead() || !unit.getTeam().isEnemy(tile.getTeam())) continue;
                 if(Mathf.dst(unit.x, unit.y, cx, cy) > range) continue;
 
-                //放电：朝随机方向（对应原版 Mathf.random(360f)）
-                Lightning.createLighting(com.phoenix.game.core.Time.nanos(), tile.getTeam(),
-                    com.phoenix.game.graphics.Pal.surge, damage, cx, cy, Mathf.random(360f), length);
+                //原版 ShockMine.java:45-47：循环 tendrils 次，每次朝随机方向放一道闪电
+                //⚠ 变量名用 j 不用 i：外层单位遍历已占用 i，Java 禁止同方法内局部变量遮蔽（用 i 会编译报错）
+                for(int j = 0; j < tendrils; j++){
+                    Lightning.createLighting(com.phoenix.game.core.Time.nanos(), tile.getTeam(),
+                        com.phoenix.game.graphics.Pal.lancerLaser, damage, cx, cy, Mathf.random(360f), length);
+                }
 
+                //⚠ 补偿性偏离（主会话已决策，见 plans/phoenix-remaining-port.md §6）：
+                //原版没有这一行——原版 Lightning 沿整条路径逐段生成伤害子弹（起点就伤），
+                //本项目 Lightning 是简化版（只在末端点 x+trnsx(angle,length*tilesize) 结算一次）→
+                //不补这一行的话，站在雷上的单位反而毫发无伤。**保留，等 Lightning 补齐后回退。**
                 unit.damage(damage);
                 //自伤（踩雷后地雷受损）
                 handleDamage(tileDamage);

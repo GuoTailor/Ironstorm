@@ -9,6 +9,7 @@ public class Vault extends StorageBlock{
         super(name);
         size = 3;
         itemCapacity = 1000;
-        health = 500;
+        //不写 health：原版 Vault 构造器不设 health（走 size*size*40 → size3 = 360）。
+        //⚠ 本项目 StorageBlock 硬编码 health = 120，size 默认不可达 → health 由 Blocks.java 显式给 360。
     }
 }

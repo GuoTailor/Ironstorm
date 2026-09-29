@@ -14,6 +14,19 @@ public class Consumers{
     private Consume[] results = {};
     private Consume[] optionalResults = {};
 
+    /**
+     * "本方块接受的物品"位图（下标 = {@code Item.id}），对应原版 {@code Consumers.itemFilters}。
+     * <p>由 {@link #init()} 调用各消耗器的 {@code applyItemFilter} 填充。
+     * <p>⚠ 当前**没有消费点**：{@code BlockStorage.acceptItem} 刻意不接这条判据（见该处注释与 转换.md）。
+     * 位图仍保持完整填充，这样将来若按原版恢复判据，不必再排查"哪些消耗器没填"。
+     */
+    public final com.badlogic.gdx.utils.Bits itemFilters = new com.badlogic.gdx.utils.Bits();
+    /**
+     * "本方块接受的液体"位图（下标 = {@code Liquid.id}），对应原版 {@code Consumers.liquidfilters}。
+     * <p>由 {@link #init()} 调用各消耗器的 {@code applyLiquidFilter} 填充（冷却炮塔的加成表也读它）。
+     */
+    public final com.badlogic.gdx.utils.Bits liquidfilters = new com.badlogic.gdx.utils.Bits();
+
     /** 由 {@code Block.init()} 调用：把槽位表拍平成数组（之后不再变动）。 */
     public void init(){
         Array<Consume> all = new Array<>();
@@ -27,6 +40,12 @@ public class Consumers{
 
         results = all.toArray(Consume.class);
         optionalResults = optional.toArray(Consume.class);
+
+        //登记"接受的物品/液体"位图（对应原版 Consumers.init 末尾的两行）
+        for(Consume cons : results){
+            cons.applyItemFilter(itemFilters);
+            cons.applyLiquidFilter(liquidfilters);
+        }
     }
 
     public boolean hasPower(){
@@ -84,5 +103,15 @@ public class Consumers{
     /** @return 仅可选消耗器（加成输入）。 */
     public Consume[] optionals(){
         return optionalResults;
+    }
+
+    /**
+     * 把各消耗器登记到方块的统计里（对应原版 {@code Consumers.display}）。
+     * <p>由 {@code Block.setStats()} 调用 —— 必须在 {@link #init()} 之后（它拍平 {@link #results}）。
+     */
+    public void display(com.phoenix.game.world.meta.BlockStats stats){
+        for(Consume cons : results){
+            if(cons != null) cons.display(stats);
+        }
     }
 }

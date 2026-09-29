@@ -1,8 +1,12 @@
 package com.phoenix.game.game;
+import com.phoenix.game.Vars;
 import com.phoenix.game.core.Core;
 import com.phoenix.game.graphics.Pal;
+import com.phoenix.game.world.Tile;
+import com.phoenix.game.world.meta.I18n;
 
 import com.badlogic.gdx.graphics.Color;
+import com.badlogic.gdx.utils.Array;
 
 /**
  * 最小实现：阵营。参照 Mindustry mindustry.game.Team 移植。
@@ -62,9 +66,35 @@ public class Team implements Comparable<Team>{
         return other != this;
     }
 
+    //原版 Team.java:84-86 public Array<CoreEntity> cores(){ return state.teams.cores(this); }
+    //（原版 TeamData 上的 hasCore/noCores/core 也一并搬到本队便捷方法上，见 Teams 同名方法）
+    /** @return 本队的核心锚点瓦片列表（对应原版 {@code Team.cores()}）。 */
+    public Array<Tile> cores(){
+        //⚠ 本项目 Vars.state / state.teams 都可能为 null（原版是 final 非空）→ 返回空数组而不是 NPE
+        if(Vars.state == null || Vars.state.teams == null) return new Array<>();
+        return Vars.state.teams.cores(this);
+    }
+
+    /** @return 本队是否还有核心（对应原版 {@code TeamData.hasCore()}）。 */
+    public boolean hasCore(){
+        return Vars.state != null && Vars.state.teams != null && Vars.state.teams.hasCore(this);
+    }
+
+    /** @return 本队是否已无核心（对应原版 {@code TeamData.noCores()}）。 */
+    public boolean noCores(){
+        return !hasCore();
+    }
+
+    /** @return 本队的第一个核心瓦片（原版 {@code TeamData.core()}）；无核心返回 null。 */
+    public Tile core(){
+        return Vars.state == null || Vars.state.teams == null ? null : Vars.state.teams.core(this);
+    }
+
     public String localized(){
-        //TODO: 待本地化资源就绪后改为读取 Core.bundle
-        return name;
+        //原版 Team.java:90 = Core.bundle.get("team." + name + ".name", name)
+        //本项目 bundle 缺键返回 ???key???（不能用 get 的 fallback）→ 走 I18n.get 的双形态判定，
+        //取不到时回退到原名字（占位队伍 team#6..team#255 没有对应键）
+        return I18n.get("team." + name + ".name", name);
     }
 
     @Override

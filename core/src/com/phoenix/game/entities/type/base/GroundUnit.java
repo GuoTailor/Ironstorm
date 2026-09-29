@@ -1,4 +1,5 @@
 package com.phoenix.game.entities.type.base;
+import com.phoenix.game.Vars;
 import com.phoenix.game.entities.Predict;
 import com.phoenix.game.entities.Units;
 import com.phoenix.game.entities.type.BaseUnit;
@@ -21,7 +22,10 @@ import com.phoenix.game.world.Tile;
 /**
  * create by GYH on 2024/12/25
  * 最小实现：地面单位。参照 Mindustry mindustry.entities.type.base.GroundUnit 移植。
- * 原版的寻路/核心突袭被简化为“朝最近敌人直线移动”。
+ * <p>{@code attack} 状态照原版：**移动目标永远是敌方核心**（走寻路流场绕墙），
+ * 只有进到射程附近才把核心本身设为攻击目标；打谁另由 {@code updateTargeting()} 决定。
+ * <p>⚠ 本项目让 {@link FlyingUnit} 继承本类（原版 {@code FlyingUnit} 直接继承 {@code BaseUnit}），
+ * 所以本类的状态机会被飞行单位继承 —— 飞行单位在自己类里覆写了 {@code getStartState()} 保住原行为。
  */
 public class GroundUnit extends BaseUnit {
     protected float walkTime;
@@ -36,25 +40,29 @@ public class GroundUnit extends BaseUnit {
         }
 
         public void update() {
-            //最小实现：没有核心建筑系统，直接搜索较远范围内的敌方单位并靠近
-            if(target == null || !target.isValid() || retarget()){
-                target = Units.closestTarget(team, x, y, Math.max(type.attackLength, 700f), u -> type.targetAir || !u.isFlying());
-            }
+            //照原版 GroundUnit.attack：**移动目标始终是敌方核心**（走流场绕墙），而不是"最近的敌方单位"。
+            //打谁由 updateTargeting()/targetClosest() 决定（会挑最近的敌方单位或建筑），
+            //与"往哪走"是两件事 —— 之前把两者混在一起，导致所有敌人一起扑向同一个最近单位、挤成一团。
+            Tile core = getClosestEnemyCore();
 
-            if(target != null){
-                if(dst(target) > range() * 0.75f){
-                    //追击移动目标走直线；被障碍卡住时改用流场绕路，避免一直顶着墙/建筑
-                    if(stuckTime > 30f){
-                        moveTo(PathTarget.enemyCores);
-                    }else{
-                        moveTo(target.getX(), target.getY());
-                    }
-                }else{
-                    velocity.scl(0.9f);
+            if(core == null){
+                //没有敌方核心：朝敌核流场推进；但已经贴近敌方出生点（空投区）时就别往里钻
+                Tile closestSpawn = getClosestSpawner();
+                if(closestSpawn == null || !within(closestSpawn, Vars.state.rules.dropZoneRadius + 85f)){
+                    moveTo(PathTarget.enemyCores);
                 }
             }else{
-                //无可见目标时，朝敌核流场流动（绕墙）。原版语义：无目标 -> 逼近敌方核心。
-                moveTo(PathTarget.enemyCores);
+                float dst = dst(core);
+
+                if(dst < range() / 1.1f){
+                    target = core;
+                }
+
+                if(dst > range() * 0.5f){
+                    moveTo(PathTarget.enemyCores);
+                }
+                //已在射程内就不给速度 —— 靠 drag 自然刹停（本项目 Time.delta() ≈ 1，drag 每帧乘 (1-drag)）
+
             }
         }
     },
@@ -159,6 +167,10 @@ public class GroundUnit extends BaseUnit {
                     x + Angles.trnsx(tra, type.weapon.width, trY),
                     y + Angles.trnsy(tra, type.weapon.width, trY), w, type.weapon.region.getRegionHeight() * Draw.scl, rotation - 90);
         }
+
+        //F12c：单位附加绘制钩子（对应原版 Mech.draw(Player)；如 javelin-ship 的高速护盾）
+        type.drawOverlay(this);
+        Draw.color();
     }
 
     public void behavior() {

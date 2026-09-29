@@ -45,7 +45,7 @@ import static com.phoenix.game.Vars.tilesize;
  *   <li><b>存档</b>：原版实现 SaveTrait 把火写进存档，本工程存档只存瓦片/实体，火不落盘（读档后不恢复）。</li>
  * </ul>
  */
-public class Fire{
+public class Fire implements com.phoenix.game.entities.traits.TypeTrait, com.phoenix.game.entities.traits.Entity{
     /** 场上所有的火（对应原版 fireGroup）。倒序遍历，允许更新中移除自身。 */
     public static final Array<Fire> all = new Array<>();
     /** 按瓦片 pos 索引的火（对应原版 Fire.map）：同一格只会有一团火。 */
@@ -54,6 +54,13 @@ public class Fire{
     private static final float baseLifetime = 1000f, spreadChance = 0.05f, fireballChance = 0.07f;
     /** 音效只在这个距离内播放（原版由音效系统的距离衰减处理）。 */
     private static final float soundRange = 600f;
+
+    /** 实体 id 分配器（原版由 BaseEntity 提供；本项目 Fire 不是 BaseEntity，自带一个）。 */
+    private static int lastid;
+    /** 实体 id（{@code fireGroup} 的映射表按它索引）。 */
+    public int id = lastid++;
+    /** 所属实体组（对应原版 {@code Entity.group}）。 */
+    private transient com.phoenix.game.entities.EntityGroup group;
 
     private Tile tile;
     private Block block;
@@ -77,15 +84,74 @@ public class Fire{
             fire.y = tile.worldy();
             map.put(tile.pos(), fire);
             all.add(fire);
+            fire.add(); //登记进 fireGroup（对应原版 Fire.create 里的 fire.add()）
         }else{
             fire.lifetime = baseLifetime;
             fire.time = 0f;
         }
     }
 
+    /** @return 本实体的同步类型（对应原版 {@code Fire.getTypeID()}）。 */
+    @Override
+    public com.phoenix.game.type.TypeID getTypeID(){
+        return com.phoenix.game.content.TypeIDs.fire;
+    }
+
+    // ---- 实体接口（对应原版 Entity；原版 Fire 继承 TimedEntity，是 Entity）----
+
+    @Override
+    public float getX(){
+        return x;
+    }
+
+    @Override
+    public float getY(){
+        return y;
+    }
+
+    @Override
+    public void setX(float x){
+        this.x = x;
+    }
+
+    @Override
+    public void setY(float y){
+        this.y = y;
+    }
+
+    @Override
+    public int getID(){
+        return id;
+    }
+
+    @Override
+    public void resetID(int id){
+        this.id = id;
+    }
+
+    /** 重新分配一个 id（对应原版 BaseEntity.incrementID）。 */
+    public void incrementID(){
+        id = lastid++;
+    }
+
+    @Override
+    public com.phoenix.game.entities.EntityGroup getGroup(){
+        return group;
+    }
+
+    @Override
+    public void setGroup(com.phoenix.game.entities.EntityGroup group){
+        this.group = group;
+    }
+
+    /** @return 火归属 {@link Vars#fireGroup}（对应原版 {@code Fire.targetGroup()}）。 */
+    @Override
+    public com.phoenix.game.entities.EntityGroup targetGroup(){
+        return Vars.fireGroup;
+    }
+
     /** @return 该格是否有正在燃烧的火。 */
-    public static boolean has(int x, int y){
-        if(Vars.world == null) return false;
+    public static boolean has(int x, int y){        if(Vars.world == null) return false;
         if(x < 0 || y < 0 || x >= Vars.world.width() || y >= Vars.world.height()) return false;
 
         Fire fire = map.get(Pos.get(x, y));
@@ -116,6 +182,8 @@ public class Fire{
     public static void clear(){
         all.clear();
         map.clear();
+        //同步清空 fireGroup（解绑 + 清队列），否则组里会残留指向已清空数组的火
+        if(Vars.fireGroup != null) Vars.fireGroup.clear();
     }
 
     /** @return 场上火的数量（调试用）。 */
@@ -128,7 +196,8 @@ public class Fire{
         return lifetime <= 0f ? 1f : Mathf.clamp(time / lifetime);
     }
 
-    private void update(){
+    @Override
+    public void update(){
         if(Mathf.chance(0.1f * Time.delta())){
             Effects.effect(Fx.fire, x + Mathf.range(4f), y + Mathf.range(4f));
         }
@@ -194,8 +263,11 @@ public class Fire{
         }
     }
 
-    /** 熄灭并摘掉自己（对应原版 {@code Fire.removed}）。 */
-    private void remove(){
+    /** 熄灭并摘掉自己（对应原版 {@code Fire.removed}；覆写 {@code Entity.remove()} 以顺带解绑 fireGroup）。 */
+    @Override
+    @SuppressWarnings("unchecked")
+    public void remove(){
+        if(getGroup() != null) getGroup().remove(this);
         if(tile != null){
             //只摘掉"指向自己"的那条记录：同格可能已经被重新点燃成了另一团火
             map.remove(tile.pos(), this);

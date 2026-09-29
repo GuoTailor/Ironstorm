@@ -16,6 +16,19 @@ public class ConsumeItems extends Consume{
         this.items = items;
     }
 
+    /**
+     * 把消耗清单里的物品登记进"本方块接受的物品"位图（对应原版 {@code ConsumeItems.applyItemFilter}）。
+     * <p>⚠ 登记后**当前没有消费点**：{@code BlockStorage.acceptItem} 刻意不接这条判据（见该处注释与 转换.md）。
+     * 补这个方法是为了消除脆弱结构 —— 否则将来若要按原版恢复那条判据，依赖 ConsumeItems 的方块
+     * （油压机的沙、内燃发电机的煤等）会因位图是空的而**突然全部停摆**。
+     */
+    @Override
+    public void applyItemFilter(com.badlogic.gdx.utils.Bits filter){
+        for(ItemStack stack : items){
+            filter.set(stack.item.id);
+        }
+    }
+
     @Override
     public ConsumeType type(){
         return ConsumeType.item;
@@ -44,5 +57,13 @@ public class ConsumeItems extends Consume{
             if(stack.item == item) return true;
         }
         return false;
+    }
+
+    @Override
+    public void display(com.phoenix.game.world.meta.BlockStats stats){
+        //加成输入（可选消耗）归"可选的增强物品"，否则算"输入"（对应原版 ConsumeItems.display）
+        stats.add(booster ? com.phoenix.game.world.meta.BlockStat.booster
+                : com.phoenix.game.world.meta.BlockStat.input,
+            new com.phoenix.game.world.meta.values.ItemListValue(items));
     }
 }

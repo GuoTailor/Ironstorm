@@ -18,7 +18,9 @@ public class StorageBlock extends Block{
         update = true;
         solid = true;
         destructible = true;
-        health = 120;
+        //刻意偏离修正：此前这里硬编码 health = 120，使子类（container/vault/launch-pad）无法走
+        //Block.init() 的 size*size*40 默认值。原版 BlockStorage（world/BlockStorage.java）不设 health
+        //→ 这里也去掉，具体血量由各子类在 content/Blocks.java 里显式给（与原版 Blocks 一致）。
         hasItems = true;
         itemCapacity = 200;
         entityType = StorageEntity::new;
@@ -41,6 +43,20 @@ public class StorageBlock extends Block{
     @Override
     public boolean outputsItems(){
         return false;
+    }
+
+    /**
+     * 悬停仓库时把选中框绘制转交给它链接的核心（对应原版 {@code StorageBlock.drawSelect}）：
+     * 核心的选中框会一次性把"核心 + 所有与它共享库存的相邻仓库"全部描边，所以仓库自己不重复画。
+     */
+    @Override
+    public void drawSelect(Tile tile){
+        if(!(tile.entity instanceof StorageEntity)) return;
+
+        StorageEntity entity = (StorageEntity)tile.entity;
+        if(entity.linkedCore != null){
+            entity.linkedCore.block().drawSelect(entity.linkedCore);
+        }
     }
 
     /** 仓库实体：可被核心链接；物品由 {@link #handleItem} 存入。 */

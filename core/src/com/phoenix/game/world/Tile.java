@@ -167,6 +167,11 @@ public class Tile implements Position, TargetTrait {
         this.overlay = (Floor)block;
     }
 
+    /** 清除覆盖层（对应原版 {@code Tile.clearOverlay()}）。 */
+    public void clearOverlay(){
+        setOverlay(Blocks.air);
+    }
+
     /**
      * 读档专用：直接还原瓦片的方块/地板/队伍/朝向，跳过 setBlock 的多格自动铺开与 notify 链。
      * 只用于彻底重建世界（整张地图一次载入），避免逐瓦片触发卫星瓦片重铺。
@@ -282,6 +287,18 @@ public class Tile implements Position, TargetTrait {
      */
     public boolean interactable(Team team){
         return team == getTeam();
+    }
+
+    /**
+     * 该瓦片是否处于"敌方作弊 AI"控制之下（对应原版 {@code Tile.isEnemyCheat()}）：
+     * 作弊波次里敌方建筑不消耗资源/弹药。
+     * <p>等价于原版 {@code getTeam() == state.rules.waveTeam && state.rules.enemyCheat}，
+     * 只是补了 {@code Vars.state/rules} 的 null 守卫（本项目菜单期 state 可能为空）。
+     * <p>消费点：{@code ConsumeModule.update}（作弊时直接判有效、跳过消耗判定）。
+     */
+    public boolean isEnemyCheat(){
+        return Vars.state != null && Vars.state.rules != null
+            && Vars.state.rules.enemyCheat && getTeam() == Vars.state.rules.waveTeam;
     }
 
     public Tile getNearby(int dx, int dy){

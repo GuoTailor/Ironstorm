@@ -1,5 +1,6 @@
 package com.phoenix.game.core;
 
+import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.phoenix.game.math.Angles;
 import com.phoenix.game.math.Mathf;
@@ -20,6 +21,12 @@ public class Lines{
         Drawf.stroke(width);
     }
 
+    /** 同时设置线宽与颜色（对应 arc 的 {@code Lines.stroke(thick, color)}：先记线宽再 {@code Draw.color}）。 */
+    public static void stroke(float width, Color color){
+        Drawf.stroke(width);
+        Draw.color(color);
+    }
+
     /** 画一条线段。 */
     public static void line(float x, float y, float x2, float y2){
         Drawf.begin(ShapeRenderer.ShapeType.Filled);
@@ -37,6 +44,20 @@ public class Lines{
         line(x - hx, y - hy, x + hx, y + hy);
     }
 
+    /**
+     * 虚线：把整条线等分成 divisions 段，**只画下标为偶数的段**（照抄 arc 的 {@code Lines.dashLine}）。
+     */
+    public static void dashLine(float x1, float y1, float x2, float y2, int divisions){
+        float dx = x2 - x1, dy = y2 - y1;
+
+        for(int i = 0; i < divisions; i++){
+            if(i % 2 == 0){
+                line(x1 + ((float)i / divisions) * dx, y1 + ((float)i / divisions) * dy,
+                     x1 + ((i + 1f) / divisions) * dx, y1 + ((i + 1f) / divisions) * dy);
+            }
+        }
+    }
+
     /** 空心圆。 */
     public static void circle(float x, float y, float radius){
         circle(x, y, radius, segments(radius));
@@ -48,6 +69,24 @@ public class Lines{
         float step = 360f / segments;
         for(int i = 0; i < segments; i++){
             float a1 = i * step, a2 = (i + 1) * step;
+            line(x + Angles.trnsx(a1, radius), y + Angles.trnsy(a1, radius),
+                 x + Angles.trnsx(a2, radius), y + Angles.trnsy(a2, radius));
+        }
+    }
+
+    /**
+     * 虚线圆（照抄 arc 的 {@code Lines.dashCircle}）：分段数 = 10 + radius * 0.6f（为奇数则 +1），
+     * **只画下标为奇数的段**，角度从 +90 起算——段划分与原版逐字一致，圈的大小/疏密不会走样。
+     * <p>这是原版炮塔射程圈（{@code Drawf.dashCircle}）/超频范围等指示圈的基础图元。
+     */
+    public static void dashCircle(float x, float y, float radius){
+        float scaleFactor = 0.6f;
+        int sides = 10 + (int)(radius * scaleFactor);
+        if(sides % 2 == 1) sides++;
+
+        for(int i = 0; i < sides; i++){
+            if(i % 2 == 0) continue;
+            float a1 = 360f / sides * i + 90f, a2 = 360f / sides * (i + 1) + 90f;
             line(x + Angles.trnsx(a1, radius), y + Angles.trnsy(a1, radius),
                  x + Angles.trnsx(a2, radius), y + Angles.trnsy(a2, radius));
         }

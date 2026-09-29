@@ -1,4 +1,4 @@
-sourceCompatibility = 21
+//字节码版本由 root build.gradle 的 JavaCompile 配置统一决定（Gradle 9 已移除 project 级 sourceCompatibility）
 sourceSets.main.java.srcDirs = [ "src/" ]
 sourceSets.main.resources.srcDirs = ["../assets"]
 
@@ -6,6 +6,18 @@ project.ext.mainClassName = "com.phoenix.game.DesktopLauncher"
 project.ext.assetsDir = new File("../assets")
 
 import org.gradle.internal.os.OperatingSystem
+
+dependencies {
+    //对齐 gdx_demo：把 lwjgl 抬到 $lwjgl3Version，避免 gdx 传递依赖拉到旧版并在新 JDK 上告警
+    constraints {
+        implementation("org.lwjgl:lwjgl:$lwjgl3Version")
+        implementation("org.lwjgl:lwjgl-glfw:$lwjgl3Version")
+        implementation("org.lwjgl:lwjgl-jemalloc:$lwjgl3Version")
+        implementation("org.lwjgl:lwjgl-openal:$lwjgl3Version")
+        implementation("org.lwjgl:lwjgl-opengl:$lwjgl3Version")
+        implementation("org.lwjgl:lwjgl-stb:$lwjgl3Version")
+    }
+}
 
 tasks.register('run', JavaExec) {
     dependsOn classes

@@ -12,7 +12,6 @@ import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.Touchable;
 import com.badlogic.gdx.scenes.scene2d.ui.Button;
-import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.phoenix.game.Vars;
@@ -21,6 +20,7 @@ import com.phoenix.game.core.Draw;
 import com.phoenix.game.core.Scl;
 import com.phoenix.game.graphics.MinimapRenderer;
 import com.phoenix.game.math.Mathf;
+import com.phoenix.game.ui.Label;
 import com.phoenix.game.ui.Styles;
 import io.anuke.mindustry.gen.Tex;
 

@@ -2,7 +2,6 @@ package com.phoenix.game.ui.fragments;
 
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.scenes.scene2d.ui.Button;
-import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.WidgetGroup;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
@@ -12,6 +11,7 @@ import com.phoenix.game.content.Items;
 import com.phoenix.game.core.Scl;
 import com.phoenix.game.game.Team;
 import com.phoenix.game.input.InputHandler;
+import com.phoenix.game.ui.Label;
 import com.phoenix.game.ui.Styles;
 import com.phoenix.game.world.meta.BlockFlag;
 import com.phoenix.game.world.Tile;
@@ -31,10 +31,21 @@ public class HudFragment extends Fragment{
     private Label waveLabel;
     /** 自动存档开关。 */
     private com.badlogic.gdx.scenes.scene2d.ui.CheckBox autosaveCheck;
+    /** 教程引导文字面板（对应原版 HudFragment 的 "tutorial text" 块）；非教程局隐藏。 */
+    private Table tutorialTable;
+    private Label tutorialLabel;
+    private Button tutorialPrev, tutorialNext;
+    /** BOSS 血条所在的外层表（显隐每帧刷新；对应原版 `.visible(() -> state.rules.waves && state.boss() != null)`）。 */
+    private Table bossTable;
     /** 右侧建造菜单。 */
     private final PlacementFragment placementFragment = new PlacementFragment();
     /** 建筑配置面板（点分拣器/指挥中心/物品源等可配置方块时弹出）。 */
     private final com.phoenix.game.ui.fragments.BlockConfigFragment configFragment = new com.phoenix.game.ui.fragments.BlockConfigFragment();
+    /**
+     * 建筑库存面板（点核心/容器等有物品的可存取方块时弹出，对应原版 {@code OverlayFragment.inv}）。
+     * <p>public 供输入层调用（{@code InputHandler.tileTapped} 里的 {@code Vars.hud.inv.showFor/hide}）。
+     */
+    public final BlockInventoryFragment inv = new BlockInventoryFragment();
     private final MinimapFragment minimapFragment = new MinimapFragment();
     private boolean menusShown = true;
 
@@ -130,34 +141,317 @@ public class HudFragment extends Fragment{
         });
         waveTable.add(autosaveCheck).padLeft(Scl.scl(6f));
 
-        top.add(waveTable).left().padTop(Scl.scl(6f));
+        //原版把 BOSS 血条放在 wavesMain（波次按钮那一列）的**第二行**，并用 `fillX` 撑满该列宽度：
+        //`wavesMain.table(Tex.button, t -> t.margin(10f).add(new Bar("boss.health", Pal.health,
+        //   () -> state.boss() == null ? 0f : state.boss().healthf()).blink(Color.white))
+        //   .grow()).fillX().visible(() -> state.rules.waves && state.boss() != null).height(60f)`
+        //本项目波次面板在左上角且是一横排 → 同样嵌一层 wavesMain，让血条宽度 = 波次行的宽度。
+        //⚠ 判定用 `state.boss()`（= 带 StatusEffects.boss 且属波次阵营），不是 getType().boss。
+        bossTable = new Table();
+        bossTable.setBackground(io.anuke.mindustry.gen.Tex.button);
+        bossTable.add(new com.phoenix.game.ui.Bar(
+            com.phoenix.game.world.meta.I18n.get("boss.health", "Boss Health"),
+            com.phoenix.game.graphics.Pal.health,
+            () -> {
+                com.phoenix.game.entities.type.BaseUnit b = Vars.state == null ? null : Vars.state.boss();
+                return b == null ? 0f : b.healthf();
+            }).blink(Color.WHITE)).grow().pad(Scl.scl(10f));
+        bossTable.setVisible(false);
+
+        Table wavesMain = new Table();
+        wavesMain.add(waveTable).left().row();
+        wavesMain.add(bossTable).fillX().height(Scl.scl(60f)).padTop(Scl.scl(6f));
+        top.add(wavesMain).left().padTop(Scl.scl(6f)).row();
+
+        //FPS / ping 显示（对应原版 HudFragment 的 "fps display" 块）。
+        //原版用 IntFormat("fps")/IntFormat("ping") 惰性取值；本项目没有 IntFormat，
+        //改在 MenuFragment.Act 里每帧 setText（文案取自 bundle，缺键时 I18n.get 回退）。
+        Table fpsTable = new Table();
+        Label fpsLabel = new Label("", Styles.outlineLabel);
+        fpsLabel.setAlignment(Align.left);
+        Label pingLabel = new Label("", Styles.outlineLabel);
+        pingLabel.setAlignment(Align.left);
+        fpsTable.add(fpsLabel).left().row();
+        fpsTable.add(pingLabel).left().row();
+        fpsTable.setVisible(false);
+        top.add(fpsTable).left().padTop(Scl.scl(4f));
 
         //右上角小地图（对应原版 HudFragment 里的 parent.fill(t -> { t.add(new Minimap()); ... })）
         Table minimapTable = new Table();
         minimapTable.setFillParent(true);
         minimapTable.top().right();
         minimapTable.add(new com.phoenix.game.ui.Minimap());
+        //坐标显示（对应原版小地图表里 t.row() 之后的 position label）
+        Label positionLabel = new Label("", Styles.outlineLabel);
+        minimapTable.row();
+        minimapTable.add(positionLabel).right().padTop(Scl.scl(2f));
         group.addActor(minimapTable);
 
         //右侧建造菜单独立于世界相机，按 Mindustry PlacementFragment 组织
         placementFragment.build(group);
         //建筑配置面板（点 configurable 方块时弹出）
         configFragment.build(group);
+
+        //建筑库存面板（点核心/容器等有物品的方块时弹出）。
+        //对应原版 OverlayFragment 的 group：一层 childrenOnly 的全屏容器，空白处点击穿透到世界输入。
+        //这里仅内联该容器并挂 inv（不直接用 OverlayFragment.add()：它的 config 实例会与上面
+        //configFragment 同时响应 configTile，导致配置面板显示两份）。
+        WidgetGroup overlay = new WidgetGroup();
+        overlay.setFillParent(true);
+        overlay.setTouchable(com.badlogic.gdx.scenes.scene2d.Touchable.childrenOnly);
+        group.addActor(overlay);
+        inv.build(overlay);
+
+        //移动端：左下角的"取消 / 蓝图面板"按钮（对应原版 MobileInput.buildUI）。
+        //放在建造菜单之后、全屏小地图之前，这样它盖在世界上但压不住小地图。
+        if(Vars.mobile && input() != null){
+            Table mobileTable = new Table();
+            mobileTable.setFillParent(true);
+            mobileTable.bottom().left();
+            input().buildUI(mobileTable);
+            group.addActor(mobileTable);
+        }
+
         //全屏小地图必须最后 build，才能盖在建造菜单之上
         //（对应原版 UI.java 里 minimapfrag.build 在 hudfrag.build 之后）
         minimapFragment.build(group);
+
+        //教程引导文字（对应原版 HudFragment 的 "tutorial text" 块）：只在 rules.tutorial 为真时显示。
+        //原版放**右上角**并靠 !state.rules.tutorial 隐藏小地图；本项目小地图固定在右上角，
+        //所以教程文字改放**顶部居中**，避开波次面板（左上）与小地图（右上）。
+        tutorialTable = new Table();
+        tutorialTable.setFillParent(true);
+        tutorialTable.top();
+        tutorialTable.setVisible(false);
+        group.addActor(tutorialTable);
+
+        tutorialLabel = new Label("", Styles.outlineLabel);
+        tutorialLabel.setWrap(true);
+        tutorialLabel.setAlignment(Align.center);
+        tutorialTable.add(tutorialLabel).width(Scl.scl(420f)).padTop(Scl.scl(64f)).row();
+
+        Table tutorialNav = new Table();
+        tutorialPrev = button("◀");
+        tutorialPrev.addListener(new ClickListener(){
+            @Override public void clicked(com.badlogic.gdx.scenes.scene2d.InputEvent event, float x, float y){
+                if(Vars.control != null && Vars.control.tutorial != null) Vars.control.tutorial.prevSentence();
+            }
+        });
+        tutorialNext = button("▶");
+        tutorialNext.addListener(new ClickListener(){
+            @Override public void clicked(com.badlogic.gdx.scenes.scene2d.InputEvent event, float x, float y){
+                if(Vars.control != null && Vars.control.tutorial != null) Vars.control.tutorial.nextSentence();
+            }
+        });
+        tutorialNav.add(tutorialPrev).size(Scl.scl(38f)).padRight(Scl.scl(6f));
+        tutorialNav.add(tutorialNext).size(Scl.scl(38f));
+        tutorialTable.add(tutorialNav);
+
+        //暂停提示（对应原版 HudFragment 的 "paused table"：顶部居中的小黑条 "$paused"）。
+        //⚠ 本项目教程文字也占顶部居中（见上，从 padTop 64px 起）→ 提示条压在最顶部，两者不重叠
+        Table pausedTable = new Table();
+        pausedTable.setFillParent(true);
+        pausedTable.top();
+        pausedTable.setTouchable(com.badlogic.gdx.scenes.scene2d.Touchable.disabled);
+        pausedTable.setVisible(false);
+        group.addActor(pausedTable);
+
+        Table pausedInner = new Table();
+        pausedInner.setBackground(io.anuke.mindustry.gen.Tex.buttonTrans);
+        pausedInner.add(new Label(com.phoenix.game.world.meta.I18n.get("paused", "Paused"), Styles.defaultLabel)).pad(Scl.scl(5f));
+        pausedTable.add(pausedInner).padTop(Scl.scl(6f));
+
+        //'saving' 指示器（对应原版 HudFragment 的 "saving indicator"：底部居中 "$saveload" 小字）
+        Table savingTable = new Table();
+        savingTable.setFillParent(true);
+        savingTable.bottom();
+        savingTable.setTouchable(com.badlogic.gdx.scenes.scene2d.Touchable.disabled);
+        savingTable.setVisible(false);
+        group.addActor(savingTable);
+
+        savingTable.add(new Label(com.phoenix.game.world.meta.I18n.get("saveload", "Saving..."), Styles.outlineLabel));
+
+        //空投区警告（对应原版 HudFragment 的 "spawner warning" 块）：
+        //整屏表居中放一个黑底 Label，alpha 每帧 lerp 到 playerNear。
+        //⚠ 偏离：原版把背景/内边距挂在 table(Styles.black, ...).margin(6) 上；本项目 Table/Cell 没有 margin()
+        //  → 改用 pad(6)。label 颜色在白/猩红间脉动照抄原版。
+        Table nearTable = new Table();
+        nearTable.setFillParent(true);
+        nearTable.setTouchable(com.badlogic.gdx.scenes.scene2d.Touchable.disabled);
+        group.addActor(nearTable);
+
+        Table nearInner = new Table();
+        nearInner.setBackground(Styles.black);
+        Label nearLabel = new Label(com.phoenix.game.world.meta.I18n.get("nearpoint", "LEAVE DROP POINT IMMEDIATELY"), Styles.defaultLabel);
+        nearInner.add(nearLabel).pad(Scl.scl(6f));
+        nearTable.add(nearInner);
+        nearTable.getColor().a = 0f;
+
+        //等待玩家提示（对应原版 "waiting for players" 块）：仅在服务器等待玩家时可见。
+        //⚠ 偏离：原版 fill 表未禁用触摸；本项目整屏表禁用触摸，避免挡住建造/操作输入。
+        Table waitingTable = new Table();
+        waitingTable.setFillParent(true);
+        waitingTable.setTouchable(com.badlogic.gdx.scenes.scene2d.Touchable.disabled);
+        group.addActor(waitingTable);
+
+        Table waitingInner = new Table();
+        waitingInner.setBackground(io.anuke.mindustry.gen.Tex.button);
+        waitingInner.add(new Label(com.phoenix.game.world.meta.I18n.get("waiting.players", "Waiting for players..."), Styles.defaultLabel)).pad(Scl.scl(5f));
+        waitingTable.add(waitingInner);
+
+        //'core is under attack' 提示（对应原版 "'core is under attack' table"）：
+        //整屏顶部按钮底 Label，收到 teamCoreDamage 事件后 240 帧内淡入淡出。
+        Table coreTable = new Table();
+        coreTable.setFillParent(true);
+        coreTable.setTouchable(com.badlogic.gdx.scenes.scene2d.Touchable.disabled);
+        coreTable.top();
+        group.addActor(coreTable);
+
+        Table coreInner = new Table();
+        coreInner.setBackground(io.anuke.mindustry.gen.Tex.button);
+        Label coreLabel = new Label(com.phoenix.game.world.meta.I18n.get("coreattack", "< Core is under attack! >"), Styles.defaultLabel);
+        coreInner.add(coreLabel).pad(Scl.scl(2f));
+        coreTable.add(coreInner).padTop(Scl.scl(30f));
+
+        //收到"核心被攻击"事件后计时 240 帧（对应原版 notifDuration / coreAttackTime）
+        final float notifDuration = 240f;
+        final float[] coreAttackTime = {0f};
+        final float[] coreAttackOpacity = {0f};
+        com.phoenix.game.core.Events.on(com.phoenix.game.game.EventType.Trigger.teamCoreDamage,
+            () -> coreAttackTime[0] = notifDuration);
+
+        //两者每帧刷新（与 waveLabel 同一模式；暂停判定对应原版 visible(() -> state.isPaused())）
+        group.addActor(new MenuFragment.Act(() -> {
+            if(pausedTable != null) pausedTable.setVisible(Vars.state != null && Vars.state.isPaused());
+            if(savingTable != null) savingTable.setVisible(Vars.saves != null && Vars.saves.isSaving());
+        }));
 
         //每帧刷新顶部状态
         group.addActor(new MenuFragment.Act(() -> {
             if(waveLabel != null){
                 waveLabel.setText(waveStatus());
             }
+            //BOSS 血条显隐（对应原版 `.visible(() -> state.rules.waves && state.boss() != null)`）
+            if(bossTable != null){
+                bossTable.setVisible(Vars.state != null && Vars.state.rules != null
+                    && Vars.state.rules.waves && Vars.state.boss() != null);
+            }
+        }));
+
+        //教程文字每帧刷新（对应原版 labelWrap(() -> control.tutorial.stage.text()) 的惰性取值）
+        group.addActor(new MenuFragment.Act(() -> {
+            if(tutorialTable == null) return;
+            boolean active = Vars.state != null && Vars.state.rules != null && Vars.state.rules.tutorial
+                && Vars.control != null && Vars.control.tutorial != null;
+            tutorialTable.setVisible(active);
+            if(active){
+                com.phoenix.game.game.Tutorial tut = Vars.control.tutorial;
+                tutorialLabel.setText(tut.stage.text()
+                    + (tut.canNext() ? "\n\n" + com.phoenix.game.world.meta.I18n.get("tutorial.next", "next") : ""));
+                tutorialPrev.setVisible(tut.canPrev());
+                tutorialNext.setVisible(tut.canNext());
+            }
+        }));
+
+        //FPS / ping 每帧刷新（对应原版 info.visible(() -> Core.settings.getBool("fps")) + 惰性文本；
+        //ping 只在联机时显示，对应原版 label(...).visible(net::client)）
+        group.addActor(new MenuFragment.Act(() -> {
+            if(fpsTable == null) return;
+            boolean show = com.phoenix.game.core.Core.settings.getBool("fps");
+            fpsTable.setVisible(show);
+            if(!show) return;
+
+            String fpsFmt = com.phoenix.game.world.meta.I18n.get("fps", "FPS: {0}");
+            fpsLabel.setText(fpsFmt.replace("{0}", String.valueOf(com.phoenix.game.core.Core.graphics.getFramesPerSecond())));
+
+            boolean connected = Vars.netClient != null && Vars.netClient.isConnected();
+            pingLabel.setVisible(connected);
+            if(connected){
+                String pingFmt = com.phoenix.game.world.meta.I18n.get("ping", "Ping: {0}ms");
+                pingLabel.setText(pingFmt.replace("{0}", String.valueOf(Vars.netClient.getPing())));
+            }
+        }));
+
+        //坐标显示每帧刷新（对应原版 visible(() -> Core.settings.getBool("position") && !state.rules.tutorial)）
+        group.addActor(new MenuFragment.Act(() -> {
+            if(positionLabel == null) return;
+            boolean show = com.phoenix.game.core.Core.settings.getBool("position")
+                && Vars.state != null && Vars.state.rules != null && !Vars.state.rules.tutorial
+                && Vars.player != null && Vars.world != null;
+            positionLabel.setVisible(show);
+            if(show){
+                positionLabel.setText(Vars.world.toTile(Vars.player.x) + "," + Vars.world.toTile(Vars.player.y));
+            }
+        }));
+
+        //空投区警告每帧刷新（对应原版 update：整表 alpha lerp 到 playerNear，label 颜色白↔猩红脉动）。
+        //⚠ Mathf.num 本项目不存在 → 用三元表达式取 1f/0f。
+        group.addActor(new MenuFragment.Act(() -> {
+            if(nearTable == null) return;
+            float playerNear = (Vars.spawner != null && Vars.spawner.playerNear()) ? 1f : 0f;
+            nearTable.getColor().a = com.phoenix.game.math.Mathf.lerpDelta(nearTable.getColor().a, playerNear, 0.1f);
+            nearLabel.getColor().set(Color.WHITE).lerp(Color.SCARLET,
+                com.phoenix.game.math.Mathf.absin(com.phoenix.game.core.Time.time(), 10f, 1f));
+        }));
+
+        //等待玩家提示每帧刷新（对应原版 visible(() -> netServer.isWaitingForPlayers())）
+        group.addActor(new MenuFragment.Act(() -> {
+            if(waitingTable == null) return;
+            waitingTable.setVisible(Vars.netServer != null && Vars.netServer.isWaitingForPlayers());
+        }));
+
+        //核心被攻击提示每帧刷新（对应原版 t.top().visible(...) 里的淡入淡出逻辑）
+        group.addActor(new MenuFragment.Act(() -> {
+            if(coreTable == null) return;
+            if(Vars.state == null || Vars.state.isMenu() || Vars.player == null){
+                coreAttackTime[0] = 0f;
+                coreTable.setVisible(false);
+                return;
+            }
+            coreTable.getColor().a = coreAttackOpacity[0];
+            coreAttackOpacity[0] = com.phoenix.game.math.Mathf.lerpDelta(coreAttackOpacity[0], coreAttackTime[0] > 0 ? 1f : 0f, 0.1f);
+            coreAttackTime[0] -= com.phoenix.game.core.Time.delta();
+            coreTable.setVisible(coreAttackOpacity[0] > 0f);
+            coreLabel.getColor().set(Color.ORANGE).lerp(Color.SCARLET,
+                com.phoenix.game.math.Mathf.absin(com.phoenix.game.core.Time.time(), 2f, 1f));
         }));
     }
 
     /** @return 当前输入处理器 */
     private InputHandler input(){
         return Vars.control == null ? null : Vars.control.input;
+    }
+
+    /**
+     * 开局降落时的全屏白闪（对应原版 {@code HudFragment.showLand}）：
+     * 往 HUD 所在 stage 的顶层塞一张铺满屏幕的白色 Image，0.8 秒淡出后自删。
+     * <p>⚠ <b>与 libgdx 的差异</b>：原版 {@code new Image()} 用的是 arc 的默认白色 drawable；
+     * libgdx 的 {@code Image} 没有默认 drawable（不给就什么都画不出来）→ 这里显式给一个 {@code white} 贴图区域
+     * （缺失时回退 {@code blank}，与 {@code Renderer.region(...)} 同口径）。
+     * <p>⚠ <b>偏离</b>：原版还在 update 钩子里每帧 {@code image.toFront()} 并在菜单态 {@code image.remove()}；
+     * 本项目 {@code showLand()} 只在 {@code Trigger.newGame}（非菜单态）被调用，0.8s 后自动移除，
+     * 故省去该 update 钩子。
+     */
+    public void showLand(){
+        if(group == null || group.getStage() == null) return;
+
+        com.badlogic.gdx.graphics.g2d.TextureRegion white = com.phoenix.game.core.Core.atlas == null
+            ? null : com.phoenix.game.core.Core.atlas.findRegion("white");
+        if(white == null && com.phoenix.game.core.Core.atlas != null){
+            white = com.phoenix.game.core.Core.atlas.findRegion("blank");
+        }
+        if(white == null) return;
+
+        com.badlogic.gdx.scenes.scene2d.ui.Image image = new com.badlogic.gdx.scenes.scene2d.ui.Image(
+            new com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable(white));
+        image.getColor().a = 1f;
+        image.setTouchable(com.badlogic.gdx.scenes.scene2d.Touchable.disabled);
+        //铺满 stage（fillParent 由 Widget.validate() 在绘制时生效）
+        image.setFillParent(true);
+        image.addAction(com.badlogic.gdx.scenes.scene2d.actions.Actions.sequence(
+            com.badlogic.gdx.scenes.scene2d.actions.Actions.fadeOut(0.8f),
+            com.badlogic.gdx.scenes.scene2d.actions.Actions.removeActor()));
+        group.getStage().addActor(image);
     }
 
     /** 弹出读档对话框（HUD 用）：共用静态实现。 */

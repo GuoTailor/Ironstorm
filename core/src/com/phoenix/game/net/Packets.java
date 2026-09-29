@@ -27,6 +27,18 @@ public class Packets {
         KickReason(boolean quiet){
             this.quiet = quiet;
         }
+
+        /**
+         * 取本地化的踢出原因文本（对应原版 {@code KickReason.toString()}：
+         * {@code Core.bundle.get("server.kicked." + name())}）。
+         * <p>原版直接调 {@code Core.bundle.get}，缺键时返回 {@code ???key???}；
+         * 本项目 bundle 裁剪过，所以走 {@code I18n.get} 兜住"缺键 / bundle 未初始化"两种情况。
+         * <p>注意 {@code NetConnection.kick} 打日志用的是 {@code name()}，不受本方法影响。
+         */
+        @Override
+        public String toString(){
+            return com.phoenix.game.world.meta.I18n.get("server.kicked." + name(), name());
+        }
     }
 
     /** 服务端管理动作（@Remote onAdminRequest 的参数，后续阶段接入）。 */
@@ -648,6 +660,109 @@ public class Packets {
             x = buffer.getFloat();
             y = buffer.getFloat();
             queue = buffer.get() == 1;
+        }
+    }
+
+    /**
+     * 服务端 → 客户端：玩家列表整表快照。
+     * <p>原版每个客户端都有全部玩家的 {@code Player} 实体（随实体同步走）；本项目远程玩家只存在于服务端，
+     * 客户端没有他们的 {@code Player} 对象 → 用**整表快照**广播（玩家加入/离开/权限变更时）。
+     * 客户端收到后重建 {@code playerGroup} 里的远程玩家（本地玩家不动）。
+     */
+    public static class PlayerListSync implements Packet {
+        public String[] uuids = {}, names = {}, usids = {};
+        /** 玩家颜色（RGBA8888 int，对应 {@code Color.toIntBits()}）。 */
+        public int[] colors = {};
+        public boolean[] admins = {};
+        public byte[] teams = {};
+
+        @Override
+        public void write(ByteBuffer buffer){
+            buffer.putShort((short)uuids.length);
+            for(int i = 0; i < uuids.length; i++){
+                TypeIO.writeString(buffer, uuids[i]);
+                TypeIO.writeString(buffer, names[i]);
+                TypeIO.writeString(buffer, usids[i]);
+                buffer.putInt(colors[i]);
+                buffer.put((byte)(admins[i] ? 1 : 0));
+                buffer.put(teams[i]);
+            }
+        }
+
+        @Override
+        public void read(ByteBuffer buffer){
+            int n = buffer.getShort();
+            if(n < 0 || n > 512) n = 0;
+            uuids = new String[n];
+            names = new String[n];
+            usids = new String[n];
+            colors = new int[n];
+            admins = new boolean[n];
+            teams = new byte[n];
+            for(int i = 0; i < n; i++){
+                uuids[i] = TypeIO.readString(buffer);
+                names[i] = TypeIO.readString(buffer);
+                usids[i] = TypeIO.readString(buffer);
+                colors[i] = buffer.getInt();
+                admins[i] = buffer.get() != 0;
+                teams[i] = buffer.get();
+            }
+        }
+    }
+
+    /**
+     * 客户端 → 服务端：管理员操作请求（对应原版 {@code Call.onAdminRequest}）。
+     * <p>服务端在本项目里直接执行（不是每个客户端都有 Player 实体），鉴权照原版
+     * {@code NetServer.onAdminRequest}：发起者必须是管理员、目标不能是管理员（除非发起者是房主）、不能是自己。
+     */
+    public static class AdminRequest implements Packet {
+        /** 目标玩家 uuid。 */
+        public String uuid;
+        /** {@link AdminAction} 的 ordinal。 */
+        public byte action;
+
+        @Override
+        public void write(ByteBuffer buffer){
+            TypeIO.writeString(buffer, uuid);
+            buffer.put(action);
+        }
+
+        @Override
+        public void read(ByteBuffer buffer){
+            uuid = TypeIO.readString(buffer);
+            action = buffer.get();
+        }
+    }
+
+    /**
+     * 服务端 → 客户端：管理员 trace 的响应包（对应原版 {@code Call.onTraceInfo}）。
+     * <p>原版 RPC 携带目标 {@code Player} 实体引用 + {@code TraceInfo}；本项目没有 RPC 层，
+     * 客户端也没有远端玩家在服务端的实体 → 改携带目标玩家 uuid（与 {@link AdminRequest} 同款做法），
+     * 客户端用本地 {@code remotePlayers} 按 uuid 解析出 {@code Player}。
+     * <p>{@code TraceInfo} 的 4 个字段走 {@link TypeIO#writeTraceInfo}/{@link TypeIO#readTraceInfo}（与原版一致）。
+     */
+    public static class TraceInfoPacket implements Packet {
+        /** 被追踪玩家的 uuid（客户端据此解析 Player）。 */
+        public String playerUuid;
+        /** 追踪信息（ip/uuid/modded/mobile）。 */
+        public Administration.TraceInfo info;
+
+        @Override
+        public void write(ByteBuffer buffer){
+            TypeIO.writeString(buffer, playerUuid);
+            TypeIO.writeTraceInfo(buffer, info);
+        }
+
+        @Override
+        public void read(ByteBuffer buffer){
+            playerUuid = TypeIO.readString(buffer);
+            info = TypeIO.readTraceInfo(buffer);
+        }
+
+        @Override
+        public void reset(){
+            playerUuid = null;
+            info = null;
         }
     }
 }

@@ -1,5 +1,6 @@
 package com.phoenix.game.world.blocks;
 
+import com.phoenix.game.type.Liquid;
 import com.phoenix.game.world.Block;
 import com.phoenix.game.world.Tile;
 
@@ -50,6 +51,16 @@ public class BlockPart extends Block{
     @Override
     public boolean isHidden(){
         return true;
+    }
+
+    /**
+     * 卫星格是否接受液体：转发给中心格判定（对应原版 {@code BlockPart.acceptLiquid}）。
+     * <p>不做转发的话会落到 {@code Block.acceptLiquid}（卫星格没有液体消耗器、位图为空 → 拒绝一切液体）。
+     */
+    @Override
+    public boolean acceptLiquid(Tile tile, Tile source, Liquid liquid, float amount){
+        Block block = tile.link().block();
+        return block.hasLiquids && block.acceptLiquid(tile.link(), source, liquid, amount);
     }
 
     @Override

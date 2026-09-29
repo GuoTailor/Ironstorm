@@ -1,6 +1,6 @@
 apply plugin: "java"
 
-sourceCompatibility = 1.8
+//字节码版本由 root build.gradle 的 JavaCompile 配置统一决定（Gradle 9 已移除 project 级 sourceCompatibility）
 sourceSets.main.java.srcDirs = ["src/"]
 
 
@@ -216,7 +216,7 @@ def tileImage = { File file ->
     ImageIO.write(result, "png", file)
 }
 
-task swapColors() {
+tasks.register('swapColors') {
     doLast {
         if (project.hasProperty("colors")) {
             def carr = new File(getProperty("colors")).text.split("\n")
@@ -249,7 +249,7 @@ task swapColors() {
     }
 }
 
-task antialiasImages() {
+tasks.register('antialiasImages') {
     doLast {
         for (def img : project.getProperty("images").split(",")) {
             println(project.getProperty("startdir") + "/" + img)
@@ -258,7 +258,7 @@ task antialiasImages() {
     }
 }
 
-task scaleImages() {
+tasks.register('scaleImages') {
     doLast {
         for (def img : project.getProperty("images").split(",")) {
             println(project.getProperty("startdir") + "/" + img)
@@ -267,7 +267,7 @@ task scaleImages() {
     }
 }
 
-task tileImages() {
+tasks.register('tileImages') {
     doLast {
         for (def img : project.getProperty("images").split(",")) {
             println(project.getProperty("startdir") + "/" + img)
@@ -276,7 +276,8 @@ task tileImages() {
     }
 }
 
-task pack(dependsOn: classes) {
+tasks.register('pack') {
+    dependsOn classes
 
     doLast {
         //cleanup old sprites
@@ -298,7 +299,7 @@ task pack(dependsOn: classes) {
             }
 
             jvmArgs("-Djava.awt.headless=true")
-            main = "io.anuke.mindustry.Upscaler"
+            mainClass = "io.anuke.mindustry.Upscaler"
             classpath = sourceSets.main.runtimeClasspath
             standardInput = System.in
             workingDir = "../core/assets-raw/sprites_out/ui/icons"
@@ -325,20 +326,22 @@ task pack(dependsOn: classes) {
     }
 }
 
-task genSprites(dependsOn: classes, type: JavaExec) {
+tasks.register('genSprites', JavaExec) {
+    dependsOn classes
     finalizedBy 'antialiasGen'
 
-    main = "io.anuke.mindustry.ImagePacker"
+    mainClass = "io.anuke.mindustry.ImagePacker"
     classpath = sourceSets.main.runtimeClasspath
     jvmArgs("-Djava.awt.headless=true")
     standardInput = System.in
     workingDir = genFolder
 }
 
-task updateBundles(dependsOn: classes, type: JavaExec) {
+tasks.register('updateBundles', JavaExec) {
+    dependsOn classes
     file(genFolder).mkdirs()
 
-    main = "io.anuke.mindustry.BundleLauncher"
+    mainClass = "io.anuke.mindustry.BundleLauncher"
     classpath = sourceSets.main.runtimeClasspath
     standardInput = System.in
     workingDir = "../core/assets/bundles/"

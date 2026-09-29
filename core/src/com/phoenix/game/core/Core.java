@@ -29,6 +29,8 @@ public class Core {
     public static GL20 gl;
     public static GL20 gl20;
     public static GL30 gl30;
+    /** 持久化配置（对应 arc 的 Core.settings）。 */
+    public static Settings settings = new Settings();
 //    public static World world;
 //    public static ContentLoader content;
 }

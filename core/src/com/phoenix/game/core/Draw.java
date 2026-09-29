@@ -34,6 +34,23 @@ public class Draw{
         Core.batch.setShader(null);
     }
 
+    /**
+     * 当前投影矩阵（对应 arc 的 {@code Draw.proj()}）。
+     * <p>返回的是 {@code Core.batch} 内部那个矩阵的**引用**，所以
+     * {@code Draw.proj().setToOrtho2D(...)} 这类原地改写会立刻作用到批次上
+     * （{@code BlockRenderer} 烘焙"1 像素 1 格"缓冲时就这么用）。
+     * <p>⚠ 与 {@link #proj(com.badlogic.gdx.math.Matrix4)} 的区别：那个是**拷贝**（libgdx 的
+     * {@code setProjectionMatrix} 内部 {@code set()}），所以改传入的矩阵不会影响批次。
+     */
+    public static com.badlogic.gdx.math.Matrix4 proj(){
+        return Core.batch.getProjectionMatrix();
+    }
+
+    /** 设置投影矩阵（对应 arc 的 {@code Draw.proj(Mat)}），内容是拷贝。 */
+    public static void proj(com.badlogic.gdx.math.Matrix4 matrix){
+        Core.batch.setProjectionMatrix(matrix);
+    }
+
     public static Color getColor() {
         return Core.batch.getColor();
     }

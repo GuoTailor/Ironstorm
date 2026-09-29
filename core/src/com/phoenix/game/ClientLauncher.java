@@ -17,6 +17,7 @@ import com.badlogic.gdx.graphics.g2d.freetype.FreeTypeFontGeneratorLoader;
 import com.badlogic.gdx.graphics.g2d.freetype.FreetypeFontLoader;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.InputMultiplexer;
+import com.badlogic.gdx.input.GestureDetector;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.utils.I18NBundle;
@@ -33,6 +34,7 @@ import com.phoenix.game.core.Logic;
 import com.phoenix.game.core.Renderer;
 import com.phoenix.game.core.Scl;
 import com.phoenix.game.core.Time;
+import com.phoenix.game.core.Version;
 import com.phoenix.game.ui.Styles;
 import com.phoenix.game.ui.fragments.ChatFragment;
 import com.phoenix.game.ui.fragments.HudFragment;
@@ -65,9 +67,17 @@ public class ClientLauncher extends ApplicationAdapter {
     SpriteBatch batch;
     @Override
     public void create() {
+        //照原版在启动早期初始化版本信息（本项目 Version.init() 是空实现，字段已在声明处硬编码）
+        Version.init();
+
+    
         FileHandle handle = Gdx.files.internal("i18n/bundle");
         Locale locale = Locale.getDefault();
         Locale.setDefault(locale);
+        //本项目的 bundle 是从原版裁剪过的（缺键很多），必须关掉"缺键抛异常"，
+        //否则内容类构造函数读 localizedName/description 时会直接抛 MissingResourceException。
+        //关掉后 get(key) 对缺键返回 "???key???"，所以取值一律走 I18n.get 的双形态判定。
+        I18NBundle.setExceptionOnMissingKey(false);
         Core.bundle = I18NBundle.createBundle(handle, locale);
 
         Core.assets = new AssetManager();
@@ -106,13 +116,19 @@ public class ClientLauncher extends ApplicationAdapter {
             Core.app = Gdx.app;
             Core.graphics = Gdx.graphics;
             Core.files = Gdx.files;
+            //⚠ 必须显式镜像：Core.net 声明后从未赋值（恒 null），而 AboutDialog/DiscordDialog 的
+            //"打开链接"按钮直接调 Core.net.openURI(...) → 不赋值就是点击即 NPE。
+            Core.net = Gdx.net;
             Core.atlas = new TextureAtlas("sprites/sprites.atlas");
             Core.skin = new Skin(Core.atlas);
-            //加载内容（需要在 atlas 就绪之后）
-            Blocks.load();
+            //加载内容（需要在 atlas 就绪之后）：ContentLoader 负责创建全部内容并分配 id
+            Vars.content.createBaseContent();
             Vars.control.loadAsync();
             Vars.renderer = renderer;
-            new UnitTypes().load();
+            Vars.content.init();
+            Vars.content.load();
+            //小地图取色必须在全部方块贴图加载完之后
+            Blocks.loadMinimapColors();
 //            Musics.load();
 //            Sounds.load();
 //            Musics.update();
@@ -120,7 +136,40 @@ public class ClientLauncher extends ApplicationAdapter {
             Tex.load();
             Icon.load();
             setupFonts();
+            //==== 实体系统 / mod 文件树 / 方块索引（对应原版 Vars.init 里的三处实例化）====
+            //照本项目惯例（Vars.hud / Vars.ui 也是在这里赋值），Vars 里只声明字段、不 new。
+            //时机必须在 content.load() 之后：EntityGroup 的构造会建 QuadTree，组内类型也全是内容相关实体类。
+            //组 id 与原版一致（player/tile/bullet/effect/groundEffect/puddle/shield/fire/unit 共 9 个）
+            Vars.entities = new com.phoenix.game.entities.Entities();
+            Vars.playerGroup = Vars.entities.add(com.phoenix.game.entities.type.Player.class).enableMapping();
+            Vars.entities.add(com.phoenix.game.entities.type.TileEntity.class, false);
+            Vars.entities.add(com.phoenix.game.entities.type.Bullet.class).enableMapping();
+            Vars.effectGroup = Vars.entities.add(com.phoenix.game.entities.type.EffectEntity.class, false);
+            Vars.entities.add(com.phoenix.game.entities.traits.DrawTrait.class, false);
+            Vars.puddleGroup = Vars.entities.add(com.phoenix.game.entities.effect.Puddle.class).enableMapping();
+            //⚠ 这里原本还注册过一个 `ForceProjector.ShieldEntity` 组（旧版把护盾做成独立实体、进 shieldGroup）。
+            //   N2c2 批按原版重写后，护盾绘制改由 `Renderer.drawShields` 直接遍历可见瓦片完成
+            //   （本项目不新增实体组）→ 该组与那个空壳实体类一并删除。
+            Vars.fireGroup = Vars.entities.add(com.phoenix.game.entities.effect.Fire.class).enableMapping();
+            Vars.entities.add(com.phoenix.game.entities.type.BaseUnit.class).enableMapping();
+            //mod 文件树必须在 Vars.init()（内部 mods.load()）之前就绪
+            Vars.tree = new com.phoenix.game.core.FileTree();
+            //方块索引：构造器自己挂 WorldLoadEvent/TileChangeEvent，必须早于第一次世界加载
+            Vars.indexer = new com.phoenix.game.ai.BlockIndexer();
+            //DEBUG-MOBILE-START
+            // 调试钩子：桌面端强制走移动端分支（Vars.testMobile 会喂给 Vars.init 里的 mobile 判定）。
+            // 必须在 Vars.init() 之前赋值 —— mobile 在那里一次性算好。
+            if(System.getenv("PHOENIX_MOBILE") != null) Vars.testMobile = true;
+            //DEBUG-MOBILE-END
             Vars.init();
+
+            //帧率上限（对应原版 ClientLauncher.update 里按 fpscap 限帧；本项目改用 libgdx 的 setForegroundFPS）。
+            //设置菜单的滑块会实时改它（见 SettingsMenuDialog），这里负责启动时应用一次 ——
+            //否则永远停在 DesktopLauncher 的硬编码 60，设置项形同虚设（静默缺失，见 plans/phoenix-silent-gaps.md）。
+            //⚠ s > 240 的语义是"无限制"（该滑块的最大档）→ libgdx 传 0。
+            int fpscap = Core.settings.getInt("fpscap", 240);
+            Gdx.graphics.setForegroundFPS(fpscap > 240 ? 0 : fpscap);
+
             Core.assets.finishLoading();
             Fonts.outline.getData().markupEnabled = true;
             Fonts.def.getData().markupEnabled = true;
@@ -132,10 +181,31 @@ public class ClientLauncher extends ApplicationAdapter {
             hudfrag.build(stage.getRoot());
             chatfrag = new ChatFragment();
             chatfrag.build(stage.getRoot());
+            //FloatingDialog 需要 Stage 才能 show()（对应原版 Core.scene）
+            com.phoenix.game.ui.dialogs.FloatingDialog.scene = stage;
+            //UI 门面（对应原版 Vars.ui）：必须在 content.load() 之后构造，
+            //因为 TechTreeDialog 的构造器会立刻展开 TechTree.root
+            Vars.ui = new com.phoenix.game.core.UI();
+
+            //玩家列表（对应原版 UI 里的 listfrag.build(hudGroup)）：
+            //此前漏了这一行 → sField 恒为 null，按 Tab 打开玩家列表直接 NPE（F13b 验证时抓到）
+            if(Vars.ui.listfrag != null){
+                Vars.ui.listfrag.build(stage.getRoot());
+            }
         }
 
         //输入路由：Stage（菜单 + HUD 按钮）优先，其次游戏输入处理器（相机/放置）
-        Gdx.input.setInputProcessor(new InputMultiplexer(stage, Vars.control.input));
+        //移动端再挂一个 GestureDetector：它把原始触摸事件翻译成 tap/longPress/pan/zoom 回调。
+        //顺序很关键 —— Stage 在最前，点中 HUD 按钮时事件被消费，手势层收不到，自然不会误建造；
+        //GestureDetector 放在输入处理器之后，是为了让处理器能先拿到 touchUp（移动端要用它给连线收尾，
+        //而长按之后如果手指没移动，GestureDetector 不会触发 pan/panStop）。
+        if(Vars.mobile){
+            GestureDetector detector = new GestureDetector((GestureDetector.GestureListener)Vars.control.input);
+            detector.setLongPressSeconds(0.4f);
+            Gdx.input.setInputProcessor(new InputMultiplexer(scrollGate(), stage, Vars.control.input, detector));
+        }else{
+            Gdx.input.setInputProcessor(new InputMultiplexer(scrollGate(), stage, Vars.control.input));
+        }
 
         //调试用：设置环境变量 PHOENIX_AUTOPLAY=1 可跳过菜单直接进入战役模式
         String joinTarget = System.getenv("PHOENIX_JOIN");
@@ -163,6 +233,12 @@ public class ClientLauncher extends ApplicationAdapter {
                 }
             }
             menufrag.joinServer(ip, port, "player");
+        }else if(!Core.settings.getBool("playedtutorial", false)){
+            //首次启动自动进教程（对应原版 Control.init 的 playedtutorial 分支）：
+            //原版是 Core.app.post(() -> Core.app.post(this::playTutorial))（延后两帧，等 stage/UI 就绪）。
+            //libgdx 没有 arc 的 post，用 Gdx.app.postRunnable 模拟同样的双重延后。
+            menufrag.hide();
+            Gdx.app.postRunnable(() -> Gdx.app.postRunnable(Vars.control::playTutorial));
         }
     }
 
@@ -208,10 +284,98 @@ public class ClientLauncher extends ApplicationAdapter {
         }};
     }
 
+    /**
+     * 滚轮闸门（放在 InputMultiplexer 最前），做两件事。
+     * <ol>
+     *   <li><b>纠正滚动焦点。</b>libgdx 的 {@code Stage.scrolled} 只看 {@code scrollFocus}、完全不看鼠标位置，
+     *       而这个焦点是 {@code ScrollPane.touchDown} 时设置的、libgdx 从不自动清除。
+     *       于是只要点过一次右下角建造列表（选方块就会点到），滚轮就永远发给那个列表：
+     *       鼠标在世界里滚也只会滚列表，相机再也缩放不了。这里按鼠标实际位置重新指定焦点
+     *       （对应原版 DesktopInput 缩放分支里的 {@code !Core.scene.hasScroll()} 条件）。</li>
+     *   <li>放置可旋转方块时把滚轮截给建造输入（转朝向），否则放行给 Stage/游戏输入（滚列表或缩放）。</li>
+     * </ol>
+     */
+    private com.badlogic.gdx.InputProcessor scrollGate(){
+        return new com.badlogic.gdx.InputAdapter(){
+            @Override
+            public boolean scrolled(float amountX, float amountY){
+                if(stage != null){
+                    com.badlogic.gdx.scenes.scene2d.ui.ScrollPane pane = scrollPaneUnderMouse(stage);
+                    if(stage.getScrollFocus() != pane) stage.setScrollFocus(pane);
+                }
+
+                if(Vars.control != null && Vars.control.input != null && Vars.control.input.scrollRotatesBuild()){
+                    Vars.control.input.scrolled(amountX, amountY);
+                    return true;
+                }
+                return false;
+            }
+        };
+    }
+
+    /** 滚轮闸门用的临时坐标（滚轮事件频繁，避免每次分配）。 */
+    private final com.badlogic.gdx.math.Vector2 scrollTmp = new com.badlogic.gdx.math.Vector2();
+
+    /** @return 鼠标指针下的滚动面板（不在任何面板上时为 null）。 */
+    private com.badlogic.gdx.scenes.scene2d.ui.ScrollPane scrollPaneUnderMouse(Stage stage){
+        stage.screenToStageCoordinates(scrollTmp.set(Gdx.input.getX(), Gdx.input.getY()));
+        com.badlogic.gdx.scenes.scene2d.Actor actor = stage.hit(scrollTmp.x, scrollTmp.y, true);
+        while(actor != null){
+            if(actor instanceof com.badlogic.gdx.scenes.scene2d.ui.ScrollPane){
+                return (com.badlogic.gdx.scenes.scene2d.ui.ScrollPane)actor;
+            }
+            actor = actor.getParent();
+        }
+        return null;
+    }
+
     //DEBUG-SHOT-START
     /** 抓帧计数（PHOENIX_SHOT = 第几帧抓）。 */
     private int shotFrames = 1;
+
+    /** 把当前后缓冲抓成 PNG（翻正后写 d:/IdeaProjects/phoenix/shot.png），然后退出进程。世界/菜单两个分支共用。 */
+    private void debugShot(){
+        int w = Gdx.graphics.getWidth(), h = Gdx.graphics.getHeight();
+        com.badlogic.gdx.graphics.Pixmap src = com.badlogic.gdx.graphics.Pixmap.createFromFrameBuffer(0, 0, w, h);
+        //帧缓冲是上下翻转的：这里直接翻正再存，省掉外部后处理（Add-Type 之类在受限环境下不可用）
+        com.badlogic.gdx.graphics.Pixmap dst = new com.badlogic.gdx.graphics.Pixmap(w, h, src.getFormat());
+        java.nio.ByteBuffer sb = src.getPixels(), db = dst.getPixels();
+        int stride = w * 4;
+        byte[] row = new byte[stride];
+        for(int y = 0; y < h; y++){
+            sb.position(y * stride);
+            sb.get(row);
+            db.position((h - 1 - y) * stride);
+            db.put(row);
+        }
+        com.badlogic.gdx.graphics.PixmapIO.writePNG(
+            Gdx.files.absolute("d:/IdeaProjects/phoenix/shot.png"), dst);
+        src.dispose();
+        dst.dispose();
+        Gdx.app.exit();
+    }
     //DEBUG-SHOT-END
+
+    //DEBUG-BLKSIZE-START
+    /**
+     * 「原版 vs 本项目 数值对照」用的 dump 帧计数（`PHOENIX_BLKSIZE=1`）。
+     * <p>遍历 {@code Vars.content.blocks()} 打印 {@code BLKSIZE <name> <size>} 后退出。
+     * 用途：静态解析 `Blocks.java` 会漏掉"size 写在辅助方法/方块类构造器里"的方块，
+     * 运行时 dump 才是权威。做 health / itemCapacity / power / range 对照时同样用它。
+     * <p>配套对比脚本：{@code C:\Users\GYH\.codebuddy\plans\phoenix_block_size_scan.py}
+     */
+    private int blkSizeFrame;
+    //DEBUG-BLKSIZE-END
+
+
+
+
+
+
+
+
+
+
     //DEBUG-LOGTEST-START
     /** 物流链路自动化验证的帧计数 / 结束帧 / 模式 / 是否已搭建 / 链路瓦片 / 容器瓦片。 */
     private int logTestFrame, logTestEnd = 400, logTestMode = 1;
@@ -231,12 +395,92 @@ public class ClientLauncher extends ApplicationAdapter {
     private java.util.List<String> galleryNames;
     /** 模式 28 用：站在火里验证燃烧状态的单位。 */
     private com.phoenix.game.entities.type.BaseUnit logTestFireUnit;
+    /** 模式 29 用：钻头 → 传送带 → 核心 链路（钻头锚点瓦片、带子瓦片、核心瓦片）。 */
+    private com.phoenix.game.world.Tile drillChainDrill, drillChainCore;
+    private com.phoenix.game.world.Tile[] drillChainTiles;
+    /** 模式 29 变体 B：三台钻头竖排 + 带子接右侧。 */
+    private com.phoenix.game.world.Tile drillChainDrillB, drillChainCoreB;
+    private com.phoenix.game.world.Tile[] drillChainTilesB;
+    /** 模式 29 变体 C：气动钻头（无电）。 */
+    private com.phoenix.game.world.Tile drillChainDrillC, drillChainCoreC;
+    private com.phoenix.game.world.Tile[] drillChainTilesC;
     /** 看门狗线程（死循环定位用）。 */
     private Thread watchdog;
     //DEBUG-LOGTEST-END
 
     @Override
     public void render() {
+        //DEBUG-BLKSIZE-START
+        //临时：dump 全部方块的运行时 size（PHOENIX_BLKSIZE=1），用于「尺寸没搬」扫描。
+        if(System.getenv("PHOENIX_BLKSIZE") != null && blkSizeFrame++ > 2){
+            StringBuilder sb = new StringBuilder();
+            for(com.phoenix.game.world.Block b : Vars.content.blocks()){
+                sb.append("BLKSIZE ").append(b.name).append(' ').append(b.size).append('\n');
+            }
+            System.out.print(sb);
+            Gdx.app.exit();
+            return;
+        }
+        //DEBUG-BLKSIZE-END
+
+        //DEBUG-BLKDATA-START
+        //数值对照 dump（PHOENIX_BLKDATA=1）：逐方块输出 name/size/health/材料。
+        //用途：原版↔本项目「数值保真度」对照批次的运行时核对手段（只解析 Blocks.java 会大量假阳性，
+        //      因为本项目有字段写在 wall()/unitFactory() 这类辅助方法或方块类构造器里）。
+        if(System.getenv("PHOENIX_BLKDATA") != null && blkSizeFrame++ > 2){
+            StringBuilder sb = new StringBuilder();
+            for(com.phoenix.game.world.Block b : Vars.content.blocks()){
+                sb.append("BLKDATA ").append(b.name).append(' ').append(b.size).append(' ').append(b.health)
+                  .append(" cat=").append(b.category)
+                  .append(" bv=").append(b.buildVisibility)
+                  .append(" cap=").append(b.hasItems ? b.itemCapacity : -1);
+                if(b.requirements != null){
+                    sb.append(" req=");
+                    for(com.phoenix.game.type.ItemStack st : b.requirements){
+                        sb.append(st.item.name).append(':').append(st.amount).append(',');
+                    }
+                }
+                sb.append('\n');
+            }
+            System.out.print(sb);
+            Gdx.app.exit();
+            return;
+        }
+        //DEBUG-BLKDATA-END
+
+        //DEBUG-UNITDATA-START
+        //单位数值 dump（PHOENIX_UNITDATA=1）：name/hitsize/health/武器子弹/免疫。
+        //与 BLKDATA 同属「原版↔本项目数值保真度」对照设施。
+        if(System.getenv("PHOENIX_UNITDATA") != null && blkSizeFrame++ > 2){
+            StringBuilder sb = new StringBuilder();
+            for(com.phoenix.game.type.UnitType t : Vars.content.units()){
+                sb.append("UNITDATA ").append(t.name).append(' ').append(t.hitsize).append(' ').append(t.health);
+                //⚠ BulletType 没有 name 字段（Content 只带 id）→ 直接 dump 数值，便于与原版对照
+                sb.append(" bullet=");
+                if(t.weapon == null || t.weapon.bullet == null){
+                    sb.append("none");
+                }else{
+                    sb.append(t.weapon.bullet.damage).append('/').append(t.weapon.bullet.speed).append('/')
+                      .append(t.weapon.bullet.lifetime).append('/').append(t.weapon.bullet.splashDamage).append('/')
+                      .append(t.weapon.bullet.splashDamageRadius);
+                }
+                sb.append(" imm=");
+                if(t.immunities != null){
+                    for(com.phoenix.game.type.StatusEffect e : t.immunities){
+                        sb.append(e.name).append(',');
+                    }
+                }
+                sb.append('\n');
+            }
+            System.out.print(sb);
+            Gdx.app.exit();
+            return;
+        }
+        //DEBUG-UNITDATA-END
+
+
+
+
         //服务端（主机）模式：每帧 drain 入站包 + 周期性同步单位/建筑状态。
         //必须无条件驱动 —— 之前漏了这一句，主机根本收不到任何入站包（表现为客户端握手超时）。
         if(Vars.netServer != null && Vars.netServer.isHosting()){
@@ -263,21 +507,55 @@ public class ClientLauncher extends ApplicationAdapter {
                 };
             }
             Vars.netClient.update();
-            if(Vars.netClient.isConnected() && chatfrag != null) chatfrag.update();
         }
+
+        //聊天框每帧推进（对应原版 ChatFragment 由 HUD 每帧 update）。
+        //⚠ 不能挂在 `isConnected()` 里面：单机 / 断线后仍要显示系统消息（被踢、连接断开）与淡出动画，
+        //  否则这些消息永远看不见（S4b 批修正）。
+        if(chatfrag != null) chatfrag.update();
 
         //战役模式：输入 -> 逻辑 -> 渲染（暂停时只渲染不更新，与 Mindustry 一致）
         if(!Vars.state.isMenu()){
             if(Vars.control.input != null) Vars.control.input.update();
 
+            //局内每帧把"玩家核心库存里已有的物品"标记为已解锁（原版 core/Control.java:436-444：
+            //紧跟 input.update(); 之后、tutorial 之前）。
+            //⚠ 不要挪进 InputHandler.update()：DesktopInput/MobileInput 两个子类都 override 了 update()
+            //  且不调 super（S4b 实测：放那里是死代码，解锁永不生效）。
+            if(Vars.world != null && Vars.world.isZone() && Vars.player != null && Vars.state.teams != null){
+                com.badlogic.gdx.utils.Array<com.phoenix.game.world.Tile> cores =
+                        Vars.state.teams.cores(Vars.player.getTeam());
+                //热路径嵌套循环用下标（libgdx Array 的 for-each 迭代器不能嵌套）
+                for(int i = 0; i < cores.size; i++){
+                    com.phoenix.game.world.Tile coreTile = cores.get(i);
+                    if(coreTile == null || coreTile.entity == null || coreTile.entity.items == null) continue;
+                    com.badlogic.gdx.utils.Array<com.phoenix.game.type.Item> contentItems = Vars.content.items();
+                    for(int j = 0; j < contentItems.size; j++){
+                        com.phoenix.game.type.Item item = contentItems.get(j);
+                        //原版写 tile.items.has(item)（本项目 ItemModule 只有 has(item, amount)）
+                        if(coreTile.entity.items.has(item, 1)){
+                            Vars.data.unlockContent(item);
+                        }
+                    }
+                }
+            }
+
+            //教程（对应原版 Control.update 里的 if(state.rules.tutorial) tutorial.update()）：
+            //故意放在 isPlaying 判定之外 —— 原版 Control.update 每帧都跑（含暂停态），
+            //教程的 pause/unpause 两阶段就是靠"暂停时也推进"才能过。
+            if(Vars.state.rules.tutorial && Vars.control.tutorial != null) Vars.control.tutorial.update();
+
             if(Vars.state.isPlaying()) Logic.update();
             if(Vars.renderer != null) Vars.renderer.update();
 
-
-
-
             ScreenUtils.clear(0.09f, 0.10f, 0.12f, 1f);
-            renderer.draw();
+            //像素化（设置项 pixelate）：打开时世界先渲进低分辨率 FrameBuffer 再放大贴回屏幕
+            //（对应原版 Renderer.update() 里 `if(pixelator.enabled()) pixelator.drawPixelate(); else draw();`）
+            if(renderer.pixelator.enabled()){
+                renderer.pixelator.drawPixelate();
+            }else{
+                renderer.draw();
+            }
 
             //绘制游戏内 HUD（Scene2D 叠加在世界之上）
             if(hudfrag != null){
@@ -286,32 +564,17 @@ public class ClientLauncher extends ApplicationAdapter {
                 stage.draw();
             }
 
+        
+        
+
             //DEBUG-LOGTEST-START
             if(System.getenv("PHOENIX_LOGTEST") != null) debugLogTest();
             //DEBUG-LOGTEST-END
 
+
             //DEBUG-SHOT-START
             String shot = System.getenv("PHOENIX_SHOT");
-            if(shot != null && shotFrames++ == Integer.parseInt(shot)){
-                int w = Gdx.graphics.getWidth(), h = Gdx.graphics.getHeight();
-                com.badlogic.gdx.graphics.Pixmap src = com.badlogic.gdx.graphics.Pixmap.createFromFrameBuffer(0, 0, w, h);
-                //帧缓冲是上下翻转的：这里直接翻正再存，省掉外部后处理（Add-Type 之类在受限环境下不可用）
-                com.badlogic.gdx.graphics.Pixmap dst = new com.badlogic.gdx.graphics.Pixmap(w, h, src.getFormat());
-                java.nio.ByteBuffer sb = src.getPixels(), db = dst.getPixels();
-                int stride = w * 4;
-                byte[] row = new byte[stride];
-                for(int y = 0; y < h; y++){
-                    sb.position(y * stride);
-                    sb.get(row);
-                    db.position((h - 1 - y) * stride);
-                    db.put(row);
-                }
-                com.badlogic.gdx.graphics.PixmapIO.writePNG(
-                    Gdx.files.absolute("d:/IdeaProjects/phoenix/shot.png"), dst);
-                src.dispose();
-                dst.dispose();
-                Gdx.app.exit();
-            }
+            if(shot != null && shotFrames++ == Integer.parseInt(shot)) debugShot();
             //DEBUG-SHOT-END
 
             return;
@@ -322,6 +585,15 @@ public class ClientLauncher extends ApplicationAdapter {
         ScreenUtils.clear(0.57f, 0.77f, 0.85f, 1);
         stage.act(Gdx.graphics.getDeltaTime());
         Time.update();
+
+        //主菜单背景（对应原版 MenuFragment 里 `parent.fill((x, y, w, h) -> renderer.render())`）。
+        //⚠ 放在 stage.draw() 之前、且此时 batch 未 begin —— MenuRenderer.render() 会自己 begin/end 并临时改投影，
+        //   夹在 stage 的 begin/end 中间做会破坏 Scene2D 的批次（投影是 flush 时才生效的，改错了整屏都会花）。
+        //⚠ 懒创建：MenuFragment 的构造早于内容加载，MenuRenderer 构造需要 Blocks/UnitTypes。
+        if(menufrag != null && Vars.content != null && Vars.content.blocks().size > 0){
+            menufrag.renderer().render();
+        }
+
         stage.draw();
 
         //DEBUG-LOGTEST-START
@@ -329,6 +601,12 @@ public class ClientLauncher extends ApplicationAdapter {
         //测试进程就永远不会到达结束帧（表现为挂死）。debugLogTest 内部对 world/player 为 null 已有守卫。
         if(System.getenv("PHOENIX_LOGTEST") != null) debugLogTest();
         //DEBUG-LOGTEST-END
+
+        //DEBUG-SHOT-START
+        //菜单分支同样支持 PHOENIX_SHOT（此前只有世界分支有 —— 验证主菜单/HUD 时会误以为"钩子没生效"）
+        String mshot = System.getenv("PHOENIX_SHOT");
+        if(mshot != null && shotFrames++ == Integer.parseInt(mshot)) debugShot();
+        //DEBUG-SHOT-END
     }
 
     //DEBUG-LOGTEST-START
@@ -418,6 +696,8 @@ public class ClientLauncher extends ApplicationAdapter {
                 case 26: buildEffectGalleryTest(); break;
                 case 27: buildMuzzleTest(); break;
                 case 28: buildFireTest(); break;
+                case 29: buildDrillChainTest(); break;
+                case 30: buildDragLineTest(); break;
                 default: buildConveyorTest(); break;
                 }
                 printLogTestStats();
@@ -444,6 +724,14 @@ public class ClientLauncher extends ApplicationAdapter {
             if(logTestMode == 16 && logTestFrame == 300 && logTestTiles != null && logTestTiles[2] != null){
                 com.phoenix.game.world.Tile reactor = logTestTiles[2];
                 if(reactor.entity != null){
+                    //⚠ 真 NuclearReactor 在"燃料≥5 或 热≥0.5"时被毁会熔毁爆炸（半径 40 格）：本测试只想验证
+                    //  "方块被毁后的行为"，先清燃料并把热清零，让它安静退场
+                    if(reactor.entity instanceof com.phoenix.game.world.blocks.power.NuclearReactor.NuclearReactorEntity){
+                        com.phoenix.game.world.blocks.power.NuclearReactor.NuclearReactorEntity re =
+                            (com.phoenix.game.world.blocks.power.NuclearReactor.NuclearReactorEntity)reactor.entity;
+                        if(re.items != null) re.items.clear();
+                        re.heat = 0f;
+                    }
                     reactor.entity.health(1f);
                     reactor.entity.handleDamage(9999f);
                 }
@@ -652,7 +940,7 @@ public class ClientLauncher extends ApplicationAdapter {
                     enemy.setTeam(com.phoenix.game.game.Team.crux);
                     enemy.set(Vars.player.getX() + 50f + (logTestFrame / 30 % 3) * 14f, Vars.player.getY() + 12f);
                     enemy.health(20f);
-                    com.phoenix.game.entities.Units.add(enemy);
+                    //create() 内部已 Units.add，不要再加一次
                     if(logTestFrame == 40){
                         System.err.println("DBG effect enemy spawned hp=" + enemy.health());
                     }
@@ -693,7 +981,7 @@ public class ClientLauncher extends ApplicationAdapter {
                         enemy.setTeam(com.phoenix.game.game.Team.crux);
                         enemy.set(ax + k * 40f, ay + (k - 1) * 40f);
                         enemy.health(120f);
-                        com.phoenix.game.entities.Units.add(enemy);
+                        //create() 内部已 Units.add，不要再加一次
                     }
 
                     if(logTestFrame == 60){
@@ -733,7 +1021,7 @@ public class ClientLauncher extends ApplicationAdapter {
                     unit.setTeam(Vars.player.getTeam());
                     unit.set(logTestTiles[0].entity.x, logTestTiles[0].entity.y);
                     unit.health(500f);
-                    com.phoenix.game.entities.Units.add(unit);
+                    //create() 内部已 Units.add，不要再加一次
                     logTestFireUnit = unit;
                 }
 
@@ -749,6 +1037,13 @@ public class ClientLauncher extends ApplicationAdapter {
                         + " waterFloor=" + logTestTiles[3].floor().name
                         + " grassFloor=" + logTestTiles[4].floor().name);
                 }
+            }
+
+            //模式 29：钻头 → 带子 → 核心 的逐帧链路状态
+            if(logTestMode == 29 && logTestFrame > 10 && logTestFrame % 30 == 0){
+                System.err.println(drillChainLine("A", drillChainDrill, drillChainTiles, drillChainCore, logTestFrame));
+                System.err.println(drillChainLine("B", drillChainDrillB, drillChainTilesB, drillChainCoreB, logTestFrame));
+                System.err.println(drillChainLine("C", drillChainDrillC, drillChainTilesC, drillChainCoreC, logTestFrame));
             }
 
             if(logTestFrame > 10 && logTestFrame % 30 == 0){
@@ -978,7 +1273,22 @@ public class ClientLauncher extends ApplicationAdapter {
             ((com.phoenix.game.world.blocks.storage.LaunchPad)com.phoenix.game.content.Blocks.launchPad).launchTime = 30f;
         }
 
+        //⚠ 战役地图每次运行随机生成 → 这块区域可能落在**深水**上（原版 validPlace 里
+        //   `isDeep(floor) && !block.floating` 会直接拒绝），表现为"发射台静默放置失败"。
+        //   所以必须像模式 10 那样用 setFloor 强制铺一块实地，让测试确定性通过。
+        for(int dx = -1; dx <= 4; dx++){
+            for(int dy = -1; dy <= 1; dy++){
+                com.phoenix.game.world.Tile o = Vars.world.tile(bx + dx, by + dy);
+                if(o != null) o.setFloor(com.phoenix.game.content.Blocks.grass);
+            }
+        }
+
         com.phoenix.game.world.Tile pad = put(bx, by, com.phoenix.game.content.Blocks.launchPad, 0);
+
+        //N2c1 起发射台按原版耗电（hasPower + consumes.power(1f)）→ 测试必须给它接电，
+        //否则 pad 永远不发射（这正是电力门控生效的表现）。
+        //⚠ 3x3 的锚点在中格（offset = -(size-1)/2 = -1）→ 占地 bx-1..bx+1，电源必须放 bx+2 才相邻。
+        com.phoenix.game.world.Tile psrc = put(bx + 2, by, com.phoenix.game.content.Blocks.powerSource, 0);
 
         //塞满（itemCapacity = 100）
         if(pad != null && pad.entity != null && pad.entity.items != null){
@@ -986,6 +1296,7 @@ public class ClientLauncher extends ApplicationAdapter {
         }
 
         logTestStores = new com.phoenix.game.world.Tile[]{pad};
+        logTestTiles = new com.phoenix.game.world.Tile[]{pad, psrc};
         System.err.println("DBG launchpad built at " + bx + "," + by
             + " ent=" + (pad != null && pad.entity != null)
             + " globalCu=" + (Vars.data == null ? -1 : Vars.data.getItem(com.phoenix.game.content.Items.copper)));
@@ -1000,18 +1311,25 @@ public class ClientLauncher extends ApplicationAdapter {
         clearArea(bx - 3, by - 3, 14, 8);
 
         //三组用例：矿脉 overlay 产铜 / 沙地地板直接产沙 / 钛矿硬度超出机械钻头 tier（应放不上）
+        //机械钻头是 2x2（覆盖 4 格），所以先把每组的 4 格地板统一铺平，
+        //否则会混进地图原有的沙地，让"钛矿不可采"的用例误判成可采
         com.phoenix.game.world.Tile t1 = Vars.world.tile(bx, by);
         com.phoenix.game.world.Tile t2 = Vars.world.tile(bx + 3, by);
         com.phoenix.game.world.Tile t3 = Vars.world.tile(bx + 6, by);
+        for(int dx = 0; dx <= 1; dx++){
+            for(int dy = 0; dy <= 1; dy++){
+                com.phoenix.game.world.Tile o1 = Vars.world.tile(bx + dx, by + dy);
+                if(o1 != null) o1.setFloor(com.phoenix.game.content.Blocks.grass);
+                com.phoenix.game.world.Tile o2 = Vars.world.tile(bx + 3 + dx, by + dy);
+                if(o2 != null) o2.setFloor(com.phoenix.game.content.Blocks.sand);
+                com.phoenix.game.world.Tile o3 = Vars.world.tile(bx + 6 + dx, by + dy);
+                if(o3 != null) o3.setFloor(com.phoenix.game.content.Blocks.grass);
+            }
+        }
         if(t1 != null){
-            t1.setFloor(com.phoenix.game.content.Blocks.grass);
             t1.setOverlay(com.phoenix.game.content.Blocks.oreCopper);
         }
-        if(t2 != null){
-            t2.setFloor(com.phoenix.game.content.Blocks.sand);
-        }
         if(t3 != null){
-            t3.setFloor(com.phoenix.game.content.Blocks.grass);
             t3.setOverlay(com.phoenix.game.content.Blocks.oreTitanium);
         }
 
@@ -1024,7 +1342,7 @@ public class ClientLauncher extends ApplicationAdapter {
         System.err.println("DBG drill t1 overlay=" + (t1 == null ? "?" : t1.overlay().name)
             + " drop=" + (t1 == null || t1.drop() == null ? "null" : t1.drop().name)
             + " canPlaceOn=" + com.phoenix.game.content.Blocks.copperDrill.canPlaceOn(t1)
-            + " d3Valid(expect false)=" + (t3 != null && com.phoenix.game.world.Build.validPlace(t3, com.phoenix.game.content.Blocks.copperDrill)));
+            + " d3Valid(expect false)=" + (t3 != null && com.phoenix.game.world.Build.validPlace(t3, com.phoenix.game.content.Blocks.copperDrill, 0)));
         System.err.println("DBG drill built at " + bx + "," + by
             + " d1=" + (d1 != null && d1.entity != null)
             + " d2=" + (d2 != null && d2.entity != null)
@@ -1032,6 +1350,113 @@ public class ClientLauncher extends ApplicationAdapter {
             + " r1=" + (t1 == null ? "?" : String.valueOf(com.phoenix.game.content.Blocks.copperDrill.resultFor(t1)))
             + " r2=" + (t2 == null ? "?" : String.valueOf(com.phoenix.game.content.Blocks.copperDrill.resultFor(t2)))
             + " r3=" + (t3 == null ? "?" : String.valueOf(com.phoenix.game.content.Blocks.copperDrill.resultFor(t3))));
+    }
+
+    /**
+     * 测试模式 29：机械钻头(2x2, 煤矿) → 传送带 → 核心，复现"传送带上没矿物"。
+     * <p>变体 A：单台钻头，带子接在钻头正下方（正后方输入）。
+     * <p>变体 B：三台钻头竖排（复刻用户截图），带子接在钻头右侧（侧向输入）。
+     */
+    private void buildDrillChainTest(){
+        grantTestItems();
+
+        int bx = Vars.world.toTile(Vars.player.getX()) + 4;
+        int by = Vars.world.toTile(Vars.player.getY());
+        clearArea(bx - 2, by - 10, 22, 20);
+
+        //变体 A：钻头正下方接带子
+        int ax = bx, ay = by + 4;
+        layOre(ax, ay, 2);
+        drillChainDrill = put(ax, ay, com.phoenix.game.content.Blocks.copperDrill, 0);
+        drillChainTiles = new com.phoenix.game.world.Tile[]{
+            put(ax, ay - 1, com.phoenix.game.content.Blocks.conveyor, 2),
+            put(ax, ay - 2, com.phoenix.game.content.Blocks.conveyor, 2),
+            put(ax, ay - 3, com.phoenix.game.content.Blocks.conveyor, 1),
+            put(ax + 1, ay - 3, com.phoenix.game.content.Blocks.conveyor, 1)
+        };
+        drillChainCore = put(ax + 3, ay - 4, com.phoenix.game.content.Blocks.core, 0);
+
+        //变体 B：三台钻头竖排，带子接在最下面那台右侧
+        int cx = bx + 9, cy = by + 4;
+        layOre(cx, cy + 4, 2);
+        layOre(cx, cy + 2, 2);
+        layOre(cx, cy, 2);
+        put(cx, cy + 4, com.phoenix.game.content.Blocks.copperDrill, 0);
+        put(cx, cy + 2, com.phoenix.game.content.Blocks.copperDrill, 0);
+        drillChainDrillB = put(cx, cy, com.phoenix.game.content.Blocks.copperDrill, 0);
+        drillChainTilesB = new com.phoenix.game.world.Tile[]{
+            put(cx + 2, cy, com.phoenix.game.content.Blocks.conveyor, 2),
+            put(cx + 2, cy - 1, com.phoenix.game.content.Blocks.conveyor, 2),
+            put(cx + 2, cy - 2, com.phoenix.game.content.Blocks.conveyor, 1),
+            put(cx + 3, cy - 2, com.phoenix.game.content.Blocks.conveyor, 1)
+        };
+        drillChainCoreB = put(cx + 5, cy - 3, com.phoenix.game.content.Blocks.core, 0);
+
+        //变体 C：气动钻头（无电）——原版气动钻头**不耗电**，若本项目给它加了电力消耗则完全停摆
+        int dx2 = bx + 16, dy2 = by + 4;
+        layOre(dx2, dy2, 2);
+        drillChainDrillC = put(dx2, dy2, com.phoenix.game.content.Blocks.leadDrill, 0);
+        drillChainTilesC = new com.phoenix.game.world.Tile[]{
+            put(dx2, dy2 - 1, com.phoenix.game.content.Blocks.conveyor, 2),
+            put(dx2, dy2 - 2, com.phoenix.game.content.Blocks.conveyor, 2),
+            put(dx2, dy2 - 3, com.phoenix.game.content.Blocks.conveyor, 1),
+            put(dx2 + 1, dy2 - 3, com.phoenix.game.content.Blocks.conveyor, 1)
+        };
+        drillChainCoreC = put(dx2 + 3, dy2 - 4, com.phoenix.game.content.Blocks.core, 0);
+
+        com.phoenix.game.world.Tile a = Vars.world.tile(ax, ay);
+        System.err.println("DBG drillchain built A=" + ax + "," + ay + " B=" + cx + "," + cy
+            + " oreDrop=" + (a == null || a.drop() == null ? "null" : a.drop().name)
+            + " canPlaceOn=" + com.phoenix.game.content.Blocks.copperDrill.canPlaceOn(a)
+            + " A drill=" + (drillChainDrill != null && drillChainDrill.entity != null)
+            + " core=" + (drillChainCore != null && drillChainCore.entity != null)
+            + " B drill=" + (drillChainDrillB != null && drillChainDrillB.entity != null)
+            + " core=" + (drillChainCoreB != null && drillChainCoreB.entity != null)
+            + " resultFor=" + com.phoenix.game.content.Blocks.copperDrill.resultFor(a));
+    }
+
+    /**
+     * 测试模式 30：拖拽连线时多格方块的"重叠跳过"（对应原版 {@code InputHandler.iterateLine} 里的
+     * {@code Rectangle.overlaps} 判定）。机械钻头是 2x2，沿路径逐格铺必然互相压住，原版会丢弃重叠格。
+     */
+    private void buildDragLineTest(){
+        grantTestItems();
+        if(Vars.renderer != null) Vars.renderer.setScale(4f);
+
+        int bx = Vars.world.toTile(Vars.player.getX()) + 3;
+        int by = Vars.world.toTile(Vars.player.getY());
+        clearArea(bx - 2, by - 3, 22, 8);
+
+        com.phoenix.game.input.InputHandler in = Vars.control.input;
+        in.buildBlock = com.phoenix.game.content.Blocks.copperDrill;
+        in.updateLine(bx, by, bx + 12, by);
+
+        StringBuilder sb = new StringBuilder("DBG dragLine size=" + in.lineSize + ":");
+        for(int i = 0; i < in.lineSize; i++){
+            sb.append(" (").append(in.lines[i].x).append(",").append(in.lines[i].y).append(")");
+        }
+        System.err.println(sb);
+
+        //把路径上的格子实际放出来，截图确认不再互相压住
+        for(int i = 0; i < in.lineSize; i++){
+            put(in.lines[i].x, in.lines[i].y, com.phoenix.game.content.Blocks.copperDrill, in.lines[i].rotation);
+        }
+
+        in.buildBlock = null;
+        in.clearLine();
+    }
+
+    /** 把 (x,y) 起 size×size 铺成石头 + 煤矿。 */
+    private void layOre(int x, int y, int size){
+        for(int dx = 0; dx < size; dx++){
+            for(int dy = 0; dy < size; dy++){
+                com.phoenix.game.world.Tile t = Vars.world.tile(x + dx, y + dy);
+                if(t != null){
+                    t.setFloor(com.phoenix.game.content.Blocks.stone);
+                    t.setOverlay(com.phoenix.game.content.Blocks.oreCoal);
+                }
+            }
+        }
     }
 
     /** 测试模式 11：墙系列与门的渲染/血量。 */
@@ -1154,14 +1579,16 @@ public class ClientLauncher extends ApplicationAdapter {
      * 测试模式 15：电力节点连线 + 二极管单向输电。
      * <p>两条互不相邻的链（纵向隔 8 格，超出节点 6 格连线范围）：
      * <ul>
-     *   <li>链 A：太阳能 - 电池(300) - 节点1 …… 隔 4 格空档 …… 节点2 - 过载投影器(1.0)。
-     *       节点2 与节点1 相隔正好 6 格，只有靠连线才能进同一张电网 —— 连通则 gsize=5、need=1.0；</li>
-     *   <li>链 B：太阳能 - 电池L(400) - 二极管(朝右) - 电池R - 过载投影器(1.0)。
+     *   <li>链 A：太阳能 - 电池(300) - 节点1 …… 隔 4 格空档 …… 节点2 - 过载投影器(3.5)。
+     *       节点2 与节点1 相隔正好 6 格，只有靠连线才能进同一张电网 —— 连通则 gsize=5、need=3.5；</li>
+     *   <li>链 B：太阳能 - 电池L(400) - 二极管(朝右) - 电池R - 过载投影器(3.5)。
      *       二极管自身不带电力模块，把左右隔成两张电网；靠比较两侧电池的充满百分比单向搬电。</li>
      * </ul>
-     * <p>预期：链 A 的 gsize=5 且 need=1.0（连线生效）；链 B 左右各 gsize=2 且互不相通，
-     * 左侧 need=0、右侧 need=1.0，电池L 的 400 电被二极管搬去右侧供投影器用，
-     * 所以右侧 sat 一直 1.0，直到左侧搬空（约 400 帧）后掉到 0。
+     * <p>预期：链 A 的 gsize=5 且 need=3.5（连线生效）；链 B 左右各 gsize=2 且互不相通，
+     * 左侧 need=0、右侧 need=3.5，电池L 的 400 电被二极管搬去右侧供投影器用，
+     * 所以右侧 sat 一直 1.0，直到左侧搬空（净耗 3.5-0.06 ≈ 3.44/帧 → 约 115 帧）后掉到 0。
+     * <p>⚠ 数值随 #148 更新：过载投影器耗电从 1.0 改成原版的 3.5（旧注释写 need=1.0 / 约 400 帧）。
+     * 本模式的校验代码只打印、无断言，故逻辑本身无需改动。
      */
     private void buildNodeDiodeTest(){
         grantTestItems();
@@ -1201,7 +1628,8 @@ public class ClientLauncher extends ApplicationAdapter {
      * 测试模式 16：各类发电机。
      * <p>一字排开（间隔足够，多格建筑互不重叠），各自带燃料/热源：
      * <ul>
-     *   <li>地热发电机：把脚下 2x2 的地板改成 shale(heat=0.5) → 预期发电 1.8 × (4×0.5) = 3.6；</li>
+     *   <li>地热发电机：把脚下 2x2 的地板改成 hotrock(heat=0.5) → 预期发电 1.8 × (4×0.5) = 3.6；
+     *       （⚠ 别再用 shale：T5 起 shale 已按原版只带油、不带地热，`floor.heat` 为 0）</li>
      *   <li>衰变发电机：塞钍(radioactivity=1.0) → 预期 3 × 1.0 = 3.0；</li>
      *   <li>钍反应堆：塞 15 钍（容量 30）→ 效率 0.5 → 预期 14 × 0.5 = 7.0；</li>
      *   <li>冲击反应堆：需要 25/帧启动电力才能点火，旁边挂一块预充电池；预热提速到 0.02 便于观察爬坡。</li>
@@ -1220,7 +1648,7 @@ public class ClientLauncher extends ApplicationAdapter {
         for(int dx = 0; dx < 2; dx++){
             for(int dy = 0; dy < 2; dy++){
                 com.phoenix.game.world.Tile t = Vars.world.tile(bx + dx, by + dy);
-                if(t != null) t.setFloor(com.phoenix.game.content.Blocks.shale);
+                if(t != null) t.setFloor(com.phoenix.game.content.Blocks.hotrock);
             }
         }
 
@@ -1231,9 +1659,14 @@ public class ClientLauncher extends ApplicationAdapter {
         }
 
         //钍反应堆：塞 15 钍（容量 30 → 效率 0.5）
+        //⚠ F9 起 thorium-reactor 是真 NuclearReactor：不供低温流体就会持续升温、约 100 帧熔毁自爆（半径 40 格）
+        //  → 这里直接给实体灌冷却液（本测试不验证冷却链路，只要它安静地发电）
         com.phoenix.game.world.Tile reactor = put(bx + 13, by, com.phoenix.game.content.Blocks.thoriumReactor, 0);
         for(int i = 0; i < 15 && reactor != null && reactor.entity != null; i++){
             reactor.block().handleItem(com.phoenix.game.content.Items.thorium, reactor, reactor);
+        }
+        if(reactor != null && reactor.entity != null && reactor.entity.liquids != null){
+            reactor.entity.liquids.add(com.phoenix.game.content.Liquids.cryofluid, 200f);
         }
 
         //冲击反应堆：需要外部供电点火，旁边挂预充电池；并把预热速度调快便于观察
@@ -1356,6 +1789,17 @@ public class ClientLauncher extends ApplicationAdapter {
             roundTrip = "EX " + e;
         }
 
+        //往返：写 base64 → 读 base64（对应 SchematicsDialog 的"复制/导入剪贴板"路径）
+        String b64Trip = "n/a";
+        try{
+            String b64 = com.phoenix.game.game.Schematics.writeBase64(schem);
+            com.phoenix.game.game.Schematic back2 = com.phoenix.game.game.Schematics.readBase64(b64);
+            b64Trip = back2.tiles.size + "/" + back2.width + "x" + back2.height
+                + " hdr=" + b64.startsWith(com.phoenix.game.game.Schematics.base64Header);
+        }catch(Exception e){
+            b64Trip = "EX " + e;
+        }
+
         logTestTiles = new com.phoenix.game.world.Tile[]{
             Vars.world.tile(bx + 10, by), Vars.world.tile(bx + 11, by),
             Vars.world.tile(bx + 12, by), Vars.world.tile(bx + 13, by)
@@ -1366,6 +1810,7 @@ public class ClientLauncher extends ApplicationAdapter {
             + " size=" + schem.width + "x" + schem.height
             + " fileBytes=" + fileSize
             + " roundTrip=" + roundTrip
+            + " b64RoundTrip=" + b64Trip
             + " coalId=" + com.phoenix.game.content.Items.coal.id
             + " reqs=" + schem.requirements().size);
     }
@@ -1612,15 +2057,17 @@ public class ClientLauncher extends ApplicationAdapter {
         fillLiquidArea(bx - 4, by - 6, 34, 16);
 
         //(炮塔, 弹药物品, x 偏移)：偏移按方块尺寸留出间距，避免大炮塔互相压盖。
-        //物品为 null 表示该炮塔不耗弹药（耗电/纯装饰），跳过塞弹。
+        //物品必须是该炮塔 ammo(...) 表里登记过的（原版弹药），否则塞不进去；null 表示不耗物品弹药（耗电/纯装饰）。
+        //TODO lancer/meltdown 是耗电炮塔（2.5/14 电力），本场景只有一块太阳能板（0.06）→ 供不起、不会开火
+        //     （meltdown 本来就这样；lancer 改成 ChargeTurret 后也一样），要看激光束得另外接电源。
         Object[][] list = {
             {com.phoenix.game.content.Blocks.duo, com.phoenix.game.content.Items.copper, 0},
-            {com.phoenix.game.content.Blocks.scorch, com.phoenix.game.content.Items.copper, 2},
+            {com.phoenix.game.content.Blocks.scorch, com.phoenix.game.content.Items.coal, 2},
             {com.phoenix.game.content.Blocks.hail, com.phoenix.game.content.Items.graphite, 4},
-            {com.phoenix.game.content.Blocks.fuse, com.phoenix.game.content.Items.titanium, 8},
+            {com.phoenix.game.content.Blocks.fuse, com.phoenix.game.content.Items.graphite, 8},
             {com.phoenix.game.content.Blocks.scatter, com.phoenix.game.content.Items.lead, 12},
-            {com.phoenix.game.content.Blocks.swarmer, com.phoenix.game.content.Items.silicon, 15},
-            {com.phoenix.game.content.Blocks.lancer, com.phoenix.game.content.Items.copper, 18},
+            {com.phoenix.game.content.Blocks.swarmer, com.phoenix.game.content.Items.blastCompound, 15},
+            {com.phoenix.game.content.Blocks.lancer, null, 18},
             {com.phoenix.game.content.Blocks.meltdown, null, 22},
             {com.phoenix.game.content.Blocks.solarPanel, null, 26},
         };
@@ -1631,9 +2078,11 @@ public class ClientLauncher extends ApplicationAdapter {
             int offset = (Integer)list[i][2];
 
             com.phoenix.game.world.Tile t = put(bx + offset, by, block, 1);
-            //塞满弹药：ConsumeItems.valid 要求建筑库存里真的有对应物品
-            if(item != null && t != null && t.entity != null && t.entity.items != null){
-                t.entity.items.add(item, 500);
+            //塞满弹药：ItemTurret 的弹药表只由 handleItem 填充（往 entity.items 里直接加不算数）
+            if(item != null && t != null && t.entity != null){
+                for(int k = 0; k < 15; k++){
+                    t.block().handleItem(item, t, null);
+                }
             }
             if(t == null || t.block() != block){
                 System.err.println("DBG muzzle place FAILED " + block.name + " offset=" + offset);
@@ -1787,8 +2236,19 @@ public class ClientLauncher extends ApplicationAdapter {
         com.phoenix.game.world.Tile source = put(bx + 5, by + 2, com.phoenix.game.content.Blocks.itemSource, 0);
         if(source != null && source.entity != null) source.configure(com.phoenix.game.content.Items.titanium.id);
 
+        //v5：往"玩家队伍"的重建队列里塞两条记录，让存档往返能覆盖 brokenBlocks 的写/读路径
+        //（真机上由 Control 的 BlockDestroyEvent 监听器写入，这里直接构造以做确定性验证）。
+        com.badlogic.gdx.utils.Array<com.phoenix.game.game.Teams.BrokenBlock> brokenQ =
+            Vars.state.teams.brokenBlocks(Vars.player.getTeam());
+        brokenQ.clear();
+        brokenQ.add(new com.phoenix.game.game.Teams.BrokenBlock(
+            (short)(bx + 7), (short)by, (short)1, (short)com.phoenix.game.content.Blocks.conveyor.id, -1));
+        brokenQ.add(new com.phoenix.game.game.Teams.BrokenBlock(
+            (short)(bx + 7), (short)(by + 2), (short)0, (short)com.phoenix.game.content.Blocks.duo.id, 5));
+
         logTestSaveFile = com.badlogic.gdx.Gdx.files.local("saves/saveload-test.msav").file();
         System.err.println("DBG saveload layout built blocks=" + countBlocks()
+            + " broken=" + brokenQ.size
             + " sharded=" + Vars.state.teams.items(com.phoenix.game.game.Team.sharded).total());
     }
 
@@ -1812,6 +2272,8 @@ public class ClientLauncher extends ApplicationAdapter {
     /** 模式 23：读档后重建玩家（对应 Control.load，避免 player 还引用旧世界的单位）。 */
     private void rebuildPlayerAfterLoad(){
         Vars.player = new com.phoenix.game.entities.type.Player();
+        Vars.player.uuid = com.phoenix.game.core.Platform.uuid();
+        Vars.player.add(); //登记进 playerGroup
         Vars.state.gameOver = false;
         com.phoenix.game.core.Events.fire(new com.phoenix.game.game.EventType.WorldLoadEvent());
         Vars.control.spawnPlayerUnit(com.phoenix.game.game.Team.sharded);
@@ -1871,6 +2333,16 @@ public class ClientLauncher extends ApplicationAdapter {
             if(team == null) continue;
             sb.append('T').append(team.id).append('=')
                 .append(Vars.state.teams.items(team).total()).append(';');
+
+            //v5：该队的"被摧毁可重建"队列（SaveIO 写/读）。顺序敏感 → 按索引拼。
+            com.badlogic.gdx.utils.Array<com.phoenix.game.game.Teams.BrokenBlock> broken = Vars.state.teams.brokenBlocks(team);
+            sb.append('B').append(team.id).append('=');
+            for(int i = 0; i < broken.size; i++){
+                com.phoenix.game.game.Teams.BrokenBlock b = broken.get(i);
+                sb.append(b.x).append(',').append(b.y).append(',').append(b.rotation).append(',')
+                  .append(b.block).append(',').append(b.config).append('|');
+            }
+            sb.append(';');
         }
         sb.append("wave=").append(Vars.state.wave);
         return sb.toString();
@@ -1907,14 +2379,16 @@ public class ClientLauncher extends ApplicationAdapter {
         }else if(e instanceof com.phoenix.game.world.blocks.production.GenericCrafter.CraftEntity){
             sb.append("pr=").append(Math.round(
                 ((com.phoenix.game.world.blocks.production.GenericCrafter.CraftEntity)e).progress * 100f));
-        }else if(e instanceof com.phoenix.game.world.blocks.power.ItemGenerator.GeneratorEntity){
-            com.phoenix.game.world.blocks.power.ItemGenerator.GeneratorEntity g =
-                (com.phoenix.game.world.blocks.power.ItemGenerator.GeneratorEntity)e;
+        }else if(e instanceof com.phoenix.game.world.blocks.power.ItemLiquidGenerator.ItemLiquidGeneratorEntity){
+            //F9 起燃烧/衰变发电机收敛到真 ItemLiquidGenerator（原自建 ItemGenerator 已随 R2 批删除）
+            com.phoenix.game.world.blocks.power.ItemLiquidGenerator.ItemLiquidGeneratorEntity g =
+                (com.phoenix.game.world.blocks.power.ItemLiquidGenerator.ItemLiquidGeneratorEntity)e;
             sb.append("gt=").append(Math.round(g.generateTime * 1000f))
                 .append(",pe=").append(Math.round(g.productionEfficiency * 1000f));
-        }else if(e instanceof com.phoenix.game.world.blocks.power.ThoriumReactor.ReactorEntity){
-            sb.append("ft=").append(Math.round(
-                ((com.phoenix.game.world.blocks.power.ThoriumReactor.ReactorEntity)e).fuelTimer * 100f));
+        }else if(e instanceof com.phoenix.game.world.blocks.power.NuclearReactor.NuclearReactorEntity){
+            //F9 起 thorium-reactor 是真 NuclearReactor（原自建 ThoriumReactor 已随 R2 批删除）→ 打印 heat
+            sb.append("ht=").append(Math.round(
+                ((com.phoenix.game.world.blocks.power.NuclearReactor.NuclearReactorEntity)e).heat * 100f));
         }else if(e instanceof com.phoenix.game.world.blocks.power.ImpactReactor.FusionReactorEntity){
             com.phoenix.game.world.blocks.power.ImpactReactor.FusionReactorEntity f =
                 (com.phoenix.game.world.blocks.power.ImpactReactor.FusionReactorEntity)e;
@@ -1939,13 +2413,12 @@ public class ClientLauncher extends ApplicationAdapter {
         }else if(e instanceof com.phoenix.game.world.blocks.units.RepairPoint.RepairPointEntity){
             sb.append("rot=").append(Math.round(
                 ((com.phoenix.game.world.blocks.units.RepairPoint.RepairPointEntity)e).rotation * 100f));
-        }else if(e instanceof com.phoenix.game.world.blocks.defense.ForceProjector.ShieldEntity){
-            com.phoenix.game.world.blocks.defense.ForceProjector.ShieldEntity s =
-                (com.phoenix.game.world.blocks.defense.ForceProjector.ShieldEntity)e;
-            sb.append("sh=").append(Math.round(s.shield * 100f)).append(",brk=").append(s.broken);
-        }else if(e instanceof com.phoenix.game.world.blocks.defense.Mender.MendEntity){
-            sb.append("ch=").append(Math.round(
-                ((com.phoenix.game.world.blocks.defense.Mender.MendEntity)e).charge * 100f));
+        }else if(e instanceof com.phoenix.game.world.blocks.defense.ForceProjector.ForceEntity){
+            //N2c2 起护盾是原版的 buildup/breakage 模型（旧字段 shield/broken 已被 ForceEntity 取代）
+            com.phoenix.game.world.blocks.defense.ForceProjector.ForceEntity s =
+                (com.phoenix.game.world.blocks.defense.ForceProjector.ForceEntity)e;
+            sb.append("bd=").append(Math.round(s.buildup)).append(",brk=").append(s.broken)
+                .append(",ph=").append(Math.round(s.phaseHeat * 100f)).append(",rs=").append(Math.round(s.radscl * 100f));
         }else if(e instanceof com.phoenix.game.world.blocks.defense.MendProjector.MendEntity){
             sb.append("ch=").append(Math.round(
                 ((com.phoenix.game.world.blocks.defense.MendProjector.MendEntity)e).charge * 100f));
@@ -2086,6 +2559,34 @@ public class ClientLauncher extends ApplicationAdapter {
         return ((com.phoenix.game.world.blocks.distribution.Conveyor.ConveyorEntity)t.entity).len;
     }
 
+    /** 模式 29：把一条"钻头→带子→核心"链路的状态拼成一行日志。 */
+    private String drillChainLine(String tag, com.phoenix.game.world.Tile drill,
+        com.phoenix.game.world.Tile[] belts, com.phoenix.game.world.Tile core, int frame){
+
+        StringBuilder db = new StringBuilder("DBG drillchain ").append(tag).append(" f=").append(frame);
+        if(drill != null && drill.entity instanceof com.phoenix.game.world.blocks.production.Drill.DrillEntity){
+            com.phoenix.game.world.blocks.production.Drill.DrillEntity de =
+                (com.phoenix.game.world.blocks.production.Drill.DrillEntity)drill.entity;
+            db.append(" item=").append(de.dominantItem).append(" n=").append(de.dominantItems)
+              .append(" warm=").append(String.format("%.2f", de.warmup))
+              .append(" spd=").append(String.format("%.2f", de.lastDrillSpeed))
+              .append(" inv=").append(drill.entity.items == null ? -1 : drill.entity.items.total())
+              .append(" prox=").append(drill.entity.proximity.size);
+        }else{
+            db.append(" drill=none");
+        }
+        if(belts != null){
+            for(int i = 0; i < belts.length; i++){
+                com.phoenix.game.world.Tile t = belts[i];
+                db.append(" t").append(i).append('=').append(conveyorCount(t));
+                if(t != null && t.entity != null) db.append('/').append(t.rotation());
+            }
+        }
+        db.append(" core=").append(core == null || core.entity == null || core.entity.items == null
+            ? -1 : core.entity.items.total());
+        return db.toString();
+    }
+
     private void printLogTestStats(){
         if(Vars.world == null || Vars.player == null) return;
 
@@ -2123,6 +2624,17 @@ public class ClientLauncher extends ApplicationAdapter {
             }
         }
 
+        //模式 9：发射台电力门控（N2c1 起 hasPower=true）→ 打 valid 与是否已发射
+        if(logTestMode == 9 && logTestTiles != null && logTestTiles.length >= 2){
+            com.phoenix.game.world.Tile pad = logTestTiles[0];
+            sb.append(" | PAD");
+            appendPower(sb, logTestTiles[1]);
+            if(pad != null && pad.entity != null){
+                sb.append(" valid=").append(pad.entity.cons == null ? -1 : (pad.entity.cons.valid() ? 1 : 0))
+                  .append(" tot=").append(pad.entity.items == null ? -1 : pad.entity.items.total());
+            }
+        }
+
         //模式 14：电网统计（电池储量 / 全网发耗 / 满足率 / 连通规模 / 发电机燃烧剩余）
         if(logTestMode == 14 && logTestTiles != null && logTestTiles.length >= 2){
             com.phoenix.game.world.Tile bat = logTestTiles[0];
@@ -2137,9 +2649,10 @@ public class ClientLauncher extends ApplicationAdapter {
                   .append(" gsize=").append(g == null ? -1 : g.size());
             }
 
-            if(burn != null && burn.entity instanceof com.phoenix.game.world.blocks.power.ItemGenerator.GeneratorEntity){
-                com.phoenix.game.world.blocks.power.ItemGenerator.GeneratorEntity be =
-                    (com.phoenix.game.world.blocks.power.ItemGenerator.GeneratorEntity)burn.entity;
+            //F9 起燃烧发电机是真 ItemLiquidGenerator（原自建 ItemGenerator 已随 R2 批删除）
+            if(burn != null && burn.entity instanceof com.phoenix.game.world.blocks.power.ItemLiquidGenerator.ItemLiquidGeneratorEntity){
+                com.phoenix.game.world.blocks.power.ItemLiquidGenerator.ItemLiquidGeneratorEntity be =
+                    (com.phoenix.game.world.blocks.power.ItemLiquidGenerator.ItemLiquidGeneratorEntity)burn.entity;
                 sb.append(" eff=").append(be.productionEfficiency)
                   .append(" coal=").append(burn.entity.items == null ? -1 : burn.entity.items.get(com.phoenix.game.content.Items.coal));
             }
@@ -2292,12 +2805,25 @@ public class ClientLauncher extends ApplicationAdapter {
 
         Constants.width = viewport.getWorldWidth();
         Constants.height = viewport.getWorldHeight();
+
+        //原版由 UI.resize() 派发（Mindustry-126.2/core/src/mindustry/core/UI.java:210），
+        //本项目 UI 类没有 resize 钩子 → 在应用入口等价派发。
+        //监听者：MenuFragment（重建桌面/移动端布局）、FloatingDialog（重新 pack 居中）。
+        //不派发的后果：桌面缩放窗口时菜单不重排；Android 上 manifest 声明了 configChanges
+        //（不重建 Activity）→ 屏幕尺寸变化时 UI 同样收不到通知。
+        //⚠ 本项目 AndroidManifest 锁了 screenOrientation="landscape"（原版是 "user"）→ 真机目前不会
+        //  进竖屏分支；改为 "user" 后靠的就是这一行（先改锁向再验）。
+        com.phoenix.game.core.Events.fire(new com.phoenix.game.game.EventType.ResizeEvent());
     }
 
     @Override
     public void dispose() {
         //小地图纹理是自己 new 的（不走 AssetManager），要显式释放
         renderer.minimap.dispose();
+        //像素化用的 FrameBuffer 也是自己 new 的
+        renderer.pixelator.dispose();
+        //方块落影/地图变暗两张全图缓冲同理
+        renderer.blocks.dispose();
         //蓝图预览图是运行时 new 的 FrameBuffer，也要显式释放
         if(Vars.schematics != null) Vars.schematics.disposePreviews();
         batch.dispose();

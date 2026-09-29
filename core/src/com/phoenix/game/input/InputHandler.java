@@ -3,15 +3,21 @@ package com.phoenix.game.input;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.InputAdapter;
+import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
 import com.phoenix.game.Vars;
 import com.phoenix.game.core.Core;
 import com.phoenix.game.core.Draw;
+import com.phoenix.game.core.Events;
 import com.phoenix.game.core.Fill;
 import com.phoenix.game.core.Lines;
 import com.phoenix.game.core.Time;
 import com.phoenix.game.core.Tmp;
+import com.phoenix.game.entities.Effects;
+import com.phoenix.game.entities.effect.ItemTransfer;
+import com.phoenix.game.content.Blocks;
+import com.phoenix.game.content.Fx;
 import com.phoenix.game.graphics.Pal;
 import com.phoenix.game.entities.type.BaseUnit;
 import com.phoenix.game.entities.type.Player;
@@ -20,6 +26,7 @@ import com.phoenix.game.math.Angles;
 import com.phoenix.game.math.Mathf;
 import com.phoenix.game.math.geom.Geometry;
 import com.phoenix.game.net.Packets;
+import com.phoenix.game.type.Item;
 import com.phoenix.game.type.Weapon;
 import com.phoenix.game.world.Block;
 import com.phoenix.game.world.Build;
@@ -50,12 +57,22 @@ public abstract class InputHandler extends InputAdapter{
      * 点关闭 / 选中其他方块 / 退出建造模式都会清掉它。
      */
     public com.phoenix.game.world.Tile configTile;
-    /** 当前放置朝向（0=+y, 1=+x, 2=-y, 3=-x），R 键循环。 */
+    /** 当前放置朝向（0=+y, 1=+x, 2=-y, 3=-x），滚轮或 R 键循环。 */
     public int buildRotation;
 
     /** @return 是否处于建造/拆除模式 */
     public boolean isPlacing(){
         return buildBlock != null || breaking || pasteSchematic != null;
+    }
+
+    /**
+     * 滚轮是否应当归建造用（旋转放置朝向），而不是交给 HUD。
+     * <p>HUD 右下角的建造栏是 ScrollPane，Stage 会先把滚轮事件吃掉，滚轮就永远转不了朝向。
+     * 所以这个条件成立时要在 Stage 之前把滚轮截下来（见 {@code ClientLauncher.scrollGate}）。
+     * @return true 表示滚轮应被建造输入独占
+     */
+    public boolean scrollRotatesBuild(){
+        return !Vars.state.isMenu() && buildBlock != null && buildBlock.rotate;
     }
 
     /** 退出建造/拆除模式（对应原版 Binding.deselect）。 */
@@ -64,28 +81,496 @@ public abstract class InputHandler extends InputAdapter{
         breaking = false;
         pasteSchematic = null;
         configTile = null;
+        //退出建造时也取消"投递物品"状态（对应原版 DesktopInput 里 deselect 分支的 droppingItem = false）
+        droppingItem = false;
+        //退出建造/拆除时也取消采矿（对应原版 DesktopInput 里 Binding.deselect → player.setMineTile(null)）
+        if(Vars.player != null) Vars.player.setMineTile(null);
         clearLine();
         //同时清掉玩家单位还没做完的建造/拆除请求（对应原版 player.clearBuilding()）
         if(Vars.player != null) Vars.player.clearBuilding();
     }
 
+    // ---- 挂载点（对应原版 InputHandler 的 buildUI / buildPlacementUI / drawBottom / drawTop / updateState）----
+    // 原版靠多态分发：桌面端在这些方法里什么都不做，移动端覆写成触摸 UI。
+    // phoenix 的 HUD 由 ClientLauncher 手工构建，所以由 HudFragment 反过来调 buildPlacementUI/buildUI。
+
+    /** 输入处理器被启用（对应原版 InputHandler.add）。 */
+    public void add(){
+    }
+
+    /** 输入处理器被停用（对应原版 InputHandler.remove）。 */
+    public void remove(){
+    }
+
+    /** 把取消/蓝图按钮挂到 HUD 上（移动端覆写；桌面端无）。 */
+    public void buildUI(com.badlogic.gdx.scenes.scene2d.ui.Table table){
+    }
+
+    /** 把建造按钮挂到建造栏表格上（移动端覆写；桌面端无）。 */
+    public void buildPlacementUI(com.badlogic.gdx.scenes.scene2d.ui.Table table){
+    }
+
+    /** 进出菜单时复位状态（对应原版 InputHandler.updateState）。 */
+    public void updateState(){
+    }
+
+    /** @return 是否处于拆除模式。 */
+    public boolean isBreaking(){
+        return breaking;
+    }
+
+    /** @return 是否选中了方块（建造预览的锚点判断用）。 */
+    public boolean selectedBlock(){
+        return buildBlock != null;
+    }
+
+    /**
+     * 点击方块后的库存面板处理（对应原版 {@code InputHandler.tileTapped} 里 {@code frag.inv} 那一段：
+     * 点己方可交互且有物品的合成方块 → 弹出物品列表，否则收起）。
+     * <p>原版同一方法里还有 configurable/consumesTap 两个分支，本项目这两支已在
+     * {@code DesktopInput/MobileInput} 的点击流程里用 {@link #configTile} 与 {@code block().tapped()}
+     * 返回值处理，所以这里只保留下半段。
+     * <p>注意传入的瓦片要能是 air（点空地）——原版点空地同样收起面板（air 不满足 synthetic）。
+     * @return 是否消费这次点击（true 时输入层不应转入开火）
+     */
+    public boolean tileTapped(Tile tile){
+        if(tile == null || Vars.player == null || Vars.hud == null) return false;
+
+        //原版第一行就是 tile.link()：点 3x3 核心/大型建筑的任意一格都能对到锚点瓦片
+        Tile t = tile.link();
+        boolean consumed = false, showedInventory = false;
+
+        if(t.interactable(Vars.player.getTeam()) && t.block().synthetic()){
+            //原版：tile.block().hasItems && tile.entity.items.total() > 0 → 弹出库存面板
+            if(t.block().hasItems && t.entity != null && t.entity.items != null && t.entity.items.total() > 0){
+                Vars.hud.inv.showFor(t);
+                consumed = true;
+                showedInventory = true;
+            }
+        }
+
+        //没弹出面板就收起（showFor 自身也含"再点同一格 → 收起"）
+        if(!showedInventory) Vars.hud.inv.hide();
+
+        return consumed;
+    }
+
+    // ---- 玩家背包的投递 / 丢弃（对应原版 InputHandler 的 droppingItem 一族）----
+
+    /** 投递时物品从玩家背后飞出的偏移（对应原版 {@code backTrns = 3f}）。 */
+    public static final float backTrns = 3f;
+
+    /** {@code getStackOffset} 用的临时向量（对应原版 {@code static Vec2 stackTrns}）。 */
+    public final com.badlogic.gdx.math.Vector2 stackTrns = new com.badlogic.gdx.math.Vector2();
+
+    /**
+     * 是否已按下"点自己"进入投递状态（对应原版 {@code InputHandler.droppingItem}）。
+     * <p>交互（与原版一致）：先点自己 → {@code droppingItem = true}；松手时对光标下的方块
+     * {@link #tryDropItems}：能收就存进去，不能收就丢弃。
+     */
+    public boolean droppingItem;
+
+    public boolean isDroppingItem(){
+        return droppingItem;
+    }
+
+    /**
+     * @return "点自己"的有效半径（对应原版 {@code playerSelectRange = mobile ? 17f : 11f}）。
+     * <p>做成方法而不是静态常量：{@code Vars.mobile} 由启动器在 {@code Vars.init()} 里设置，
+     * 类初始化阶段读取会拿到默认值（与项目里 {@code Scl.scl} 的懒初始化同因）。
+     */
+    public static float playerSelectRange(){
+        return Vars.mobile ? 17f : 11f;
+    }
+
+    /** @return 玩家在投递半径内且背包里有物品（对应原版 {@code canTapPlayer}）。 */
+    public boolean canTapPlayer(float x, float y){
+        return Vars.player != null && Vars.player.dst(x, y) <= playerSelectRange() && Vars.player.itemAmount > 0;
+    }
+
+    /** 点自己 → 进入投递状态（对应原版 {@code tryTapPlayer}）。 */
+    public boolean tryTapPlayer(float x, float y){
+        if(canTapPlayer(x, y)){
+            droppingItem = true;
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 松手时把背包物品投给光标下的方块（对应原版 {@code InputHandler.tryDropItems}）：
+     * 目标能收（{@code acceptStack > 0} 且同队、有库存）→ {@link #transferInventory} 存入；否则丢弃（{@link #dropItem}）。
+     */
+    public void tryDropItems(Tile tile, float x, float y){
+        Player player = Vars.player;
+        if(!droppingItem || player == null || player.unit() == null || player.itemAmount <= 0
+            || canTapPlayer(x, y) || Vars.state.isPaused()){
+            droppingItem = false;
+            return;
+        }
+
+        droppingItem = false;
+
+        if(tile != null && tile.entity != null && tile.interactable(player.getTeam()) && tile.block().hasItems
+            && tile.block().acceptStack(player.item, player.itemAmount, tile, player.unit()) > 0
+            && !player.isTransferring){
+            transferInventory(player, tile);
+        }else{
+            dropItem(player, player.angleTo(x, y));
+        }
+    }
+
+    /**
+     * 把玩家背包里的物品搬进目标方块（对应原版 {@code @Remote transferInventory}，本项目去掉网络层与
+     * 服务端校验，直接本地执行）。
+     * <p>与原版一致：{@code Time.run(i*3)} 分批创建 {@link ItemTransfer}（飞行动画），"物品真正入库"
+     * 绑在动画结束的回调里（{@code ItemTransfer.removed()} → {@code done}）。
+     * <p>刻意降级：原版 {@code Core.app.post(() -> Events.fire(...))} 是"下一帧派发"；本项目直接派发。
+     */
+    public void transferInventory(Player player, Tile tile){
+        if(player == null || tile == null || tile.entity == null || player.unit() == null) return;
+
+        player.isTransferring = true;
+
+        Item item = player.item;
+        int amount = player.itemAmount;
+        int accepted = tile.block().acceptStack(item, amount, tile, player.unit());
+        player.removeItem(accepted);
+
+        int sent = Mathf.clamp(accepted / 4, 1, 8);
+        int removed = accepted / sent;
+        int[] remaining = {accepted};
+        Block block = tile.block();
+
+        Events.fire(new com.phoenix.game.game.EventType.DepositEvent());
+
+        for(int i = 0; i < sent; i++){
+            //原版闭包捕获循环变量 i（arc 的 Time.run 是 lambda）；Java 要求 effectively final → 提成 final
+            final boolean end = i == sent - 1;
+            Time.run(i * 3f, () -> {
+                tile.block().getStackOffset(item, tile, stackTrns);
+
+                ItemTransfer.create(item,
+                    player.x + Angles.trnsx(player.unit().rotation + 180f, backTrns),
+                    player.y + Angles.trnsy(player.unit().rotation + 180f, backTrns),
+                    tile.block().centerX(tile) + stackTrns.x,
+                    tile.block().centerY(tile) + stackTrns.y,
+                    () -> {
+                        if(tile.block() != block || tile.entity == null || tile.entity.items == null) return;
+
+                        tile.block().handleStack(item, removed, tile, player.unit());
+                        remaining[0] -= removed;
+
+                        if(end && remaining[0] > 0){
+                            tile.block().handleStack(item, remaining[0], tile, player.unit());
+                        }
+                    });
+
+                if(end){
+                    player.isTransferring = false;
+                }
+            });
+        }
+    }
+
+    /**
+     * 丢弃背包物品（对应原版 {@code @Remote dropItem}）：播掉落特效并清空背包。
+     * <p>原版只在"投递失败"（目标收不下）时触发，本项目同样（没有独立的丢弃按键）。
+     */
+    public void dropItem(Player player, float angle){
+        if(player == null || player.itemAmount <= 0) return;
+        Effects.effect(Fx.dropItem, com.badlogic.gdx.graphics.Color.WHITE, player.x, player.y, angle, player.item);
+        player.clearItem();
+    }
+
+    // ---- 采矿（对应原版 InputHandler.tryBeginMine / canMine）----
+
+    /**
+     * 尝试开始/取消开采光标下的瓦片（对应原版 {@code InputHandler.tryBeginMine}）。
+     * <p>可采则切换：再点同一格 = 取消（原版注释 {@code if a block is clicked twice, reset it}）。
+     * @return 是否消费这次点击（true 时输入层不应转入开火）
+     */
+    public boolean tryBeginMine(Tile tile){
+        Player player = Vars.player;
+        if(player == null || player.unit() == null) return false;
+
+        if(canMine(tile)){
+            player.setMineTile(player.getMineTile() == tile ? null : tile);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * @return 该瓦片能否被玩家开采（对应原版 {@code InputHandler.canMine}）。
+     * <p><b>偏离</b>：原版首项 {@code !Core.scene.hasMouse()}（鼠标被 UI 占用时不响应）；本项目
+     * InputMultiplexer 把 stage 排在输入处理器之前，UI 点击已被 Stage 消费 → 省略该项。
+     * <p><b>偏离</b>：原版用 {@code player.mech.drillPower} 判可采；本项目没有机甲系统 →
+     * 改调 {@code player.unit().canMine(item)}（{@code UnitType.toMine} 白名单，dagger = {铅,铜}）。
+     */
+    public boolean canMine(Tile tile){
+        Player player = Vars.player;
+        if(tile == null || player == null || player.isDead() || player.unit() == null) return false;
+
+        Item drop = tile.drop();
+        return drop != null && player.unit().canMine(drop)
+            && !(tile.floor().playerUnmineable && tile.overlay().itemDrop == null)
+            && player.acceptsItem(drop)
+            && tile.block() == Blocks.air
+            && player.dst(tile.worldx(), tile.worldy()) <= player.unit().getMiningRange();
+    }
+
+    // ---- 世界层绘制（对应原版 InputHandler.drawBottom / drawTop）----
+    // 由 Renderer 每帧在 Core.batch 的 begin/end 之间调用，投影矩阵已是世界相机。
+
+    /** 世界层**之下**绘制：移动端的选中框/准星/蓝图框选（桌面端无）。 */
+    public void drawBottom(){
+    }
+
+    /**
+     * 世界层**之上**绘制建造预览（对应原版 DesktopInput.drawTop）：
+     * 半透明方块贴图（带朝向的会按朝向旋转，传送带因此能直接看出输送方向）+ 朝向箭头，
+     * 绿色表示可放置、红色表示位置非法或材料不足。
+     * <p>光标位置取 {@link #targetX}/{@link #targetY}：桌面端由 {@link #updateTarget()} 从鼠标换算，
+     * 移动端由触摸事件写入，因此两端共用这一份绘制。
+     */
+    public void drawTop(){
+        if(Vars.world == null || Vars.state.isMenu()) return;
+
+        //悬停己方建筑时调用其 Block.drawSelect（对应原版 OverlayRenderer 的"draw selected block"）：
+        //炮塔射程圈 / 留言板文本等。只在非建造、非拆除状态下绘制，避免与建造预览抢画面。
+        if(buildBlock == null && !breaking && pasteSchematic == null){
+            drawSelectedBlock();
+        }
+
+        if(buildBlock == null && !breaking && pasteSchematic == null) return;
+
+        TextureRegion white = whiteRegion();
+        if(white == null) return;
+
+        int tx = Vars.world.toTile(targetX), ty = Vars.world.toTile(targetY);
+        Tile tile = Vars.world.tile(tx, ty);
+        if(tile == null) return;
+
+        //蓝图粘贴预览：把整张蓝图以光标为中心铺一遍半透明贴图（合法绿/非法红）
+        if(pasteSchematic != null){
+            com.phoenix.game.game.Schematic schem = pasteSchematic;
+            int ox = tx - schem.width / 2, oy = ty - schem.height / 2;
+
+            for(int i = 0; i < schem.tiles.size; i++){
+                com.phoenix.game.game.Schematic.Stile stile = schem.tiles.get(i);
+                Tile target = Vars.world.tile(stile.x + ox, stile.y + oy);
+                if(target == null) continue;
+
+                drawGhost(target, stile.block, stile.rotation, Build.validPlace(target, stile.block, stile.rotation, playerTeam()), white);
+            }
+            Core.batch.setColor(1f, 1f, 1f, 1f);
+            return;
+        }
+
+        //拆除预览：整个方块范围标红
+        if(buildBlock == null){
+            drawBreakingGhost(tile, white);
+            return;
+        }
+
+        Block block = buildBlock;
+        Team team = playerTeam();
+
+        //拖拽连线：把路径上每一格都画成半透明 ghost（各自带自己的朝向），最后再画一个朝向箭头
+        if(lineMode && lineSize > 0){
+            for(int i = 0; i < lineSize; i++){
+                LineRequest req = lines[i];
+                Tile t = Vars.world.tile(req.x, req.y);
+                if(t == null) continue;
+
+                drawGhost(t, block, req.rotation, Build.validPlace(t, block, req.rotation, team) && Build.canAfford(team, block), white);
+            }
+
+            LineRequest last = lines[lineSize - 1];
+            Tile lastTile = Vars.world.tile(last.x, last.y);
+            if(block.rotate && lastTile != null){
+                drawArrow(last.x, last.y, last.rotation,
+                        Build.validPlace(lastTile, block, last.rotation, team) && Build.canAfford(team, block),
+                        block, white);
+            }
+
+            Core.batch.setColor(1f, 1f, 1f, 1f);
+            return;
+        }
+
+        int rotation = buildRotation & 3;
+        boolean valid = Build.validPlace(tile, block, rotation, team) && Build.canAfford(team, block);
+
+        //占地格（半透明绿）
+        Core.batch.setColor(0.2f, 1f, 0.2f, 0.25f);
+        Core.batch.draw(white, tile.worldx(), tile.worldy(), Vars.tilesize, Vars.tilesize);
+
+        drawGhost(tile, block, rotation, valid, white);
+
+        //放置预览文字（对应原版 DesktopInput 对光标方块调 block.drawPlace）
+        block.drawPlace(tile.x, tile.y, rotation, valid);
+
+        //朝向箭头（对应原版 DesktopInput.drawArrow）
+        if(block.rotate){
+            drawArrow(tile.x, tile.y, rotation, valid, block, white);
+        }
+
+        Core.batch.setColor(1f, 1f, 1f, 1f);
+    }
+
+    /**
+     * 光标下的己方建筑若覆写了 {@code Block.drawSelect} 就调用一次（对应原版 OverlayRenderer 的
+     * {@code tile.block().drawSelect(tile)}）。空气/敌方/空瓦片都跳过。
+     */
+    protected void drawSelectedBlock(){
+        if(Vars.world == null) return;
+        int tx = Vars.world.toTile(targetX), ty = Vars.world.toTile(targetY);
+        Tile tile = Vars.world.tile(tx, ty);
+        if(tile == null) return;
+
+        Block block = tile.block();
+        if(block != null && block != com.phoenix.game.content.Blocks.air && tile.getTeam() == playerTeam()){
+            block.drawSelect(tile);
+        }
+    }
+
+    /**
+     * 把一格的方块范围标红（光标拆除预览与"拆除队列幽灵"共用）。
+     * <p>对应原版 {@code InputHandler.drawBreaking(int,int)}（原版是画 {@code block-select} 四角标记 + {@code Pal.remove}；
+     * 本项目沿用既有的"整格红块"画法，与光标拆除预览保持一致）。
+     */
+    protected void drawBreakingGhost(Tile tile, TextureRegion white){
+        if(tile == null || white == null) return;
+        float s = tile.block().size * Vars.tilesize;
+        Core.batch.setColor(1f, 0.2f, 0.2f, 0.35f);
+        Core.batch.draw(white, tile.worldx() + (Vars.tilesize - s) / 2f, tile.worldy() + (Vars.tilesize - s) / 2f, s, s);
+        Core.batch.setColor(1f, 1f, 1f, 1f);
+    }
+
+    /**
+     * 画一条建造/拆除请求的幽灵预览（对应原版 {@code InputHandler.drawRequest(BuildRequest)} +
+     * {@code drawBreaking(BuildRequest)}）。供 {@code BaseUnit.drawBuildRequests()} 对建造队列逐条调用。
+     */
+    public void drawRequest(com.phoenix.game.world.BuildRequest req){
+        if(req == null || Vars.world == null) return;
+        Tile tile = Vars.world.tile(req.x, req.y);
+        if(tile == null) return;
+
+        TextureRegion white = whiteRegion();
+        if(white == null) return;
+
+        if(req.breaking){
+            drawBreakingGhost(tile, white);
+        }else if(req.block != null){
+            //合法 = 可放置，或该格已经有这个方块的占位（对应原版 `validPlace(...) || requestMatches(request)`）
+            boolean valid = Build.validPlace(tile, req.block, req.rotation, playerTeam()) || requestMatches(req);
+            drawGhost(tile, req.block, req.rotation, valid, white);
+            Core.batch.setColor(1f, 1f, 1f, 1f);
+        }
+    }
+
+    /**
+     * @return 该格是否已经有"这条请求的目标方块"的占位 {@code BuildBlock}
+     * （对应原版 {@code InputHandler.requestMatches}：
+     * {@code tile.block() instanceof BuildBlock && tile.<BuildEntity>ent().cblock == request.block}）。
+     */
+    public boolean requestMatches(com.phoenix.game.world.BuildRequest req){
+        if(req == null || Vars.world == null) return false;
+        Tile tile = Vars.world.tile(req.x, req.y);
+        return tile != null && tile.block() instanceof com.phoenix.game.world.blocks.BuildBlock
+            && tile.entity instanceof com.phoenix.game.world.blocks.BuildBlock.BuildEntity
+            && ((com.phoenix.game.world.blocks.BuildBlock.BuildEntity)tile.entity).cblock == req.block;
+    }
+
+    /** 画一格半透明方块预览（带朝向的按朝向旋转）。 */
+    protected void drawGhost(Tile tile, Block block, int rotation, boolean valid, TextureRegion white){
+        //按层叠加（对应原版 drawRequestRegion 里的 icon(Cicon.full) 合成图）：
+        //只画 region 会只剩底座，钻头之类会缺掉钻头和上层
+        TextureRegion[] layers = block.getGeneratedIcons();
+        if(layers.length == 0) return;
+
+        float size = block.size * Vars.tilesize;
+        //多格建筑以锚点铺开：几何中心 = 瓦片左下角 + offset + 半格
+        float cx = tile.worldx() + block.offset() + Vars.tilesize / 2f;
+        float cy = tile.worldy() + block.offset() + Vars.tilesize / 2f;
+        float angle = block.rotate ? spriteAngle(rotation) : 0f;
+
+        //合法=白，非法=偏红
+        Core.batch.setColor(1f, valid ? 1f : 0.25f, valid ? 1f : 0.25f, 0.6f);
+        for(int i = 0; i < layers.length; i++){
+            TextureRegion layer = layers[i];
+            if(layer == null) continue;
+            Core.batch.draw(layer, cx - size / 2f, cy - size / 2f, size / 2f, size / 2f,
+                    size, size, 1f, 1f, angle);
+        }
+    }
+
+    /** 画朝向箭头（对应原版 DesktopInput.drawArrow）。 */
+    protected void drawArrow(int tx, int ty, int rotation, boolean valid, Block block, TextureRegion white){
+        float cx = tx * Vars.tilesize + block.offset() + Vars.tilesize / 2f;
+        float cy = ty * Vars.tilesize + block.offset() + Vars.tilesize / 2f;
+        float a = arrowAngle(rotation);
+        float len = Vars.tilesize * 0.7f, hl = Vars.tilesize * 0.35f;
+
+        Core.batch.setColor(valid ? Pal.accent : Pal.remove);
+
+        //箭杆
+        Core.batch.draw(white, cx - len / 2f, cy - 1f, len / 2f, 1f, len, 2f, 1f, 1f, a);
+
+        //箭头（两撇，从箭尖往回各偏 145 度）
+        float tipx = cx + Angles.trnsx(a, len / 2f);
+        float tipy = cy + Angles.trnsy(a, len / 2f);
+        float bx = tipx - Angles.trnsx(a, hl / 2f);
+        float by = tipy - Angles.trnsy(a, hl / 2f);
+
+        for(int s = -1; s <= 1; s += 2){
+            Core.batch.draw(white, bx - hl / 2f, by - 1f, hl / 2f, 1f, hl, 2f, 1f, 1f, a + 145f * s);
+        }
+    }
+
+    /**
+     * 本项目 rotation（0=上/1=右/2=下/3=左）→ 贴图旋转角。
+     * <p>建筑贴图基准朝向为"右"（conveyor-0-0 的带面水平、履带纹竖直；原版 rotation 0 也是 +x），
+     * libgdx 的 batch.draw 角度顺时针为正，故 = (1 - rotation) * 90：0(上) 转 90°、1(右) 不转、2(下) 转 -90°、3(左) 转 -180°。
+     */
+    protected static float spriteAngle(int rotation){
+        return (1 - (rotation & 3)) * 90f;
+    }
+
+    /**
+     * 本项目 rotation → 朝向箭头角度（供 {@link Angles#trnsx} 等用）。
+     * <p>这里用的是数学角度约定（0=+X、逆时针为正），与贴图角不是同一个式子的结果，故 = (1 - rotation) * 90。
+     */
+    protected static float arrowAngle(int rotation){
+        return (1 - (rotation & 3)) * 90f;
+    }
+
+    /** @return 纯白贴图（画预览色块用）；atlas 未就绪时返回 null。 */
+    protected static TextureRegion whiteRegion(){
+        if(Core.atlas == null) return null;
+        TextureRegion region = Core.atlas.findRegion("white");
+        if(region == null) region = Core.atlas.findRegion("blank");
+        return region;
+    }
+
     // ---- 连线放置（拖拽连放，对应原版 InputHandler.updateLine / lineRequests）----
 
-    /** 连线长度上限（避免拖太远铺满地图）。 */
+    /** 连线长度上限（避免拖太远铺满地图）。单轴上限。 */
     public static final int maxLineLength = 48;
+    /** 路径格数上限（纯直线最多 {@link #maxLineLength} + 1 格含起点，这里留一点余量）。 */
+    public static final int maxPathLength = maxLineLength + 2;
     /** 复用数组：路径点（避免每次拖拽分配）。 */
-    public final int[] pathX = new int[maxLineLength + 1], pathY = new int[maxLineLength + 1];
+    public final int[] pathX = new int[maxPathLength], pathY = new int[maxPathLength];
     /** 当前路径格数。 */
     public int pathSize;
 
-    /** 按住 Ctrl 时强制直线（原版用 Binding.diagonal_placement 做相反的切换）。 */
-    public boolean straightLine;
     /** 是否正在拖拽连线（对应原版 PlaceMode.placing）。 */
     public boolean lineMode;
     /** 连线起点瓦片。 */
     public int lineStartX, lineStartY;
     /** 当前连线的逐格结果（对应原版 lineRequests）：朝向指向路径的下一格。 */
-    public final LineRequest[] lines = new LineRequest[maxLineLength + 1];
+    public final LineRequest[] lines = new LineRequest[maxPathLength];
     /** 当前连线格数。 */
     public int lineSize;
 
@@ -124,62 +609,92 @@ public abstract class InputHandler extends InputAdapter{
         updateLine(lineStartX, lineStartY, Vars.world.toTile(worldX), Vars.world.toTile(worldY));
     }
 
+    /** 连线重叠判定用的临时矩形（对应原版 {@code iterateLine} 里的 Tmp.r2 / Tmp.r3）。 */
+    private final com.badlogic.gdx.math.Rectangle nextBounds = new com.badlogic.gdx.math.Rectangle();
+    private final com.badlogic.gdx.math.Rectangle lineBounds = new com.badlogic.gdx.math.Rectangle();
+
     /**
-     * 生成连线路径（对应原版 InputHandler.iterateLine + Placement.normalizeLine）。
-     * <p>直线模式下只沿偏差较大的一个轴推进；可旋转方块（传送带）默认走 L 形路径，
-     * 且每一格的朝向指向路径的下一格、最后一格用"起点 → 终点"的方向，
-     * 因此拖出拐角时带子会自动跟着转弯。
+     * 生成连线路径（对应原版 InputHandler.iterateLine）。
+     * <p>路径由 {@link #buildPath} 按原版 {@code Placement.normalizeLine} 生成（纯直线，不拐弯）。
+     * <p>多格方块按 {@code size} 占位：某格的占位范围若与前一个已放置的格子重叠，就**直接丢弃**
+     * （原版靠 {@code Rectangle.overlaps} 做同样的事）——否则 2x2/3x3 方块会沿着路径叠成一串，
+     * 表现就是拖放时预览互相重叠。
      */
     public void updateLine(int startX, int startY, int endX, int endY){
         lineSize = 0;
         Block block = buildBlock;
         if(block == null) return;
 
-        //可旋转方块（传送带）走 L 形路径，其余方块走直线
-        buildPath(startX, startY, endX, endY, block.rotate && !straightLine);
+        int count = buildPath(startX, startY, endX, endY);
 
-        int count = pathSize;
         //路径终点（用于最后一格的朝向）
         int lastX = pathX[count - 1], lastY = pathY[count - 1];
         int baseRotation = (startX == lastX && startY == lastY) ? buildRotation : relativeTo(startX, startY, lastX, lastY);
 
+        //空矩形：overlaps 恒为 false，等价于原版 Tmp.r3.set(-1, -1, 0, 0)
+        float size = block.size * Vars.tilesize;
+        lineBounds.set(-1f, -1f, 0f, 0f);
+
         for(int i = 0; i < count; i++){
+            float cx = pathX[i] * Vars.tilesize + block.offset() + Vars.tilesize / 2f;
+            float cy = pathY[i] * Vars.tilesize + block.offset() + Vars.tilesize / 2f;
+
+            nextBounds.setSize(size).setCenter(cx, cy);
+            if(nextBounds.overlaps(lineBounds)) continue;
+
             LineRequest req = lines[lineSize];
             req.x = pathX[i];
             req.y = pathY[i];
-            //朝向指向路径下一格（拐角自然成立），最后一格用起点→终点的方向
+            //朝向指向路径的下一格，最后一格用"起点 → 终点"的方向
             req.rotation = i < count - 1 ? relativeTo(pathX[i], pathY[i], pathX[i + 1], pathY[i + 1]) : baseRotation;
             lineSize++;
+
+            lineBounds.setSize(size).setCenter(cx, cy);
         }
     }
 
     /**
-     * 生成轴对齐的路径并填充 {@link #pathX}/{@link #pathY}（对应原版 Placement.normalizeLine / pathfindLine）。
-     * <p>直线模式只走偏差较大的一个轴；L 形模式先走长边再走短边（拖动拐角用）。
+     * 生成连线路径并填充 {@link #pathX}/{@link #pathY}（对应原版 {@code InputHandler.iterateLine → Placement.pathfindLine}）。
+     * <p>传送带/导管走 {@link Placement#pathfindLine}（开 conveyorpathfinding 时 A*，否则阶梯直线）；
+     * 其余方块只沿偏差较大的一个轴走直线，**不拐弯**（原版普通方块默认也是直线）。
      * @return 路径格数
      */
-    public int buildPath(int startX, int startY, int endX, int endY, boolean lShape){
+    public int buildPath(int startX, int startY, int endX, int endY){
         endX = startX + Mathf.clamp(endX - startX, -maxLineLength, maxLineLength);
         endY = startY + Mathf.clamp(endY - startY, -maxLineLength, maxLineLength);
+
+        //传送带/导管（conveyorPlacement）：原版走 Placement.pathfindLine（开 conveyorpathfinding 时 A*，否则阶梯直线）；
+        //其余方块仍是轴对齐纯直线，行为不变
+        if(buildBlock != null && buildBlock.conveyorPlacement){
+            com.phoenix.game.struct.Array<com.phoenix.game.math.geom.Point2> pts =
+                Placement.pathfindLine(true, startX, startY, endX, endY);
+            int count = Math.min(pts.size, maxPathLength);
+            for(int i = 0; i < count; i++){
+                com.phoenix.game.math.geom.Point2 p = pts.get(i);
+                pathX[i] = p.x;
+                pathY[i] = p.y;
+            }
+            pathSize = count;
+            return count;
+        }
 
         int sx = Integer.signum(endX - startX), sy = Integer.signum(endY - startY);
         int remainingX = Math.abs(endX - startX), remainingY = Math.abs(endY - startY);
 
         int count = 0;
-        int x = startX, y = startY;
-        pathX[count] = x;
-        pathY[count] = y;
-        count++;
-
-        if(remainingX >= remainingY){
-            for(int i = 0; i < remainingX; i++){ x += sx; pathX[count] = x; pathY[count] = y; count++; }
-            if(lShape){
-                for(int i = 0; i < remainingY; i++){ y += sy; pathX[count] = x; pathY[count] = y; count++; }
+        if(remainingX > remainingY){
+            //走横轴（原版 normalizeLine 的 "go width"）
+            for(int i = 0; i <= remainingX && count < maxPathLength; i++){
+                pathX[count] = startX + i * sx;
+                pathY[count] = startY;
+                count++;
             }
         }else{
-            for(int i = 0; i < remainingY; i++){ y += sy; pathX[count] = x; pathY[count] = y; count++; }
-            if(lShape){
-                for(int i = 0; i < remainingX; i++){ x += sx; pathX[count] = x; pathY[count] = y; count++; }
+            //走纵轴
+            for(int i = 0; i <= remainingY && count < maxPathLength; i++){
+                pathX[count] = startX;
+                pathY[count] = startY + i * sy;
+                count++;
             }
         }
 
@@ -685,7 +1200,16 @@ public abstract class InputHandler extends InputAdapter{
     /** 屏幕坐标 → 世界坐标用的临时向量 */
     private static final Vector3 tmp3 = new Vector3();
 
-    /** 每帧调用一次。 */
+    /**
+     * 每帧调用一次。
+     * <p>⚠ <b>子类覆盖时必须先调 {@code super.update()}</b>：{@link DesktopInput#update()} 与
+     * {@link MobileInput#update()} 都是 override 且<b>历史上都没调 super</b>，
+     * 导致写在这里的代码是死代码（S4b 批实测踩过：解锁逻辑放这里从不执行）。
+     * <p>原版 {@code Control.update()} 里 {@code input.update();} <b>之后</b>的段落
+     * （如"每帧解锁核心物品"，原版 core/Control.java:436-444）**没有**放在这里，
+     * 而是放在 {@code ClientLauncher} 每帧调 {@code input.update()} 的调用点之后 ——
+     * 那才是与原版位置等价的落点（tutorial.update() 同理）。
+     */
     public void update(){
     }
 
@@ -775,23 +1299,28 @@ public abstract class InputHandler extends InputAdapter{
 
     // ---- 玩家单位控制（对应原版 Player.updateKeyboard / updateShooting）----
 
-    /** WASD 驱动玩家单位移动；玩家死亡时不做任何事（此时 WASD 用于平移相机）。 */
+    /** WASD 驱动玩家单位移动；玩家死亡时不做任何事（此时 WASD 用于平移相机）。
+     * <p>照原版 Player.updateKeyboard：WASD 生成的是**加速度**（mech.speed → 本项目 UnitType.speed），
+     * 速度由 {@code updateVelocity} 的 limit(maxVelocity) + drag 阻尼平滑趋近稳态（≈ speed/drag）。
+     * 此前直接 {@code velocity.set(方向×maxVelocity)} 一帧到满速、松键又 ×0.6 急减速 → 手感比原版"硬"。 */
     public void updateMovement(){
         Player player = Vars.player;
         if(player == null || player.isDead()) return;
 
         BaseUnit unit = player.unit();
-        movement.set(axisX(), axisY());
 
-        float speed = player.isBoosting ? unit.getType().maxVelocity * boostMultiplier : unit.getType().maxVelocity;
+        float speed = player.isBoosting ? unit.getType().speed * boostMultiplier : unit.getType().speed;
 
-        if(movement.isZero()){
-            //松开方向键后快速停下（速度衰减由 drag 负责）
-            unit.velocity().scl(0.6f);
-        }else{
-            movement.nor();
-            unit.velocity().set(movement.x * speed, movement.y * speed);
+        //飞行单位倒退/侧移惩罚（原版 updateKeyboard:585-589：输入方向与机体朝向相反时速度降到最低 0.2 倍）
+        if(unit.getType().flying){
+            float penalty = 0.2f;
+            speed *= Mathf.lerp(1f, penalty, Angles.angleDist(unit.rotation, unit.velocity().angle()) / 180f);
         }
+
+        movement.set(axisX(), axisY()).scl(speed);
+        movement.limit(speed).scl(Time.delta());
+
+        unit.velocity().add(movement.x, movement.y);
     }
 
     /** 鼠标瞄准与射击：按住左键朝光标开火，未射击时朝移动方向转身。
@@ -807,13 +1336,21 @@ public abstract class InputHandler extends InputAdapter{
         player.pointerX = targetX;
         player.pointerY = targetY;
 
+        //原版 Player.updateShooting：`if(!isBuilding() && getMineTile() == null)` 才更新瞄准/开火
+        if(player.isBuilding() || player.getMineTile() != null) return;
+
         if(player.isShooting){
             unit.rotation = Mathf.slerpDelta(unit.rotation, Angles.angle(unit.x, unit.y, targetX, targetY), 0.25f);
             //本地也开火（对应原版 Player.updateKeyboard → updateShooting）：视觉即时。
-            //服务端仍按 PlayerInput 权威开火；它广播的开火事件在射手自己的客户端会被跳过，不会重复生成。
-            weapon.update(unit, targetX, targetY);
+            //服务端仍按 PlayerInput 权威开火；它广播的开火事件在射手自己的客户端会被跳过，不会重复生成子弹。
+            //F12c：canShoot 钩子（对应原版 Player.mech.canShoot；trident-ship 要求速度 >1.2 才投弹）
+            if(unit.getType().canShoot(unit)){
+                weapon.update(unit, targetX, targetY);
+            }
         }else if(!movement.isZero()){
-            unit.rotation = Mathf.slerpDelta(unit.rotation, movement.angle(), 0.13f);
+            //原版 updateKeyboard:625：飞行单位转身朝**速度方向**（velocity.angle()），地面单位朝输入方向
+            unit.rotation = Mathf.slerpDelta(unit.rotation,
+                unit.getType().flying ? unit.velocity().angle() : movement.angle(), 0.13f);
         }
     }
 

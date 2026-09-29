@@ -6,6 +6,7 @@ import com.badlogic.gdx.graphics.g2d.*;
 import com.badlogic.gdx.scenes.scene2d.ui.*;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import com.badlogic.gdx.scenes.scene2d.utils.NinePatchDrawable;
+import com.phoenix.game.graphics.Colors;
 import com.phoenix.game.graphics.Pal;
 import com.phoenix.game.core.Core;
 import com.phoenix.game.core.Fonts;
@@ -285,6 +286,13 @@ public class Styles {
             background = windowEmpty;
             titleFontColor = Pal.accent;
         }};
+
+        //Mindustry 在 UI.loadStyles 里额外注册的命名颜色（对应原版 UI.java 的 Colors.put），
+        //供 Label 的 [accent] / [stat] 等标记解析
+        Colors.put("accent", Pal.accent);
+        Colors.put("unlaunched", Color.valueOf("8982ed"));
+        Colors.put("highlight", Pal.accent.cpy().lerp(Color.WHITE, 0.3f));
+        Colors.put("stat", Pal.stat);
     }
 
     private static Drawable createFlatDown(){

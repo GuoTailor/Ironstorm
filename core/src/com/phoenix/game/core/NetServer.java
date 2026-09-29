@@ -206,6 +206,25 @@ public class NetServer {
         return hosting;
     }
 
+    /**
+     * @return 服务器是否正在等待玩家（对应原版 {@code NetServer.isWaitingForPlayers}）。
+     * <p>语义照原版：仅 PvP 局判断——"有玩家占用的队伍数 &lt; 2"即视为等待；非 PvP 恒返回 false。
+     * <p>⚠ 偏离：原版遍历 {@code state.teams.getActive()}（活跃队伍）再按队伍统计玩家数；
+     * 本项目 {@code Teams} 没有 {@code getActive()} → 改为遍历 {@link Vars#playerGroup} 收集各玩家队伍去重计数。
+     */
+    public boolean isWaitingForPlayers(){
+        if(Vars.state == null || Vars.state.rules == null || !Vars.state.rules.pvp) return false;
+        if(Vars.playerGroup == null) return false;
+
+        com.badlogic.gdx.utils.IntSet used = new com.badlogic.gdx.utils.IntSet();
+        com.badlogic.gdx.utils.Array<Player> all = Vars.playerGroup.all();
+        for(int i = 0; i < all.size; i++){
+            Player p = all.get(i);
+            if(p != null) used.add(p.getTeam().id);
+        }
+        return used.size < 2;
+    }
+
     // ---- 包处理 ----
 
     private void setupHandlers(){
@@ -230,7 +249,8 @@ public class NetServer {
                 rp.aimX = p.aimX;
                 rp.aimY = p.aimY;
                 com.phoenix.game.type.Weapon weapon = rp.unit.getWeapon();
-                if(weapon != null){
+                //F12c：canShoot 钩子（trident-ship 速度门槛等）—— 必须与 InputHandler.updateShooting 同判定（双端逻辑一致）
+                if(weapon != null && rp.unit.getType().canShoot(rp.unit)){
                     weapon.update(rp.unit, p.aimX, p.aimY);
                 }
             }
@@ -296,6 +316,54 @@ public class NetServer {
             //转发给除发送者外的所有客户端（表现层：画线/特效）
             Vars.net.sendExcept(con, p, Net.SendMode.tcp);
         });
+
+        //F13f：客户端管理员操作请求（对应原版 Call.onAdminRequest）
+        net.handleServer(Packets.AdminRequest.class, (con, p) -> onAdminRequest(con, p));
+    }
+
+    /**
+     * 处理客户端的管理员操作请求（对应原版 {@code NetServer.onAdminRequest}）。
+     * <p>鉴权照原版：① 发起者必须是管理员；② 目标存在；③ 不能操作管理员（除非发起者是房主）；
+     * ④ 不能操作自己。动作：ban（封 IP + 踢）/ kick / trace（组 {@code TraceInfo} 回传给发起者）。
+     */
+    private void onAdminRequest(NetConnection con, Packets.AdminRequest p){
+        RemotePlayer rp = findByConnection(con);
+        if(rp == null) return;
+        Player player = rp.player;
+
+        if(!player.isAdmin){
+            System.out.println("[服务器] 拒绝非管理员的管理请求（" + player.name + " / " + con.address + "）");
+            return;
+        }
+
+        RemotePlayer other = findPlayerByUuid(p.uuid);
+        if(other == null || (other.player.isAdmin && !player.isLocal) || other == rp){
+            System.out.println("[服务器] 拒绝无效的管理对象（" + player.name + " -> " + p.uuid + "）");
+            return;
+        }
+
+        Player o = other.player;
+        if(p.action < 0 || p.action >= Packets.AdminAction.values().length) return;
+        Packets.AdminAction action = Packets.AdminAction.values()[p.action];
+
+        if(action == Packets.AdminAction.ban){
+            admins.banIP(other.con.address);
+            other.con.kick(Packets.KickReason.banned);
+            System.out.println("[服务器] " + player.name + " 封禁了 " + o.name);
+        }else if(action == Packets.AdminAction.kick){
+            other.con.kick(Packets.KickReason.kick);
+            System.out.println("[服务器] " + player.name + " 踢出了 " + o.name);
+        }else if(action == Packets.AdminAction.trace){
+            //对应原版 onAdminRequest 的 trace 分支：组 TraceInfo 回传给发起者
+            //（原版走 Call.onTraceInfo(player.con, other, info)；本项目没有 RPC，改用自建响应包单播）
+            Administration.TraceInfo info = new Administration.TraceInfo(
+                other.con.address, other.player.uuid, other.con.modclient, other.con.mobile);
+            Packets.TraceInfoPacket tp = new Packets.TraceInfoPacket();
+            tp.playerUuid = other.player.uuid;
+            tp.info = info;
+            rp.con.send(tp, Net.SendMode.tcp);
+            System.out.println("[服务器] " + player.name + " 请求追踪 " + o.name + "（ip=" + other.con.address + "）");
+        }
     }
 
     /** 按 Blocks.all 下标取方块（与 SaveIO 一致）。 */
@@ -376,6 +444,16 @@ public class NetServer {
         //远程 Player（持单位引用，单位在 respawnPlayer 里生成）
         Player player = new Player();
         player.name = p.name;
+        //F13b：填列表/权限相关字段（对应原版 Player 的这些字段；单机时不会有这条路径）
+        player.uuid = p.uuid;
+        player.usid = p.usid;
+        player.con = con;
+        player.isAdmin = admins.isAdmin(p.uuid);
+        if(p.color != 0){
+            //ConnectPacket.color 是 ARGB int（0 = 客户端未上报 → 保持默认白色）
+            player.color.set(p.color);
+        }
+        player.add(); //登记进 playerGroup
 
         RemotePlayer rp = new RemotePlayer(con, p, player, null);
         players.add(rp);
@@ -387,6 +465,9 @@ public class NetServer {
 
         //广播加入提示
         broadcastChat("[服务器]", p.name + " 加入了游戏");
+
+        //F13g：广播玩家列表快照（新玩家进来后所有人刷新列表）
+        broadcastPlayerList();
     }
 
     /**
@@ -394,7 +475,10 @@ public class NetServer {
      * <p>加入时与地图重开时共用同一套流程 —— 地图重开后必须重发世界，否则客户端会停留在旧世界上。
      */
     public void respawnPlayer(RemotePlayer rp){
-        BaseUnit unit = UnitTypes.dagger.create();
+        //出生单位与单机 spawnPlayerUnit 同源：玩家自选类型（默认 dart-ship = 原版出生机甲
+        //Mechs.starter，飞行 + 可采铜/铅）。此前写死 dagger（地面单位）→ 联机玩家出生即地面机甲，
+        //在程序生成图上被水域挡住够不到矿，也无法像原版一样飞行。
+        BaseUnit unit = (rp.player.selectedType != null ? rp.player.selectedType : UnitTypes.dartShip).create();
         unit.setTeam(Team.sharded);
         unit.isPlayer = true;
 
@@ -403,7 +487,9 @@ public class NetServer {
         float y = core != null ? core.getY() + 32f : Vars.world.unitHeight() * 0.5f;
         unit.set(x, y);
         unit.health(unit.maxHealth());
-        Units.add(unit);
+        //与 spawnPlayerUnitAt 对齐：记下当前类型，后续死亡重生/容量计算都用它
+        rp.player.selectedType = unit.getType();
+        //注意：UnitTypes 的 create() 内部已 Units.add，不要再加一次
 
         rp.unit = unit;
         rp.player.unit(unit);
@@ -473,6 +559,8 @@ public class NetServer {
     /** 移除玩家及其单位，并向其他客户端广播移除。 */
     private void removePlayer(RemotePlayer rp, boolean broadcast){
         players.removeValue(rp, true);
+        //从 playerGroup 解绑（对应原版玩家断线时的 remove）
+        if(rp.player != null) rp.player.remove();
         if(rp.unit != null){
             Packets.EntityRemove er = new Packets.EntityRemove(rp.unit.getID());
             //通知所有其他连接该单位已移除
@@ -484,6 +572,81 @@ public class NetServer {
             rp.unit.remove();
             System.out.println("[服务器] " + rp.player.name + " 离开");
         }
+
+        //F13g：广播玩家列表快照（有人离开后所有人刷新列表）
+        broadcastPlayerList();
+    }
+
+    /**
+     * 广播玩家列表整表快照（对应原版每个客户端的 Player 实体同步；本项目用快照包）。
+     * <p>调用点：玩家加入（{@code onConnect}）/ 离开（{@code removePlayer}）/ 权限变更（{@code setPlayerAdmin}）。
+     */
+    public void broadcastPlayerList(){
+        if(players.size == 0) return;
+
+        Packets.PlayerListSync sync = new Packets.PlayerListSync();
+        int total = players.size + (Vars.player != null ? 1 : 0);
+        sync.uuids = new String[total];
+        sync.names = new String[total];
+        sync.usids = new String[total];
+        sync.colors = new int[total];
+        sync.admins = new boolean[total];
+        sync.teams = new byte[total];
+
+        int i = 0;
+        //本机玩家（HOST 模式下的服务端玩家）排在最前
+        if(Vars.player != null){
+            sync.uuids[i] = Vars.player.uuid;
+            sync.names[i] = Vars.player.name;
+            sync.usids[i] = Vars.player.usid;
+            sync.colors[i] = Vars.player.color.toIntBits();
+            sync.admins[i] = Vars.player.isAdmin;
+            sync.teams[i] = (byte)Vars.player.getTeam().id;
+            i++;
+        }
+        for(RemotePlayer rp : players){
+            Player pl = rp.player;
+            sync.uuids[i] = pl.uuid;
+            sync.names[i] = pl.name;
+            sync.usids[i] = pl.usid;
+            sync.colors[i] = pl.color.toIntBits();
+            sync.admins[i] = pl.isAdmin;
+            sync.teams[i] = (byte)pl.getTeam().id;
+            i++;
+        }
+
+        for(RemotePlayer rp : players){
+            rp.con.send(sync, Net.SendMode.tcp);
+        }
+    }
+
+    /** 按 uuid 查找远程玩家（管理操作用）。 */
+    public RemotePlayer findPlayerByUuid(String uuid){
+        if(uuid == null) return null;
+        for(RemotePlayer rp : players){
+            if(uuid.equals(rp.player.uuid)) return rp;
+        }
+        return null;
+    }
+
+    /**
+     * 设置某玩家的管理员权限（改档案 + 同步在场 Player 对象 + 广播列表）。
+     * <p>对应原版 {@code Administration.adminPlayer/unAdminPlayer} 之上再补"通知客户端"那一步；
+     * 本项目没有 RPC 层，服务端直接调用（客户端侧操作见候选 F13f）。
+     */
+    public void setPlayerAdmin(String uuid, boolean admin){
+        if(uuid == null) return;
+        admins.setAdmin(uuid, admin);
+        //同步在场玩家对象
+        if(Vars.player != null && uuid.equals(Vars.player.uuid)){
+            Vars.player.isAdmin = admin;
+        }
+        RemotePlayer rp = findPlayerByUuid(uuid);
+        if(rp != null){
+            rp.player.isAdmin = admin;
+        }
+        //广播列表（客户端据此更新列表里的管理员标记/按钮）
+        broadcastPlayerList();
     }
 
     /** 按连接查找玩家。 */

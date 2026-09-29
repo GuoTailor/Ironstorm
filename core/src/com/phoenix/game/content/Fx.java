@@ -536,7 +536,7 @@ public class Fx{
         });
     });
 
-    /** 火焰：更旺的火点（原版还会往光照系统塞一个光源，本工程无光照系统，跳过）。 */
+    /** 火焰：更旺的火点（原版末尾还往光照系统塞一个光源，见下；已接线（S5b 批次））。 */
     public static final Effects.Effect fire = new Effects.Effect(50f, 28f, e -> {
         Draw.color(Pal.lightFlame, Pal.darkFlame, e.fin());
 
@@ -545,6 +545,11 @@ public class Fx{
         });
 
         Draw.color();
+
+        //火焰自发光（对应原版 Fx.fire 末尾，见原版 Fx.java:423）
+        if(com.phoenix.game.Vars.renderer != null){
+            com.phoenix.game.Vars.renderer.lights.add(e.x, e.y, 20f * e.fslope(), Pal.lightFlame, 0.5f);
+        }
     });
 
     /** 火焰烟。 */

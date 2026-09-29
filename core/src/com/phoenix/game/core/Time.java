@@ -24,6 +24,11 @@ public class Time {
     /** 延迟任务队列（对应原版 Time 的 runs 列表）。 */
     private static final com.badlogic.gdx.utils.Array<DelayRun> runs = new com.badlogic.gdx.utils.Array<>();
 
+    static{
+        //注册对象池：不注册的话 libgdx 会打印 "Please manually define a Pool" 警告并退化为每次反射新建
+        Pools.set(DelayRun.class, new com.badlogic.gdx.utils.ReflectionPool<>(DelayRun.class));
+    }
+
     /** Runs a task with a delay of several ticks. If Time.clear() is called, this task will be cancelled. */
     public static void run(float delay, Runnable r){
         DelayRun run = Pools.obtain(DelayRun.class);
@@ -73,13 +78,26 @@ public class Time {
             run.delay -= delta;
             if(run.delay <= 0f){
                 runs.removeIndex(i);
+                //⚠ 必须先取出 finish 再归还对象池：Pools.free 会调用 reset() 把 finish 置成 null，
+                //   若先 free 再读 run.finish，条件恒为 false → **所有 Time.run 回调静默失效**
+                //   （曾导致玩家投递物品入库、ItemTransfer 动画等一整套延迟任务不执行）。
+                Runnable finish = run.finish;
                 Pools.free(run);
-                if(run.finish != null) run.finish.run();
+                if(finish != null) finish.run();
             }
         }
     }
     public static float delta() {
         return deltaimpl.get();
+    }
+
+    /**
+     * @return 全局时间（tick）。
+     * <p>对应 arc 的 {@code Time.time()}（原版 Time 里既有 {@code public static float time} 字段，
+     * 也有同名取值方法；两者可以共存，方法内取的就是那个字段）。
+     */
+    public static float time(){
+        return time;
     }
     /** @return The current value of the system timer, in nanoseconds. */
     public static long nanos(){

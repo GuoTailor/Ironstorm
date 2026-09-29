@@ -40,4 +40,22 @@ public final class TypeIO {
         buffer.get(bytes);
         return bytes;
     }
+
+    /**
+     * 写入玩家追踪信息（对应原版 {@code TypeIO.writeTraceInfo}）。
+     * <p>字节序照原版：ip 字符串 → uuid 字符串 → modded 字节 → mobile 字节。
+     * <p>⚠ 本项目**不使用** {@code @WriteClass}/{@code @ReadClass} 注解：注解处理器会报
+     * {@code No @WriteClass method} 直接中断编译（见 CODEBUDDY.md 硬约束），所以这里只保留方法、不加注解。
+     */
+    public static void writeTraceInfo(ByteBuffer buffer, Administration.TraceInfo trace){
+        writeString(buffer, trace.ip);
+        writeString(buffer, trace.uuid);
+        buffer.put(trace.modded ? (byte)1 : 0);
+        buffer.put(trace.mobile ? (byte)1 : 0);
+    }
+
+    /** 读取玩家追踪信息（对应原版 {@code TypeIO.readTraceInfo}）。不加注解的原因见 {@link #writeTraceInfo}。 */
+    public static Administration.TraceInfo readTraceInfo(ByteBuffer buffer){
+        return new Administration.TraceInfo(readString(buffer), readString(buffer), buffer.get() == 1, buffer.get() == 1);
+    }
 }
