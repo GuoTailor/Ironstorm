@@ -57,7 +57,8 @@ import static com.phoenix.game.Vars.tilesize;
  *     <li>{@code drawLight(Tile)}（{@code renderer.lights.add}）：<b>已接线（S5a 批次）</b>，
  *         见 {@link #drawLight(Tile)}。</li>
  *     <li>{@code Sounds.explosionbig.at(tile)}：本项目音效没有位置衰减，改成 {@code play(1f)}。</li>
- *     <li>{@code Damage.damage(x, y, radius, damage)}（不分敌我）→ 本项目对应 {@code Damage.damageAll}。</li>
+ *     <li>{@code Damage.damage(x, y, radius, damage)}：F6 批后 {@code Damage} 已有原版同名
+ *         4 参重载（→ {@code damage(null, ..., false)}，不分敌我、距离衰减、tileDamage 伤建筑），直接调用。</li>
  *     <li>原版 {@code setBars()} 里那条 heat 条 → 改写成覆写 {@link #displayBars(Tile, Table)}。</li>
  *     <li>实体内部类照 {@code Drill}/{@code Pump} 的写法改成**非静态**内部类。</li>
  * </ul>
@@ -254,7 +255,9 @@ public class NuclearReactor extends PowerGenerator{
                         Time.run(Mathf.random(40f), () -> Effects.effect(Fx.nuclearcloud, cx, cy));
                     }
 
-                    Damage.damageAll(cx, cy, explosionRadius * tilesize, explosionDamage * 4f);
+                    //原版 Damage.damage(tile.worldx(), tile.worldy(), explosionRadius * tilesize, explosionDamage * 4)
+                    //（Damage.java:170 的 4 参重载 → damage(null, ..., false)：不分敌我、距离衰减、tileDamage 伤建筑）
+                    Damage.damage(cx, cy, explosionRadius * tilesize, explosionDamage * 4f);
 
                     for(int i = 0; i < 20; i++){
                         Time.run(Mathf.random(50f), () -> {

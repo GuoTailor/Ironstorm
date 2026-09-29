@@ -84,11 +84,15 @@ public class IntQueue{
     protected void resize(int newSize){
         int[] newValues = new int[newSize];
 
-        if(tail < head){
-            System.arraycopy(values, head, newValues, 0, values.length - head);
-            System.arraycopy(values, 0, newValues, values.length - head, tail);
-        }else{
-            System.arraycopy(values, head, newValues, 0, size);
+        //按逻辑顺序拷贝 size 个元素（head 开头的第一段 + 回绕到 0 的第二段）。
+        //⚠ 不能用 tail<head / else 二分：满环时 tail==head 但布局仍是回绕的，
+        //  else 分支的 arraycopy(values, head, ..., size) 会 head+size 越界（tileDamage 实测崩）。
+        if(size > 0){
+            int firstLen = Math.min(size, values.length - head);
+            System.arraycopy(values, head, newValues, 0, firstLen);
+            if(size > firstLen){
+                System.arraycopy(values, 0, newValues, firstLen, size - firstLen);
+            }
         }
 
         head = 0;

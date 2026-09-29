@@ -10,6 +10,8 @@ import com.phoenix.game.math.Mathf;
 import com.phoenix.game.type.ItemStack;
 import com.phoenix.game.world.Tile;
 
+import static com.phoenix.game.Vars.tilesize;
+
 /**
  * 冲击反应堆。参照 Mindustry mindustry.world.blocks.power.ImpactReactor 移植。
  * <p>同时**耗电与发电**（原版 {@code outputsPower = consumesPower = true}）：需要 25/帧的启动电力
@@ -26,7 +28,7 @@ public class ImpactReactor extends PowerGenerator{
     public float warmupSpeed = 0.001f;
     /** 消耗一个燃料所需帧数。 */
     public float itemDuration = 140f;
-    /** 爆炸半径（像素）。 */
+    /** 爆炸半径（格数；调用处乘 {@code tilesize} 换算成世界单位，原版 {@code explosionRadius = 50}）。 */
     public float explosionRadius = 50f;
     /** 爆炸基础伤害（原版按 ×4 施加）。 */
     public float explosionDamage = 2000f;
@@ -121,7 +123,9 @@ public class ImpactReactor extends PowerGenerator{
                     //核爆特效（对应原版 Fx.reactorExplosion）
                     Effects.effect(com.phoenix.game.content.Fx.reactorExplosion, cx, cy);
                     Effects.shake(6f, 16f, cx, cy);
-                    Damage.damageAll(cx, cy, explosionRadius, explosionDamage * 4f);
+                    //原版 Damage.damage(tile.worldx(), tile.worldy(), explosionRadius * tilesize, explosionDamage * 4)
+                    //（Damage.java:170 的 4 参重载 → damage(null, ..., false)：不分敌我、距离衰减、tileDamage 伤建筑）
+                    Damage.damage(cx, cy, explosionRadius * tilesize, explosionDamage * 4f);
                 }
             }
             super.kill();

@@ -19,39 +19,43 @@ import com.phoenix.game.game.Team;
 import com.phoenix.game.math.Angles;
 import com.phoenix.game.math.Mathf;
 import com.phoenix.game.math.geom.Geometry;
+import com.phoenix.game.struct.GridBits;
+import com.phoenix.game.struct.IntQueue;
 import com.phoenix.game.world.Tile;
 
 import java.util.HashSet;
 
 /**
  * 伤害/爆炸工具类。参照 Mindustry mindustry.entities.Damage 移植。
- * 含 4 参旧口径（无衰减）与 6 参原版口径（衰减+击退+complete 摧毁建筑）两套重载；
- * tileDamage 传播算法归 F6 批（dynamicExplosion 已按原版补全）。
+ * <p>重载口径与原版一致：4 参重载（可带 team）= 6 参 {@code complete=false} 的转发
+ * （单位距离衰减 + 击退 + {@link #tileDamage} 菱形蔓延伤建筑）；{@code complete=true}
+ * 走 {@link #completeDamage} 整块摧毁（波次空投区清场用）。
  */
 public class Damage{
 
-    /** 对指定区域内的敌方单位造成伤害。 */
+    /** tileDamage 传播用的已访问位图（对应原版 {@code Damage.bits}，Damage.java:28；30x30 覆盖半径上限 15）。 */
+    private static GridBits bits = new GridBits(30, 30);
+    /** tileDamage 传播队列（对应原版 {@code Damage.propagation}，Damage.java:29；addFirst+removeLast 实为 LIFO）。 */
+    private static IntQueue propagation = new IntQueue();
+
+    /** 对范围内所有单位与建筑造成伤害，不分敌我（对应原版 {@code Damage.damage(float...)，Damage.java:170}）。 */
+    public static void damage(float x, float y, float radius, float damage){
+        damage(null, x, y, radius, damage);
+    }
+
+    /** 对范围内敌方单位与建筑造成伤害（对应原版 {@code Damage.damage(Team, float...)，Damage.java:175}）。 */
     public static void damage(Team team, float x, float y, float radius, float damage){
-        if(damage <= 0f) return;
-
-        //注意：用下标遍历，避免 libgdx Array 迭代器嵌套（伤害可能触发单位死亡→再遍历单位列表）
-        for(int i = 0; i < Units.units.size; i++){
-            BaseUnit unit = Units.units.get(i);
-            if(unit.isDead() || !unit.withinDst(x, y, radius)) continue;
-            if(team != null && !team.isEnemy(unit.getTeam())) continue;
-
-            unit.damage(damage);
-        }
+        damage(team, x, y, radius, damage, false);
     }
 
     /**
-     * 对范围内敌方单位（距离衰减 + 击退）与敌方建筑（{@code complete=true} 时整块摧毁）造成伤害。
+     * 对范围内敌方单位（距离衰减 + 击退）造成伤害；建筑部分：
+     * {@code complete=false} 走 {@link #tileDamage} 菱形蔓延（原版 Damage.java:203-208），
+     * {@code complete=true} 走 {@link #completeDamage} 整块摧毁（原版 Damage.java:209-211）。
      * 对应原版 {@code Damage.damage(Team, float, float, float, float, boolean)}（Damage.java:180）。
-     * <p>与上面 4 参旧口径并存：4 参是早期最小实现（无衰减/击退/建筑摧毁），消费方是
-     * 溅射子弹（BulletType）与闪电（Lightning）；本重载按原版结构新写，消费方是
-     * 波次开场的空投区清场（WaveSpawner.spawnEnemies）。
-     * <p>{@code complete=true} 时对范围内敌方建筑调 {@code TileEntity.handleDamage}（等价原版
-     * {@code tile.entity.damage}）；{@code complete=false} 的 tileDamage 传播算法归 F6 批，此处留 TODO。
+     * <p>消费方：溅射子弹（BulletType，经 4 参转发进入）与波次开场的空投区清场
+     * （WaveSpawner.spawnEnemies，{@code complete=true}）。
+     * <p>{@code TileEntity.handleDamage} 即原版 {@code tile.entity.damage}（含血量归零销毁）。
      */
     public static void damage(Team team, float x, float y, float radius, float damage, boolean complete){
         java.util.function.Consumer<BaseUnit> cons = entity -> {
@@ -79,10 +83,89 @@ public class Damage{
         }
 
         if(!complete){
-            //TODO F6 批：原版这里走 tileDamage(team, tile.x, tile.y, trad, damage) 的伤害传播算法，尚未移植；当前只伤单位不动瓦片
+            if(Vars.world == null) return;
+
+            int trad = (int)(radius / Vars.tilesize);
+            Tile tile = Vars.world.tileWorld(x, y);
+            if(tile != null){
+                tileDamage(team, tile.x, tile.y, trad, damage);
+            }
         }else{
             completeDamage(team, x, y, radius, damage);
         }
+    }
+
+    /**
+     * 菱形蔓延的建筑伤害（对应原版 {@code Damage.tileDamage}，Damage.java:214-255）。
+     * 从 ({@code startx}, {@code starty}) 起，按曼哈顿距离逐环向外传播，伤害每环衰减
+     * {@code ×(1 − dst/radius)}（衰减归零即停，形成菱形图案）；命中敌方建筑先扣血
+     * （{@code handleDamage}），扣剩的余量继续向四邻传播（穿透伤害）。
+     * <p>⚠ 原版 {@code PropCell.damage} 是 short：单格伤害 &gt; 32767 会在打包时截断成负数
+     * 而提前停止传播，本实现保持该行为。
+     * <p>⚠ 原版 {@code tile.getTeam() != team} 是引用比较：{@code team == null} 时
+     * 所有建筑（含友军）都吃伤害（{@code damage(null, ...)} 无差别口径的一部分）。
+     */
+    public static void tileDamage(Team team, int startx, int starty, int radius, float baseDamage){
+        bits.clear();
+        propagation.clear();
+        int bitOffset = bits.width() / 2;
+
+        propagation.addFirst(propCell(0, 0, (short)baseDamage));
+        //clamp radius to fit bits
+        radius = Math.min(radius, bits.width() / 2);
+
+        while(!propagation.isEmpty()){
+            int prop = propagation.removeLast();
+            int x = propCellX(prop);
+            int y = propCellY(prop);
+            int damage = propCellDamage(prop);
+            //manhattan distance used for calculating falloff, results in a diamond pattern
+            int dst = Math.abs(x) + Math.abs(y);
+
+            int scaledDamage = (int)(damage * (1f - (float)dst / radius));
+
+            bits.set(bitOffset + x, bitOffset + y);
+            Tile tile = Vars.world.ltile(startx + x, starty + y);
+
+            if(scaledDamage <= 0 || tile == null) continue;
+
+            //apply damage to entity if needed（TileEntity.health 为 protected → 走 health()；扣血走 handleDamage）
+            if(tile.entity != null && tile.getTeam() != team){
+                int health = (int)tile.entity.health();
+                if(tile.entity.health() > 0){
+                    tile.entity.handleDamage(scaledDamage);
+                    scaledDamage -= health;
+
+                    if(scaledDamage <= 0) continue;
+                }
+            }
+
+            for(int i = 0; i < Geometry.d4.length; i++){
+                int px = x + Geometry.d4[i].x, py = y + Geometry.d4[i].y;
+                if(!bits.get(bitOffset + px, bitOffset + py)){
+                    propagation.addFirst(propCell(px, py, (short)scaledDamage));
+                }
+            }
+        }
+    }
+
+    // ---- PropCell：原版 @Struct 注解生成的打包类（mindustry.gen.PropCell），
+    //      byte x + byte y + short damage 压进一个 int；此处用静态方法等价实现 ----
+
+    private static int propCell(int x, int y, short damage){
+        return (x & 0xFF) | ((y & 0xFF) << 8) | ((damage & 0xFFFF) << 16);
+    }
+
+    private static int propCellX(int cell){
+        return (byte)cell;
+    }
+
+    private static int propCellY(int cell){
+        return (byte)(cell >> 8);
+    }
+
+    private static int propCellDamage(int cell){
+        return (short)(cell >> 16);
     }
 
     /**
@@ -110,17 +193,6 @@ public class Damage{
         float falloff = 0.4f;
         float scaled = Mathf.lerp(1f - dist / radius, 1f, falloff);
         return damage * scaled;
-    }
-
-    /** 对区域内所有单位造成伤害（不分敌我）。 */
-    public static void damageAll(float x, float y, float radius, float damage){
-        if(damage <= 0f) return;
-
-        for(int i = 0; i < Units.units.size; i++){
-            BaseUnit unit = Units.units.get(i);
-            if(unit.isDead() || !unit.withinDst(x, y, radius)) continue;
-            unit.damage(damage);
-        }
     }
 
     /**
@@ -194,8 +266,7 @@ public class Damage{
         for(int i = 0; i < waves; i++){
             int f = i;
             Time.run(i * 2f, () -> {
-                //原版 Damage.damage(x, y, rad, dmg) → damage(null, ..., false)：全场单位（含友军）+ 建筑。
-                //⚠ 建筑部分随原版 tileDamage 走（F6 批的 TODO），当前只伤单位
+                //原版 Damage.damage(x, y, rad, dmg) → damage(null, ..., false)：全场单位（含友军，距离衰减）+ tileDamage 菱形蔓延伤建筑
                 damage(null, x, y, Mathf.clamp(radius + explosiveness, 0, 50f) * ((f + 1f) / waves), explosiveness / 2f, false);
                 Effects.effect(Fx.blockExplosionSmoke, x + Mathf.range(radius), y + Mathf.range(radius));
             });
