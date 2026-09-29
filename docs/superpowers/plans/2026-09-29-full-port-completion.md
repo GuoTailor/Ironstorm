@@ -84,7 +84,7 @@
 | F11 | 功能 | A3 审计产出（待 A3 完成后登记） | ☐ |
 | F12 | 功能 | T0 分类产出的"缺失功能"项（待 T0 完成后登记） | ☐ |
 | F-LOW | 功能 | 低优先级合集：EventType 缺失事件类、Schematics.overwrite、SpawnGroup 序列化、SoundLoop 工作音效、GlobalData 资源池、TileEntity 休眠优化；**内容详情面板**（ContentInfoDialog.show + displayInfo 补 Item/UnitType/Liquid/StatusEffect 覆写 + ContentDisplay.displayItem/displayLiquid/displayUnit——A3+T0 组E）、Administration 子网封禁/strict/Config（A3 中低） | ☑（提交 f5fcdcb）；内容详情面板全链（**实拍验证**：铜详情图标/中文/属性表/Storable:是）+ Administration subnetBans/Config/strict（NetServer.onConnect 消费）+ EventType 22 类三组接线（BuildSelect/Zone/GameOver）+ I18n.format 缺键占位符修复；跳过 overwrite（上游缺失=死代码）/SoundLoop（无音频）/休眠（无证据）|
-| R1 | 残留 | 死代码/占位实现/`// removed` 残留清扫（含 S3d-5 主菜单背景）；**含 StatusEffect.reactive 死字段、Edges.getPixelPolygon 死方法**（A2） | ☐ |
+| R1 | 残留 | 死代码/占位实现/`// removed` 残留清扫（含 S3d-5 主菜单背景）；**含 StatusEffect.reactive 死字段、Edges.getPixelPolygon 死方法**（A2） | ☑（提交 b9e49c5）；考据纠正三连：主菜单背景**已完整移植**（MenuRenderer 535 行，登记过时）仅补 menufrag.dispose() FBO 泄漏；reactive 死字段**审计证伪**（原版无）已删；getPixelPolygon 两边均无→作废；删 3 处调试 println |
 | V1 | 终验 | 全量验证：编译绿 + autoplay 实跑 + 截图核对 + 联机冒烟 + 数值 dump 复检 | ☐ |
 
 ---
@@ -178,3 +178,4 @@ UI 类以"功能等价"判（arc→libgdx 已知缺口见 转换.md，不算缺�
 - 2026-09-30 F17 完成：3 组贴图入集 +25 区域零丢失；**发现并修复提交裹挟**（F18 并行改动的 World/Maps 被拆出，F18 交付时一起提交）（提交 a08a2f6）
 - 2026-09-30 F18 完成：bloom 降级挂接/滤镜链/复制彩蛋/coreselect 全落；冒烟无异常（提交 b5da34b）；F14~F18 全部完成——T0-②组缺失功能清零
 - 2026-09-30 F-LOW 完成：详情面板实拍闭环 + Administration/EventType 接线；交付后修 3 处编译错（注释吞方法声明/缺 import/add(TextureRegion)→new Image 包裹）+ I18n.format 占位符增强（提交 f5fcdcb）；派发 R1
+- 2026-09-30 R1 完成：残留清扫 + 考据纠正三连（提交 b9e49c5）；**全部批次完成，开始 V1 终验**
