@@ -70,7 +70,7 @@
 | F3 | 功能 | **Lightning 完整化**（A1 高）：沿途 damageLightning 子弹 + 30 格链式跳跃（maxChain 8）+ insulated 绝缘墙拦截（Lightning.java:71-115） | ☑（提交 3adba0d）；**实测：3 连纵队每只均匀 3 击（130→100）**；insulated 纠正=塑钢墙/PowerDiode（非 surge），SurgeWall/ShockMine 补偿代码已回退 |
 | F4 | 功能 | **破坏表现链**（A1 中）：Block.onDestroyed 库存爆炸/液体泼洒/电力缓冲（Block.java:604-647，配套 ItemModule.sum/has/addAll——A2）、breakSound、单位 deathSound、死亡携带物品殉爆（Unit.java:99-101） | ☑（提交 2fde8a7）；ItemModule 零修改（126.2 链不用 sum/hasAll）；实测：塞 100 blastCompound kill→瓦片变 air 无异常、dagger 死亡殉爆 health=-18.8 无异常；**dynamicExplosion 已随 F4 补全**（含震屏上限 9f），F6 只剩 tileDamage + Damage.calculateDamage 衰减 |
 | F5 | 功能 | **子弹对空语义**（A1 高，小改）：collides() 改 `!(flying && !collidesAir)`、collideGroups 方向（Bullet.java:168-170）——实际执行时 collideGroups 实参顺序**保持本项目对调**（同步回收子弹的既声明偏离，仅补注释）；BaseUnit.collides 照原版 Unit.collides 重写 | ☑ |
-| F6 | 功能 | **Damage 家族**（A1 中）：tileDamage 菱形蔓延、calculateDamage 距离衰减+击退、dynamicExplosion 分层时序+震屏上限（Damage.java:33-274） | ☐ |
+| F6 | 功能 | **Damage 家族**（A1 中）：tileDamage 菱形蔓延、calculateDamage 距离衰减+击退、dynamicExplosion 分层时序+震屏上限（Damage.java:33-274） | ☑（提交 f284a92）；tileDamage 照原版 214-255 逐行 + dynamicExplosion 多波伤建筑接线 + 静态入口对齐（删 damageAll）+ 核爆半径漏乘 tilesize 真 bug；**实测墙 320→168 距离衰减生效**；顺带 fix IntQueue.resize 满环越界（实测抓到）|
 | F7 | 功能 | **断裂接线四件**（A1 中，小改）：launchWaveMultiplier 消费、Zone.updateWave/bestWave、护甲减免 calculateDamage（**补 freezing.armorMultiplier=0.8**——A2）、Fire.extinguish 发 fireExtinguish + Fire 接已移植的 Puddle | ☑（freezing 字段早已就位、仅缺 damage 接线；collideGroups 保持对调为已声明偏离 → docs/port/f5f7-report.md） |
 | F8 | 功能 | **索敌语义**（A1 中）：derelict 豁免、findEnemyTile tilePred、targetClosest 用 max(weapon.range, type.range)（Units.java:84-150、BaseUnit.java:181-186） | ☐ |
 | F9 | 功能 | **状态存档与染色**（A1 中/低）：Statuses writeSave/readSave、getStatusColor | ☐ |
@@ -168,3 +168,4 @@ UI 类以"功能等价"判（arc→libgdx 已知缺口见 转换.md，不算缺�
 - 2026-09-29 F10 完成：darkness 整链 + Door 手动开合 + 核心不可拆（canBreak）；**截图验证岩体暗度梯度**（提交 9ff7dea，含 rgba→toIntBits 编译修正）；派发 F13
 - 2026-09-30 F13 完成：输入/UX 九项全落（解锁 toast/E 暂停建造/P 整图截图/中键吸取/R 旋转已放置/drawConfigure×4/buildUI 提示条/投递预览/Ctrl 对角+canShoot）；arc setTranslation→fadeIn/fadeOut 等价 + 新增 ui/MenuFragment.Act；编译绿 + autoplay 冒烟无异常（提交 3c2f9c5）；**A1/A2/A3 高优先级全部清零**；派发 F4
 - 2026-09-30 F4 完成：onDestroyed 整链（物品/液体/电力/残骸）+ kill 接线 breakSound + dynamicExplosion 照原版补全（闪电/火球/多波/震屏上限）+ 单位殉爆/deathSound；**实测双链通过**（建筑 kill→air、dagger 死亡 -18.8，均无异常）；派发 F6
+- 2026-09-30 F6 完成：tileDamage 菱形蔓延（GridBits/IntQueue 复用）+ 多波伤害伤建筑接线 + 入口对齐（删 damageAll、核爆半径漏乘 tilesize 修正）；**实测抓到 IntQueue.resize 满环回绕越界并修复**（墙 320→168 衰减生效）（提交 f284a92）；派发 F8
