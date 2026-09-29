@@ -964,6 +964,16 @@ public class Block extends com.phoenix.game.ctype.UnlockableContent {
     }
 
     /**
+     * 单位站上本方块时的每帧回调（对应原版 {@code Block.unitOn}，mindustry/world/Block.java:361）。
+     * 由 {@code BaseUnit.updateVelocity()} 的地面分支调用（对应原版 Unit.java:226 的调用点），
+     * 飞行分支不调用。默认空实现，由具体方块覆写（如 {@code Conveyor} 沿带推动单位）。
+     * <p>⚠ 本项目 {@code ShockMine}/{@code UnitFactory} 此前已有各自等价的"单位站上"检测实现
+     * （刻意偏离、未改走本钩子）——本钩子只供新覆写使用。
+     */
+    public void unitOn(Tile tile, com.phoenix.game.entities.type.BaseUnit unit){
+    }
+
+    /**
      * 物品飞向本方块时的落点偏移（对应原版 {@code Block.getStackOffset}）：默认无偏移，由具体方块覆写。
      * <p>调用点：{@code InputHandler.transferInventory}（玩家投递物品的飞行动画起点/落点）。
      */

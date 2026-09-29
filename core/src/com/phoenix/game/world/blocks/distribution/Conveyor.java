@@ -243,6 +243,45 @@ public class Conveyor extends Block{
     }
 
     /**
+     * 单位站上传送带时沿带向推动（对应原版 {@code Conveyor.unitOn}，
+     * mindustry/world/blocks/distribution/Conveyor.java:140-168）。
+     * 由 {@code BaseUnit.updateVelocity()} 的地面分支每帧调用（仅地面单位）。
+     * <p>要点：带子堵住（{@code clogHeat > 0.5}）不推；推力 = 带向速度 + 把单位拉回带子中线的小分量；
+     * 带上物品快满（{@code len * itemSpace >= 0.9}）时停止推动（对应原版"站到满载带子上不被推"）。
+     * <p>方向取法：本项目 {@code Geometry.d4} 与 rotation 同序（0=上/1=右/2=下/3=左），
+     * {@code d4[rotation]} 即带子前进方向，与原版语义等价。
+     * <p>刻意降级：原版开头的 {@code entity.noSleep()}（方块休眠机制）本项目没有 → 省略（同 {@code BlockStorage} 先例）。
+     */
+    @Override
+    public void unitOn(Tile tile, com.phoenix.game.entities.type.BaseUnit unit){
+        ConveyorEntity entity = (ConveyorEntity)tile.entity;
+
+        if(entity.clogHeat > 0.5f){
+            return;
+        }
+
+        float speed = this.speed * tilesize / 2.4f;
+        float centerSpeed = 0.1f;
+        float centerDstScl = 3f;
+        float tx = Geometry.d4[tile.rotation()].x, ty = Geometry.d4[tile.rotation()].y;
+
+        float centerx = 0f, centery = 0f;
+
+        //水平带子只修正纵向（把单位拉回带子中线），竖直带子反之
+        if(Math.abs(tx) > Math.abs(ty)){
+            centery = Mathf.clamp((tile.worldy() - unit.y) / centerDstScl, -centerSpeed, centerSpeed);
+            if(Math.abs(tile.worldy() - unit.y) < 1f) centery = 0f;
+        }else{
+            centerx = Mathf.clamp((tile.worldx() - unit.x) / centerDstScl, -centerSpeed, centerSpeed);
+            if(Math.abs(tile.worldx() - unit.x) < 1f) centerx = 0f;
+        }
+
+        if(entity.len * itemSpace < 0.9f){
+            unit.applyImpulse((tx * speed + centerx) * entity.delta(), (ty * speed + centery) * entity.delta());
+        }
+    }
+
+    /**
      * 从带子上取下指定数量的物品（对应原版 Conveyor.removeStack，供装卸器/单位取物）。
      * @return 实际取下数量
      */

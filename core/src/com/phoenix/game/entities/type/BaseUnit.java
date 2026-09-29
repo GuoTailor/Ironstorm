@@ -13,6 +13,7 @@ import com.phoenix.game.core.Draw;
 import com.phoenix.game.core.Events;
 import com.phoenix.game.core.Interval;
 import com.phoenix.game.core.Time;
+import com.phoenix.game.core.Tmp;
 import com.phoenix.game.entities.Damage;
 import com.phoenix.game.entities.Effects;
 import com.phoenix.game.entities.Units;
@@ -50,6 +51,12 @@ import com.phoenix.game.world.meta.BlockFlag;
 public class BaseUnit extends SolidEntity implements TargetTrait, HealthTrait, MinerTrait {
     protected static int timerIndex = 0;
 
+    // ---- 原版 Unit 的常量与计时字段（mindustry/entities/type/Unit.java:33,38,49）----
+    /** 受击闪白总时长（对应原版 {@code Unit.hitDuration}，mindustry/entities/type/Unit.java:33）。 */
+    public static final float hitDuration = 9f;
+    /** 无出厂点标记（对应原版 {@code Unit.noSpawner}；原版值是 Pos.get(-1,1)，本项目沿用既有约定 -65535）。 */
+    public static final int noSpawner = -65535;
+
     protected static final int timerTarget = timerIndex++;
     protected static final int timerTarget2 = timerIndex++;
     protected static final int timerShootLeft = timerIndex++;
@@ -62,8 +69,15 @@ public class BaseUnit extends SolidEntity implements TargetTrait, HealthTrait, M
     /** 当前正在开采的瓦片（对应原版 {@code Unit.mining}/{@code Player.mining}）。 */
     protected Tile mineTile;
     protected Interval timer = new Interval(5);
-    protected int spawner = -65535;
+    protected int spawner = noSpawner;
     protected TargetTrait target;
+    /** 距上次受击的计时（对应原版 {@code Unit.hitTime}）：{@link #damage(float)} 刷成 {@link #hitDuration}，每帧递减；
+     * {@link #damagePeriodic(float)} 用它判断周期伤害要不要顺带表现闪白。 */
+    protected float hitTime;
+    /** 溺水进度 0~1（对应原版 {@code Unit.drownTime}，mindustry/entities/type/Unit.java:49）：
+     * 地面单位站在 {@code floor.drownTime > 0} 的液体上时按 {@code 1/floor.drownTime} 累积，
+     * 离开后向 0 衰减；达到 0.999 时受到"当前血量+1"的秒杀式伤害。飞行单位恒为 0。 */
+    protected float drownTime;
     /** 状态效果 */
     protected final Statuses status = new Statuses();
     /** 状态机 */
@@ -100,10 +114,10 @@ public class BaseUnit extends SolidEntity implements TargetTrait, HealthTrait, M
 
     /** 设置出厂/出生点标记（记录瓦片打包坐标，工厂靠它统计自己出厂的存活单位数）。 */
     public void setSpawner(Tile tile){
-        this.spawner = tile == null ? -65535 : tile.pos();
+        this.spawner = tile == null ? noSpawner : tile.pos();
     }
 
-    /** @return 出厂/出生点的瓦片打包坐标；没有则返回 -65535。 */
+    /** @return 出厂/出生点的瓦片打包坐标；没有则返回 {@link #noSpawner}。 */
     public int getSpawner(){
         return spawner;
     }
@@ -163,8 +177,28 @@ public class BaseUnit extends SolidEntity implements TargetTrait, HealthTrait, M
     @Override
     public void damage(float amount){
         if(Vars.isClient()) return;
+        //照原版 Unit.damage（mindustry/entities/type/Unit.java:79-84）：受击即刷新闪白计时
+        hitTime = hitDuration;
         //照原版 Unit.damage（mindustry/entities/type/Unit.java:80-83）：实际扣血走 calculateDamage 的护甲减免
         HealthTrait.super.damage(calculateDamage(amount));
+    }
+
+    /** 周期性伤害（照原版 {@code Unit.damagePeriodic}，mindustry/entities/type/Unit.java:364-366）：
+     * 只有距上次受击够久（{@code hitTime <= -20 + hitDuration}）时才顺带表现受击闪白，
+     * 液体灼烧等持续性掉血不会让单位一直闪白。 */
+    public void damagePeriodic(float amount){
+        damage(amount * Time.delta(), hitTime <= -20 + hitDuration);
+    }
+
+    /** 伤害并可指定是否刷新受击闪白（照原版 {@code Unit.damage(float,boolean)}，mindustry/entities/type/Unit.java:368-376）。 */
+    public void damage(float amount, boolean withEffect){
+        float pre = hitTime;
+
+        damage(amount);
+
+        if(!withEffect){
+            hitTime = pre;
+        }
     }
 
     /** 护甲减免（照原版 {@code Unit.calculateDamage}，mindustry/entities/type/Unit.java:196-198）。 */
@@ -197,6 +231,8 @@ public class BaseUnit extends SolidEntity implements TargetTrait, HealthTrait, M
         Effects.shake(2f, 2f, this);
 
         status.clear();
+        //溺水进度清零（照原版 Unit.onDeath，mindustry/entities/type/Unit.java:109）
+        drownTime = 0f;
 
         //单位销毁事件（对应原版 Unit.onDeath 里在 remove() 前派发的 UnitDestroyEvent）：
         //结算框的"消灭敌人数"由监听它的 Control 按阵营累加
@@ -513,6 +549,9 @@ public class BaseUnit extends SolidEntity implements TargetTrait, HealthTrait, M
             return;
         }
 
+        //受击闪白计时递减（照原版 BaseUnit.update，mindustry/entities/type/BaseUnit.java:280）
+        hitTime -= Time.delta();
+
         //联机远端代理单位：位置由服务器快照驱动，本地不跑 AI/物理（避免和快照打架）
         if(isRemoteProxy){
             status.update(this);
@@ -520,6 +559,16 @@ public class BaseUnit extends SolidEntity implements TargetTrait, HealthTrait, M
         }
 
         status.update(this);
+
+        //卡进实心方块即死（照原版 BaseUnit.update，mindustry/entities/type/BaseUnit.java:288-290）：
+        //地面单位嵌进非建造占位的实心方块（墙压脚/地形变化等）无法脱身，原版直接判死；
+        //建造中的占位方块（BuildBlock）不算，单位要从上面造过去
+        if(!isFlying() && Vars.world != null){
+            Tile tileHere = Vars.world.tileWorld(x, y);
+            if(tileHere != null && !(tileHere.block() instanceof com.phoenix.game.world.blocks.BuildBlock) && tileHere.solid()){
+                kill();
+            }
+        }
 
         //玩家单位由输入驱动，不跑 AI（对应原版 Player.update 覆盖了 Unit 的 AI 逻辑）
         if(!isPlayer){
@@ -539,6 +588,17 @@ public class BaseUnit extends SolidEntity implements TargetTrait, HealthTrait, M
 
         //速度积分 + 碰撞移动
         avoidOthers();
+
+        //出厂点失效即死（照原版 BaseUnit.update，mindustry/entities/type/BaseUnit.java:294-296）：
+        //原版判据是"spawner 瓦片上不再是 UnitFactoryEntity"。本项目全工程只有 UnitFactory 调 setSpawner
+        //（玩家出生不设 spawner），所以该判据不会误杀玩家；瓦片被拆/实体丢失即触发。
+        if(spawner != noSpawner && Vars.world != null){
+            Tile spawnTile = Vars.world.tile(spawner);
+            if(spawnTile == null || !(spawnTile.entity instanceof com.phoenix.game.world.blocks.units.UnitFactory.UnitFactoryEntity)){
+                kill();
+            }
+        }
+
         updateVelocity();
 
         //液体上减速（⚠ 仅地面单位：原版 updateVelocityStatus 里 floor.speedMultiplier/dragMultiplier
@@ -981,22 +1041,114 @@ public class BaseUnit extends SolidEntity implements TargetTrait, HealthTrait, M
     }
 
     /**
-     * 对应原版 {@code Unit.updateVelocityStatus} 的收尾三步（飞行分支）：先 {@code velocity.limit(maxVelocity())}
-     * 钳最大速度，再按速度移动，最后统一乘阻尼。此前用 VelocityTrait 默认实现（先阻尼再移动、且从不钳最大速度），
-     * 稳态速度比原版低约一档，加速/减速节奏也不同。
-     * <p>飞行单位（{@link FlyingUnit}）覆写走无碰撞直移；地面单位走 {@code SolidTrait.move()}（带建筑碰撞）。
+     * 单位速度积分与环境交互（对应原版 {@code Unit.updateVelocityStatus}，mindustry/entities/type/Unit.java:247-331）：
+     * 先钳最大速度 → 出界判定（出界即死 / 空投区击退 / 出界推回，这三项对飞行单位同样生效）→
+     * 按飞行/地面分支移动（飞行：无碰撞直移；地面：Block.unitOn 钩子 + 液体交互 + 碰撞移动 +
+     * "没动就清零该轴速度"）→ 最后统一乘阻尼。
+     * <p>原版这套逻辑所有单位共用（飞行/地面分支都在其中），本项目同样由本类统一承担；
+     * {@link com.phoenix.game.entities.type.base.FlyingUnit} 原先的独立覆写已删除（其行为 = 本方法的飞行分支）。
+     * <p><b>刻意保留（F1 范围约束，勿"顺手对齐"）</b>：原版地面分支把 {@code floor.speedMultiplier}
+     * 乘在 move 上、阻尼里乘 {@code floor.dragMultiplier}；本项目 {@code update()} 里已有"液体上 lerp 减速"块
+     * （保留不动），move/阻尼不再重复乘地板系数，避免双重减速。
      */
     @Override
     public void updateVelocity(){
+        Floor floor = getFloorOn();
+        Tile tile = tileOn();
+
         velocity.limit(maxVelocity());
 
-        if(this instanceof SolidTrait){
-            ((SolidTrait)this).move(velocity.x * Time.delta(), velocity.y * Time.delta());
-        }else{
-            moveBy(velocity.x * Time.delta(), velocity.y * Time.delta());
+        //出界即死（照原版 Unit.java:258-260；finalWorldBounds = worldBounds + 500 = 600）
+        if(x < -Vars.finalWorldBounds || y < -Vars.finalWorldBounds
+            || x >= Vars.world.width() * Vars.tilesize + Vars.finalWorldBounds
+            || y >= Vars.world.height() * Vars.tilesize + Vars.finalWorldBounds){
+            kill();
         }
 
-        //原版行 330：阻尼在移动**之后**统一乘（地面单位还有 floor.dragMultiplier，本项目未移植地板阻尼系数）
+        //空投区击退（照原版 Unit.java:262-270）：非敌波次阵营的单位靠近地面出生点时被推离，
+        //防止敌人在出生点堆叠被白嫖。
+        //⚠ 口径：原版 getSize() = hitbox 宽*2，其 /2f 才是本项目 getSize()（= type.hitsize）→ 半径项等价换算
+        if(Vars.spawner != null && team != Vars.state.rules.waveTeam){
+            float relativeSize = Vars.state.rules.dropZoneRadius + getSize() + 1f;
+            com.badlogic.gdx.utils.Array<Tile> spawns = Vars.spawner.getGroundSpawns();
+            for(int i = 0; i < spawns.size; i++){
+                Tile spawn = spawns.get(i);
+                if(withinDst(spawn.worldx(), spawn.worldy(), relativeSize)){
+                    //原版写法是 Tmp.v1.set(this).sub(...)：arc Vec2 有 set(Position) 重载，libgdx 没有 → set(x, y)
+                    Tmp.v1.set(x, y).sub(spawn.worldx(), spawn.worldy())
+                        .setLength(0.1f + 1f - dst(spawn) / relativeSize)
+                        .scl(0.45f * Time.delta());
+                    velocity.add(Tmp.v1);
+                }
+            }
+        }
+
+        //出界推回（照原版 Unit.java:272-278）：越界越远推力越大
+        final float warpDst = 180f;
+        if(x < 0) velocity.x += (-x / warpDst);
+        if(y < 0) velocity.y += (-y / warpDst);
+        if(x > Vars.world.unitWidth()) velocity.x -= (x - Vars.world.unitWidth()) / warpDst;
+        if(y > Vars.world.unitHeight()) velocity.y -= (y - Vars.world.unitHeight()) / warpDst;
+
+        if(isFlying()){
+            //飞行单位不与液体交互（照原版 Unit.java:281-283）
+            drownTime = 0f;
+            moveBy(velocity.x * Time.delta(), velocity.y * Time.delta());
+        }else{
+            boolean onLiquid = floor.isLiquid;
+
+            if(tile != null){
+                //Block.unitOn 钩子（照原版 Unit.java:226 的调用点；仅地面单位，飞行分支不调用）
+                tile.block().unitOn(tile, this);
+                //站着实心方块（传送带等）不算"在液体上"（照原版 Unit.java:289-291）
+                if(tile.block() != Blocks.air){
+                    onLiquid = false;
+                }
+            }
+
+            //移动时的液体涟漪（照原版 Unit.java:294-296）
+            if(onLiquid && velocity.len() > 0.4f && Mathf.chance((velocity.len() * floor.speedMultiplier) * 0.06f * Time.delta())){
+                Effects.effect(floor.walkEffect, floor.color, x, y);
+            }
+
+            //液体地板的状态效果与周期伤害（照原版 Unit.java:298-304）：焦油起火/湿身、酸液灼烧
+            if(onLiquid){
+                status.handleApply(this, floor.status, floor.statusDuration);
+
+                if(floor.damageTaken > 0f){
+                    damagePeriodic(floor.damageTaken);
+                }
+            }
+
+            //溺水进度（照原版 Unit.java:306-315）：在可溺亡液体上累积、离开后向 0 衰减
+            if(onLiquid && floor.drownTime > 0){
+                drownTime += Time.delta() * 1f / floor.drownTime;
+                if(Mathf.chance(Time.delta() * 0.05f)){
+                    Effects.effect(floor.drownUpdateEffect, floor.color, x, y);
+                }
+            }else{
+                drownTime = Mathf.lerpDelta(drownTime, 0f, 0.03f);
+            }
+
+            drownTime = Mathf.clamp(drownTime);
+
+            //溺亡（照原版 Unit.java:317-322）：进度满即受到"当前血量+1"的秒杀式伤害
+            if(drownTime >= 0.999f && !Vars.isClient()){
+                damage(health + 1f);
+                if(Vars.player != null && this == Vars.player.unit()){
+                    Events.fire(EventType.Trigger.drown);
+                }
+            }
+
+            //move 前记录位置：这一轴没动就把该轴速度清零（照原版 Unit.java:324-327），
+            //避免撞墙后速度持续顶着墙。虚调用会先进 GroundUnit.move（更新 baseRotation）再交给 SolidTrait.move 碰撞移动
+            float px = x, py = y;
+            move(velocity.x * Time.delta(), velocity.y * Time.delta());
+            if(Math.abs(px - x) <= 0.0001f) velocity.x = 0f;
+            if(Math.abs(py - y) <= 0.0001f) velocity.y = 0f;
+        }
+
+        //阻尼在移动之后统一乘（原版行 330；地面单位还有 floor.dragMultiplier —— 见方法注释的刻意保留项）
         velocity.scl(Mathf.clamp(1f - drag() * Time.delta()));
     }
 

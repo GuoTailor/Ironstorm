@@ -69,9 +69,9 @@
 | F2 | 功能 | **开波整链**（A1 高）：出生点清场（spawnShockwave+全额伤害）、延迟分批出生（Time.run+spawn 特效）、attack 模式核心增援（WaveSpawner.java:72-150） | ☐ |
 | F3 | 功能 | **Lightning 完整化**（A1 高）：沿途 damageLightning 子弹 + 30 格链式跳跃（maxChain 8）+ insulated 绝缘墙拦截（Lightning.java:71-115） | ☐ |
 | F4 | 功能 | **破坏表现链**（A1 中）：Block.onDestroyed 库存爆炸/液体泼洒/电力缓冲（Block.java:604-647，配套 ItemModule.sum/has/addAll——A2）、breakSound、单位 deathSound、死亡携带物品殉爆（Unit.java:99-101） | ☐ |
-| F5 | 功能 | **子弹对空语义**（A1 高，小改）：collides() 改 `!(flying && !collidesAir)`、collideGroups 方向 (bullet,unit)（Bullet.java:168-170） | ☐ |
+| F5 | 功能 | **子弹对空语义**（A1 高，小改）：collides() 改 `!(flying && !collidesAir)`、collideGroups 方向（Bullet.java:168-170）——实际执行时 collideGroups 实参顺序**保持本项目对调**（同步回收子弹的既声明偏离，仅补注释）；BaseUnit.collides 照原版 Unit.collides 重写 | ☑ |
 | F6 | 功能 | **Damage 家族**（A1 中）：tileDamage 菱形蔓延、calculateDamage 距离衰减+击退、dynamicExplosion 分层时序+震屏上限（Damage.java:33-274） | ☐ |
-| F7 | 功能 | **断裂接线四件**（A1 中，小改）：launchWaveMultiplier 消费、Zone.updateWave/bestWave、护甲减免 calculateDamage（**补 freezing.armorMultiplier=0.8**——A2）、Fire.extinguish 发 fireExtinguish + Fire 接已移植的 Puddle | ☐ |
+| F7 | 功能 | **断裂接线四件**（A1 中，小改）：launchWaveMultiplier 消费、Zone.updateWave/bestWave、护甲减免 calculateDamage（**补 freezing.armorMultiplier=0.8**——A2）、Fire.extinguish 发 fireExtinguish + Fire 接已移植的 Puddle | ☑（freezing 字段早已就位、仅缺 damage 接线；collideGroups 保持对调为已声明偏离 → docs/port/f5f7-report.md） |
 | F8 | 功能 | **索敌语义**（A1 中）：derelict 豁免、findEnemyTile tilePred、targetClosest 用 max(weapon.range, type.range)（Units.java:84-150、BaseUnit.java:181-186） | ☐ |
 | F9 | 功能 | **状态存档与染色**（A1 中/低）：Statuses writeSave/readSave、getStatusColor | ☐ |
 | F13 | 功能 | **输入/UX 补齐**（A3）：解锁提示 showUnlock（Control 监听 UnlockEvent + HudFragment，断裂）、E 键暂停建造队列（Player.isBuilding/buildWasAutoPaused + buildautopause 消费，断裂）、P 键地图截图（takeMapScreenshot）、中键吸取方块（Binding.pick）、R 键旋转已放置方块（rotateplaced/rotateBlock，注意项目现把 R 用作放置朝向——按原版 DesktopInput.java:225-227 恢复语义并共存）、drawConfigure 配置叠加绘制（Block+ItemBridge/MassDriver/PowerNode）、buildUI 建造提示条、投递物品光标预览（isDroppingItem 消费）、Ctrl 对角放置、canShoot 输入层守卫（hasMouse/onConfigurable/isDroppingItem） | ☐ |
@@ -161,3 +161,4 @@ UI 类以"功能等价"判（arc→libgdx 已知缺口见 转换.md，不算缺�
 - 2026-09-29 A3 完成（缺失8/偏离2/断裂3，报告 docs/port/audit-A3-ui-input-graphics.md）；登记 F13 + F-LOW 扩充。**三片审计齐**：合计缺失 27/偏离 12/断裂 10。进入修复流水线：派 T0（后台）+ 主会话跑 N1 dump
 - 2026-09-29 N1 dump 三份就绪（docs/port/dump-*.txt）；T0 完成（①11 ②26 ③217 ④0，docs/port/todo-classified.md）；登记 F14~F18 + T1；派发 N1 修复批
 - 2026-09-29 N1 完成：检查161/不一致23/全修（根因=8 个方块类构造器自设默认 health；dagger-factory 材料+耗电；burning/wet/freezing），编译绿 + BLKDATA 复跑 diff 36 行全对（提交 4849e59）；派发 F5+F7
+- 2026-09-29 F5+F7 完成：6 项全落（Bullet.collides 照原版、collideGroups 保持对调+补注释、BaseUnit.collides/calculateDamage 照原版、WaveEvent 静态块、launchWaveMultiplier、Fire 水洼+事件），编译绿 + autoplay 冒烟无异常（提交 d4423fe）；派发 F1

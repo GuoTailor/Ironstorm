@@ -90,15 +90,10 @@ public class FlyingUnit extends GroundUnit{
 
     /**
      * 飞行单位直接积分位移，绕过地面建筑碰撞。
-     * <p>顺序照原版 {@code Unit.updateVelocityStatus} 飞行分支：先钳最大速度 → 移动 → 统一阻尼
-     * （此前"先阻尼再移动"慢一拍，稳态速度也差一档，见 {@link BaseUnit#updateVelocity()}）。
+     * <p>【F1 已删除本覆写】原版所有单位共用 {@code Unit.updateVelocityStatus}（飞行/地面分支都在其中），
+     * 本类此前的独立覆写（limit → moveBy → 阻尼）与 {@link BaseUnit#updateVelocity()} 的飞行分支完全等价，
+     * 却缺少原版对飞行单位同样生效的出界即死 / 空投区击退 / 出界推回三项 → 删除，统一走基类实现。
      */
-    @Override
-    public void updateVelocity(){
-        velocity.limit(type.maxVelocity);
-        moveBy(velocity.x * Time.delta(), velocity.y * Time.delta());
-        velocity.scl(Mathf.clamp(1f - drag() * Time.delta()));
-    }
 
     // ---- 飞行移动辅助（对应原版 FlyingUnit 的 circle/moveTo；本批从各子类收敛到这里） ----
 
