@@ -960,6 +960,10 @@ public class BaseUnit extends SolidEntity implements TargetTrait, HealthTrait, M
 
     @Override
     public void collision(SolidTrait other, float x, float y){
+        //受击反击：命中的子弹交给命令 AI 处理（对应 v7/v8 UnitComp.collision → CommandAI.hit）
+        if(other instanceof com.phoenix.game.entities.type.Bullet && commandAI != null){
+            commandAI.hit((com.phoenix.game.entities.type.Bullet)other);
+        }
         if(other instanceof DamageTrait){
             damage(((DamageTrait)other).getShieldDamage());
         }

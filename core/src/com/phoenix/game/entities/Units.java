@@ -254,6 +254,28 @@ public class Units {
         }
     }
 
+    /**
+     * 半径内是否存在通过谓词的单位（F16 登记名 {@code nearbyCheck}，供 blockingUnit 避让判定作前置）。
+     * <p>考据：v6（126.2）/v7（v136）/v8（v146）原版 {@code Units} 均无同名方法；语义按登记口径实现：
+     * 遍历单位组 + 距离判定 + 谓词过滤，找到即返回 true。
+     * <p>注意：{@link EntityGroup}-式的延迟提交在本工程不存在（{@link #units} 是即时数组），
+     * 同帧添加的单位立即可见。
+     */
+    public static boolean nearbyCheck(float x, float y, float radius, Predicate<BaseUnit> pred){
+        for(int i = 0; i < units.size; i++){
+            BaseUnit unit = units.get(i);
+            if(unit.withinDst(x, y, radius) && pred.test(unit)){
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** @return 半径内是否有任何单位（{@link #nearbyCheck(float, float, float, Predicate)} 的谓词缺省版）。 */
+    public static boolean nearbyCheck(float x, float y, float radius){
+        return nearbyCheck(x, y, radius, u -> true);
+    }
+
     /** Iterates over all units of a team. */
     public static void each(Team team, Consumer<BaseUnit> cons){
         for(int i = 0; i < units.size; i++){

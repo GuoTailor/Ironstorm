@@ -303,7 +303,12 @@ public class Pathfinder implements Runnable{
             }
         }),
         rallyPoints((team, out) -> {
-            //TODO：集结建筑尚未移植
+            //照原版 Pathfinder.java:311-315：友方 BlockFlag.rally 方块（指挥中心等）作为流场目标，
+            //经 getTargetTile 沿流场流动（消费点：GroundUnit.rally 状态 → moveToCore(PathTarget.rallyPoints)）
+            if(Vars.indexer == null) return;
+            for(Tile tile : Vars.indexer.getAllied(team, BlockFlag.rally)){
+                if(tile != null) out.add(tile.pos());
+            }
         });
 
         public static final PathTarget[] all = values();

@@ -31,8 +31,9 @@ import com.phoenix.game.math.Mathf;
  * <ul>
  *   <li>{@code commandController}（RepairAI 等子控制器）恒为 null，全部走 defaultBehavior。</li>
  *   <li>payload 系列（enterPayload/loadUnits/unloadPayload/loopPayload）未移植，相关分支删除。</li>
- *   <li> {@code hit()} 受击反击、读档恢复（{@code afterRead}）、boost 起降未移植，TODO。</li>
- *   <li>避让同目标单位（blockingUnit）依赖 {@code Units.nearbyCheck} 与障碍查询，未移植，TODO。</li>
+ *   <li> {@code hit()} 受击反击已移植（{@link #hit}）；读档恢复（{@code afterRead}）不做——
+ *        考据结论：v6（126.2）与 v7/v8 的 CommandAI 均无命令状态存档，读档后 AI 从头开始，与原版一致。</li>
+ *   <li>避让同目标单位（blockingUnit）本体未移植，其前置 {@code Units.nearbyCheck} 已补。</li>
  * </ul>
  */
 public class CommandAI{
@@ -41,6 +42,10 @@ public class CommandAI{
     protected static final Vector2 moveTarget = new Vector2(), offsetedDestination = new Vector2(), currentDestination = new Vector2();
 
     private static final int timerTarget = 0;
+    /** 受击反击计时器下标（对应原版 AIController.timerTarget4）。 */
+    private static final int timerTarget4 = 3;
+    /** 反击冷却：10 秒（v146 语义，防止目标频繁抖动）。 */
+    private static final float hitCooldown = 60f * 10f;
 
     /** 命令队列（只存位置；原版还存 Teamc 目标，攻击目标本工程走 {@link #attackTarget}）。 */
     public final Array<Vector2> commandQueue = new Array<>(5);
@@ -345,5 +350,33 @@ public class CommandAI{
     /** @return 目标是否已失效（死亡/移除）。 */
     protected boolean invalid(TargetTrait target){
         return target == null || !target.isValid() || (target instanceof BaseUnit u && u.isDead());
+    }
+
+    /**
+     * 受击反击（对应 v7/v8 {@code mindustry.ai.types.CommandAI.hit(Bullet)}，由
+     * {@link BaseUnit#collision} 在子弹命中时调用）：空闲（无攻击目标）且攻击者可被本单位的
+     * 对空/对地规则锁定时，转火攻击者（{@code stopAtTarget=true}，到达射程即停——防御性反击）。
+     *
+     * <p>与原版的偏离：原版第一判定是 {@code unit.team.isAI()}（队伍级"无玩家"判定，
+     * 本工程无该 API）；本工程玩家单位在 {@link BaseUnit#update()} 里本就不跑
+     * {@code updateUnit()}，这里以 {@code !unit.isPlayer} 做等价拦截。
+     * 冷却判定（{@code timerTarget4, 60f*10f}）为 v146 增补，一并移植。
+     */
+    public void hit(com.phoenix.game.entities.type.Bullet bullet){
+        if(unit.isPlayer || attackTarget != null) return;
+
+        //原版 bullet.owner instanceof Teamc；本工程等价物是 TargetTrait（BaseUnit/TileEntity 都实现它）
+        if(!(bullet.getOwner() instanceof TargetTrait)) return;
+
+        if(bullet.getTeam() == unit.getTeam() || !unit.getTeam().isEnemy(bullet.getTeam())) return;
+
+        //可锁定判定（原版 u.checkTarget(unit.type.targetAir, unit.type.targetGround)）：
+        //攻击者是飞行单位而本单位不能对空 → 打不着，不反击；
+        //本工程 UnitType 无 targetGround 字段（恒可对地），只判 targetAir
+        if(bullet.getOwner() instanceof BaseUnit attacker && attacker.isFlying() && !unit.getType().targetAir) return;
+
+        if(timer.get(timerTarget4, hitCooldown)){
+            commandTarget((TargetTrait)bullet.getOwner(), true);
+        }
     }
 }
