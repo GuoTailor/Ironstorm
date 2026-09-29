@@ -22,9 +22,10 @@ import com.badlogic.gdx.files.FileHandle;
  *       {@code maps/MapPreviewLoader} 是同一套写法。</li>
  *   <li>{@code Core.assets} 在本项目**是存在的**（{@code ClientLauncher} 里 {@code new AssetManager()}），
  *       所以"依赖 Core.assets"这点不构成阻塞。</li>
- *   <li>TODO 本类尚未注册进 {@code Core.assets}（与 {@code MapPreviewLoader} 一样属"只新增文件"）：
- *       需要等存档列表 UI 真正要用缩略图时，在启动器里
- *       {@code Core.assets.setLoader(Texture.class, ".msav", new SavePreviewLoader())}。
+ *   <li>本类尚未注册进 {@code Core.assets}（与 {@code maps/MapPreviewLoader} 同口径：F14 后两个
+ *       预览加载器都**刻意不注册**——本项目 {@code Core.assets} 没有逐帧 {@code update()} 循环，
+ *       注册了只会卡在队列里）：等存档列表 UI 真正要用缩略图时，应仿照 {@code Maps.loadPreviews()}
+ *       的同步直载方式接线，而不是注册本加载器。
  *       目前缩略图的生成走 {@link SavePreview}（在游戏进程内用 FBO 渲染后写成 {@code <存档>.png}），
  *       与"加载"这一半是分开的。</li>
  * </ul>

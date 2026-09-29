@@ -37,9 +37,9 @@ import io.anuke.mindustry.gen.Tex;
  *       {@code tags["rules"]} 反序列化 rules 覆盖（不再是"只保留默认波次"的桩）。</li>
  *   <li>原版 {@code map.getHightScore()} <b>已落实</b>：走 {@code Core.settings}（键 {@code hiscore<地图名>}），
  *       生存模式下的"最高分"一行已恢复。</li>
- *   <li><b>地图预览纹理：半落实</b>。{@code map.safeTexture()} 现在存在，但本项目
- *       {@link Map#texture} 恒为 null（尚未加载每张地图的预览 PNG，见 {@code Maps} 类注释的 TODO）
- *       → 见 {@link #previewOf}：没有预览纹理时退回 {@link Tex#nomap} 占位。
+ *   <li><b>地图预览纹理：F14 已接线</b>。{@link Map#texture} 由预览链填充
+ *       （{@code Maps.loadPreviews} 直载 PNG / {@code Maps.createNewPreview} 离线生成），
+ *       预览区出真图；仍为 null 时（v6 旧图未重存）退回 {@link Tex#nomap} 占位，见 {@link #previewOf}。
  *       另外原版用 {@code BorderImage}（描边），本项目保留 {@code Image}（描边走 batch 铺白条，
  *       这里没有需要描边的真实预览图）。</li>
  *   <li>{@code ui.custom}：<b>已接线</b>——{@code Vars.ui.custom} 存在（{@link CustomGameDialog}），

@@ -26,11 +26,11 @@ import io.anuke.mindustry.gen.Tex;
  *
  * <p><b>与原版的差异（逐条）</b>
  * <ul>
- *   <li><b>地图缩略图</b>：原版用 {@code map.safeTexture()} 给每张地图画预览。本项目
- *       {@link Map#texture} 恒为 null（尚未加载每张地图的预览 PNG，见 {@code Maps} 类注释的 TODO），
- *       且 {@code safeTexture()} 退回的是 {@code nomap} 所在的**整张图集纹理**（libgdx 的 Texture 不带区域信息，
- *       原版 arc 的 Texture 就是单张图）→ 直接用会把整页图集画出来。
- *       所以这里退化成 {@link Tex#nomap} 的**区域**包进 {@link BorderImage}（占位图，非真实预览）。</li>
+ *   <li><b>地图缩略图</b>：原版用 {@code map.safeTexture()} 给每张地图画预览。F14 后
+ *       {@link Map#texture} 在预览 PNG 已生成/已加载时非 null → 直接 {@code BorderImage(map.texture, 2f)}
+ *       出真图；仍为 null（v6 旧格式图还没重存过）时退回 {@link Tex#nomap} 的**区域**包进
+ *       {@link BorderImage} 占位。注意不能走 {@code safeTexture()}：它退回的是 nomap 所在的
+ *       **整张图集纹理**（libgdx 的 Texture 不带区域信息，会把整页图集画出来）。</li>
  *   <li>原版 {@code maps.all().size} 是 arc 的 {@code Seq.size} 字段；本项目 {@code Maps.all()} 返回 libgdx
  *       {@code Array}（同样有 {@code size} 字段），但为了拿 `first()` 之外的语义统一改用下标循环。</li>
  *   <li>arc 的 {@code button.clicked(...)} / {@code add(String)} / {@code table.margin(...)} libgdx 没有
@@ -91,7 +91,11 @@ public class MapLoadDialog extends FloatingDialog{
 
             TextButton button = new TextButton(map.name, Styles.togglet);
             //原版 = button.add(new BorderImage(map.safeTexture(), 2f).setScaling(Scaling.fit)).size(16 * 4f)
-            BorderImage preview = new BorderImage(nomapRegion(), 2f);
+            //F14：预览纹理已就绪则出真图（预览 PNG / 生成结果）；否则退回 nomap 占位区域
+            //  （libgdx Texture 不带区域信息，map.texture == null 时不能走 safeTexture() —— 那会退回整张图集）
+            BorderImage preview = map.texture != null
+                ? new BorderImage(map.texture, 2f)
+                : new BorderImage(nomapRegion(), 2f);
             preview.setScaling(Scaling.fit);
             button.add(preview).size(Scl.scl(16 * 4f));
             //原版 button.getCells().reverse()：把预览图与文字的顺序调换成「图在左、字在右」

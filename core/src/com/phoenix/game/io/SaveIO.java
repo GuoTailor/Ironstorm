@@ -83,10 +83,14 @@ public class SaveIO{
      * （对应原版 {@code Teams.TeamData.brokenBlocks}，由 {@code Control} 的监听器维护、
      * 由 {@code Renderer.drawDestroyed()} 绘制重建幽灵轮廓、由 {@code BuilderDrone} 消费自动重建）
      * → **不兼容 v4 旧档**。
-     * <p>v6（本批 F9）：单位记录末尾追加**状态效果列表**（对应原版 {@code Statuses.writeSave/readSave}：
+     * <p>v6（F9）：单位记录末尾追加**状态效果列表**（对应原版 {@code Statuses.writeSave/readSave}：
      * {@code byte 数量} + 每项 {@code byte effect.id + float time}，id 为 {@code ContentType.status} 注册序；
-     * 玩家单位本来就被跳过、不写状态）→ **不兼容 v5 旧档**。 */
-    public static final int version = 6;
+     * 玩家单位本来就被跳过、不写状态）→ **不兼容 v5 旧档**。
+     * <p>v7（本批 F14）：map 区的实体记录改成**长度前缀子块** {@code [2B 长度][数据]}（对应原版
+     * {@code SaveVersion.writeMap} 里 {@code writeChunk(stream, true, ...)} 的内嵌子块）——
+     * 这是为了让 {@link MapIO#generatePreview} 能**离线读地图区**（只解析地板/方块，实体整段按长度跳过）。
+     * 读取侧 v6/v7 双支持（v6 实体仍是内联裸数据），**v6 旧档依然可读**；写入一律 v7。 */
+    public static final int version = 7;
     /** 单个区块的长度上限（防损坏文件导致 OOM）。 */
     private static final int maxChunkLength = 64 * 1024 * 1024;
 
@@ -201,7 +205,7 @@ public class SaveIO{
         try(DataInputStream in = new DataInputStream(new InflaterInputStream(new FileInputStream(file)))){
             readHeader(in);
             int ver = in.readInt();
-            if(ver != version) throw new IOException("不支持的存档版本: " + ver + "（当前 " + version + "）");
+            if(!isSupportedVersion(ver)) throw new IOException("不支持的存档版本: " + ver + "（当前 " + version + "）");
             return parseMeta(readChunk(in));
         }
     }
@@ -367,10 +371,17 @@ public class SaveIO{
 
                 out.writeByte(tile.getTeam().id);
                 out.writeByte(tile.rotation());
-                //有实体的方块：实体数据（含各自的血量/库存/进度等，见 TileEntity.write）
+                //有实体的方块：实体数据（含各自的血量/库存/进度等，见 TileEntity.write）。
+                //v7：先缓冲进字节数组，写成「2B 长度前缀 + 数据」的子块（对应原版 SaveVersion.writeMap 里的
+                //    writeChunk 内嵌子块）——MapIO.generatePreview 离线读地图区时靠长度整段跳过实体，
+                //    不用解析任何实体格式。
                 if(tile.entity != null){
                     out.writeByte(tile.entity.revision());
-                    tile.entity.write(out);
+                    java.io.ByteArrayOutputStream buf = new java.io.ByteArrayOutputStream();
+                    tile.entity.write(new DataOutputStream(buf));
+                    byte[] bytes = buf.toByteArray();
+                    out.writeShort(bytes.length);
+                    out.write(bytes);
                 }
             }
         }
@@ -445,7 +456,7 @@ public class SaveIO{
         clearPendingPlayer();
         readHeader(in);
         int ver = in.readInt();
-        if(ver != version){
+        if(!isSupportedVersion(ver)){
             throw new IOException("不支持的存档版本: " + ver + "（当前 " + version + "）");
         }
 
@@ -453,7 +464,8 @@ public class SaveIO{
         if(meta != null) applyMeta(meta);
 
         readContentHeader(new DataInputStream(new ByteArrayInputStream(readChunk(in))));
-        readMap(new DataInputStream(new ByteArrayInputStream(readChunk(in))));
+        //v6/v7 双读：差异只在 map 区的实体记录格式（见 version 注释），entities 区两个版本相同
+        readMap(new DataInputStream(new ByteArrayInputStream(readChunk(in))), ver);
         readEntities(new DataInputStream(new ByteArrayInputStream(readChunk(in))));
     }
 
@@ -603,7 +615,7 @@ public class SaveIO{
         }
     }
 
-    private static void readMap(DataInputStream in) throws IOException{
+    private static void readMap(DataInputStream in, int formatVersion) throws IOException{
         int width = in.readUnsignedShort();
         int height = in.readUnsignedShort();
 
@@ -653,7 +665,17 @@ public class SaveIO{
 
                     if(tile.entity != null){
                         byte revision = in.readByte();
-                        tile.entity.read(in, revision);
+                        if(formatVersion >= 7){
+                            //v7：实体数据是「2B 长度 + 数据」的子块 → 按长度整段读进缓冲再解析，
+                            //    读多/读少都会在 readFully 的对齐上暴露，不会静默错位
+                            int len = in.readUnsignedShort();
+                            byte[] data = new byte[len];
+                            in.readFully(data);
+                            tile.entity.read(new DataInputStream(new ByteArrayInputStream(data)), revision);
+                        }else{
+                            //v6（旧档）：实体数据内联，直接从主流上解析
+                            tile.entity.read(in, revision);
+                        }
                     }
                 }
             }
@@ -752,6 +774,11 @@ public class SaveIO{
 
     // ==================== 工具 ====================
 
+    /** @return 该版本号是否可读。v6/v7 双支持（v7 加了实体长度前缀子块，v6 实体内联；其余区相同），v5- 真不兼容。 */
+    static boolean isSupportedVersion(int ver){
+        return ver == version || ver == version - 1;
+    }
+
     /** 校验文件头。 */
     public static void readHeader(java.io.DataInput in) throws IOException{
         byte[] bytes = new byte[header.length];
@@ -805,8 +832,8 @@ public class SaveIO{
         out.write(bytes);
     }
 
-    /** 读一个长度前缀的区块。 */
-    private static byte[] readChunk(DataInputStream in) throws IOException{
+    /** 读一个长度前缀的区块。包内可见：{@link MapIO#generatePreview} 复用它离线解析地图区。 */
+    static byte[] readChunk(DataInputStream in) throws IOException{
         int length = in.readInt();
         if(length < 0 || length > maxChunkLength){
             throw new IOException("存档区块长度非法: " + length);

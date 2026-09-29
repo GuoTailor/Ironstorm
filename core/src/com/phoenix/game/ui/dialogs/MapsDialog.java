@@ -59,12 +59,12 @@ import java.io.File;
  *       （只有 {@code core/Platform} 接口、无实现类）→ 只记日志。</li>
  *   <li>TODO {@code map.mod.meta.displayName()}：本项目 {@code Mods.LoadedMod} 只有
  *       {@code file/mainClass/main/hidden} 字段，没有 {@code meta} → 用 {@code mod.toString()}。</li>
- *   <li>TODO <b>缩略图（整条地图预览链未移植）</b>：原版 {@code map.safeTexture()} 直接可用（arc 的 Texture 就是整张图）。
- *       本项目缺 {@code MapIO.generatePreview} / {@code mapPreviewDirectory} / {@code Map.texture} 赋值路径
- *       （{@link com.phoenix.game.maps.MapPreviewLoader} 尚未注册进 {@code Core.assets}、{@code Maps.loadPreviews()}
- *       不存在、{@code Maps.queueNewPreview} 只打日志）→ {@code map.texture} <b>恒为 null</b>；
- *       而 {@code Map.safeTexture()} 在没有预览纹理时会退回**整张图集纹理**（见 {@code Map} 类注释），
- *       直接塞进 {@code Image} 会把整页图集画出来 → 只认 {@code map.texture != null}，否则退回 {@link Tex#nomap}
+ *   <li><b>缩略图：F14 已接线</b>。原版 {@code map.safeTexture()} 直接可用（arc 的 Texture 就是整张图）。
+ *       本项目 {@code Map.texture} 现在由预览链填充（{@code Maps.loadPreviews} 直载 PNG /
+ *       {@code Maps.createNewPreview} 离线生成）；仍为 null 时（v6 旧图未重存）退回 {@link Tex#nomap}。
+ *       不能无条件用 {@code map.safeTexture()}：没有预览纹理时它退回**整张图集纹理**
+ *       （见 {@code Map} 类注释），直接塞进 {@code Image} 会把整页图集画出来
+ *       → 只认 {@code map.texture != null}，否则退回 {@link Tex#nomap}
  *       （与 {@code CustomGameDialog.previewOf} 同做法，见 {@link #previewImage}/{@link #previewBorder}）。</li>
  *   <li>{@code Core.graphics.isPortrait()} → 本项目 {@code Graphics} 没有该方法 → 用
  *       {@code getHeight() > getWidth()}（见 {@link #isPortrait()}）。</li>

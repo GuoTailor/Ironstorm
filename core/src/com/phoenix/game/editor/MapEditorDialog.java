@@ -1078,6 +1078,9 @@ public class MapEditorDialog extends FloatingDialog{
         if(existing == null && !Vars.maps.all().contains(map, true)){
             Vars.maps.all().add(map);
         }
+        //对应原版 Maps.saveMap 的收尾：落盘后立刻生成缩略图（F14；文件刚写出，离线读与内存瓦片等价，
+        //编辑器世界此时就是 Vars.world，数据一致）
+        Vars.maps.createNewPreview(map, null);
         return map;
     }
 

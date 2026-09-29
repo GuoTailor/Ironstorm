@@ -16,22 +16,19 @@ import com.phoenix.game.util.Log;
 /**
  * 地图预览纹理的异步加载器。参照 Mindustry mindustry.maps.MapPreviewLoader 移植。
  *
- * <p><b>好消息</b>：arc 的 {@code arc.assets.*} 本来就是从 libgdx 的 {@code com.badlogic.gdx.assets.*}
- * 抄过去的，两边 API 几乎逐字对应（{@code TextureLoader} / {@code TextureParameter} /
- * {@code AssetDescriptor} / {@code AbsoluteFileHandleResolver} 同名同签名），所以本类**不需要降级**，
- * 只把 {@code Fi} 换成 {@code FileHandle}、{@code arc.struct.Array} 换成 libgdx {@code Array}。
- *
- * <p><b>一处降级（TODO）</b>
+ * <p><b>与原版的差异（F14 更新）</b>
  * <ul>
  *   <li>预览加载失败时原版调 {@code Vars.maps.queueNewPreview(map)} 去**同步生成**一张缩略图；
- *       本项目没有地图缩略图生成（{@code MapIO.generatePreview} 未移植）→ {@link Maps#queueNewPreview}
- *       只打日志。</li>
+ *       F14 后 {@code Maps.queueNewPreview} 已是真实生成（post 到主线程下一帧），此兜底可达。</li>
  *   <li>彻底失败时原版返回 {@code new Texture("sprites/error.png")}；本项目改用图集里的 {@code error} 区域
  *       （已存在），缺失时退回 {@code nomap} 区域的纹理（可能为 null）。</li>
  * </ul>
  *
- * <p><b>接线状态</b>：本类尚未注册进 {@code Core.assets}（与 W1 的 {@code RespawnBlock} 一样属"只新增文件"），
- * 等地图预览生成落地后由 {@code Maps.loadPreviews()} 注册并驱动。
+ * <p><b>接线状态（F14 后保持**刻意不注册**）</b>：原版经 AssetManager 异步加载预览 PNG；本项目
+ * {@code Core.assets} 没有逐帧 {@code update()} 循环，注册了也只会卡在队列里 → {@code Maps.loadPreviews()}
+ * 改为 {@code new Texture(FileHandle)} 同步直载（见该方法的偏离声明）。本类保留作 API 完整性：
+ * 其 {@code getDependencies} 里的 {@code "contentcreate"} 依赖在本项目也不可用（content 由
+ * {@code Vars.control.loadAsync()} 手工加载，不走 AssetManager）。
  */
 public class MapPreviewLoader extends TextureLoader{
 
@@ -46,7 +43,7 @@ public class MapPreviewLoader extends TextureLoader{
         }catch(Exception e){
             Log.err(e);
             MapPreviewParameter param = (MapPreviewParameter)parameter;
-            //TODO 本项目 Maps.queueNewPreview 是降级桩（没有缩略图生成）
+            //F14：queueNewPreview 已是真实生成（post 到主线程下一帧），失败兜底可达
             if(Vars.maps != null){
                 Vars.maps.queueNewPreview(param.map);
             }

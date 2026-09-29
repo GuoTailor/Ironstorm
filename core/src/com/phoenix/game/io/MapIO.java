@@ -13,11 +13,15 @@ import com.phoenix.game.world.Block;
 import com.phoenix.game.world.LegacyColorMapper;
 import com.phoenix.game.world.Tile;
 import com.phoenix.game.world.WorldContext;
+import com.phoenix.game.world.blocks.storage.CoreBlock;
 
+import java.io.ByteArrayInputStream;
+import java.io.DataInputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.zip.InflaterInputStream;
 
 /**
  * 最小实现：地图 IO 工具。参照 Mindustry mindustry.io.MapIO 移植，目前搬了小地图上色用到的
@@ -46,6 +50,9 @@ import java.io.InputStream;
  *       本项目 {@code World} 还没有对应实现（已 grep 确认无 {@code FilterContext}）→
  *       {@code GenerateInput.begin(...)} 目前**没有调用点**，本类只是把 provider 这一半补齐。</li>
  * </ul>
+ *
+ * <p><b>F14 追加：地图缩略图生成</b> —— {@link #generatePreview(Map)}（离线读存档文件，不解世界）与
+ * {@link #generatePreview(Tile[][])}（从内存瓦片生成，原版重载）。见方法注释。
  */
 public class MapIO implements GenerateFilter.GenerateInput.TileProvider{
 
@@ -126,6 +133,156 @@ public class MapIO implements GenerateFilter.GenerateInput.TileProvider{
             return Color.rgba8888(team.color);
         }
         return Color.rgba8888(wall.solid ? wall.color : ore == Blocks.air ? floor.color : ore.color);
+    }
+
+    /**
+     * 离线生成一张地图的缩略图（1 像素 = 1 格）。对应原版 {@code MapIO.generatePreview(Map)}（F14）。
+     *
+     * <p><b>与原版同构的流式读法</b>：原版把 MSAV 的 meta/content/map 三个 region 逐段解开、用轻量
+     * {@code WorldContext}（不建真世界）逐格上色。本项目存档（PHNX 格式）分块方式一致，逐段解析：
+     * <ul>
+     *   <li>meta 区：跳过（尺寸从 map 区头部取，spawns/teams 由本次扫描重算 —— 与原版相同）；</li>
+     *   <li>content 区：解析**方块名字表**到本方法的局部数组（不走 {@link SaveIO#readContentHeader}，
+     *       避免污染它的静态表）；</li>
+     *   <li>map 区：地板/覆盖层 + 方块/队伍；实体数据是 v7 的「2B 长度前缀子块」（对应原版的
+     *       {@code writeChunk} 内嵌子块）→ 按长度整段跳过，**无需解析任何实体格式**。</li>
+     * </ul>
+     * <p>逐格上色规则与原版一致：人造方块 → 阵营色；实心方块 → 方块色；覆盖层/地板色依次兜底
+     * （{@link #colorFor}）。原版在瓦片回调里逐格写 {@code CachedTile.setBlock}，本项目存档里多格建筑
+     * 只在**中心格**存方块（卫星格是 air，读档时 {@code setBlock} 铺开）→ 这里按 {@code block.size}
+     * 把阵营色/方块色补画到整个占地区域（视觉等价）。
+     *
+     * @param map 已有 {@code file} 的地图对象（{@code spawns}/{@code teams} 会被重算覆盖）
+     * @return 宽高 = 地图格数的 Pixmap（调用方负责创建纹理后 {@code dispose}）
+     * @throws IOException 文件不是本工程存档、版本过旧（v6 实体内联无法离线跳过）或数据损坏
+     */
+    public static Pixmap generatePreview(Map map) throws IOException{
+        try(DataInputStream in = new DataInputStream(new InflaterInputStream(new FileInputStream(map.file)))){
+            SaveIO.readHeader(in);
+            int ver = in.readInt();
+            if(ver != SaveIO.version){
+                throw new IOException("地图 \"" + map.name + "\" 是 v" + ver + " 旧格式，离线预览只支持 v"
+                    + SaveIO.version + "（旧图在编辑器里重存一次即可生成缩略图）");
+            }
+
+            //meta 区：跳过（本项目 meta 是 JSON，spawns/teams 直接从瓦片重算，与原版口径一致）
+            SaveIO.readChunk(in);
+
+            //content 区：局部名字表（未知方块 → air 占位，与 SaveIO.readContentHeader 同口径）
+            DataInputStream content = new DataInputStream(new ByteArrayInputStream(SaveIO.readChunk(in)));
+            int blockCount = content.readUnsignedShort();
+            java.util.ArrayList<Block> blocks = new java.util.ArrayList<>(blockCount);
+            for(int i = 0; i < blockCount; i++){
+                String name = content.readUTF();
+                Block block = Vars.content.getByName(com.phoenix.game.ctype.ContentType.block, name);
+                if(block == null){
+                    System.err.println("地图 \"" + map.name + "\" 引用了未知方块 \"" + name + "\"，按 air 处理");
+                    block = Blocks.air;
+                }
+                blocks.add(block);
+            }
+
+            //map 区
+            DataInputStream mapData = new DataInputStream(new ByteArrayInputStream(SaveIO.readChunk(in)));
+            int width = mapData.readUnsignedShort();
+            int height = mapData.readUnsignedShort();
+
+            Pixmap floors = new Pixmap(width, height, Pixmap.Format.RGBA8888);
+            Pixmap walls = new Pixmap(width, height, Pixmap.Format.RGBA8888);
+            int black = 255;
+            int shade = Color.rgba8888(0f, 0f, 0f, 0.5f);
+
+            map.spawns = 0;
+            map.teams.clear();
+
+            try{
+                //第一遍：地板与覆盖层（原版在 create() 回调里逐格画）
+                for(int y = 0; y < height; y++){
+                    for(int x = 0; x < width; x++){
+                        Block floor = blockAt(blocks, mapData.readUnsignedShort());
+                        Block overlay = blockAt(blocks, mapData.readUnsignedShort());
+
+                        if(overlay != Blocks.air){
+                            floors.drawPixel(x, height - 1 - y, colorFor(Blocks.air, Blocks.air, overlay, Team.derelict));
+                            if(overlay == Blocks.spawn) map.spawns++;
+                        }else{
+                            floors.drawPixel(x, height - 1 - y, colorFor(floor, Blocks.air, Blocks.air, Team.derelict));
+                        }
+                    }
+                }
+
+                //第二遍：方块与队伍（实体子块整段跳过）
+                byte[] scratch = new byte[64 * 1024];
+                for(int y = 0; y < height; y++){
+                    for(int x = 0; x < width; x++){
+                        Block block = blockAt(blocks, mapData.readUnsignedShort());
+                        //卫星格/未知方块：与 SaveIO.readMap 同口径，不消费后续字节
+                        if(block == Blocks.air) continue;
+
+                        int teamId = mapData.readUnsignedByte();
+                        mapData.readUnsignedByte(); //rotation（预览用不到，读掉保持对齐）
+
+                        if(block.hasEntity()){
+                            //v7 实体子块：[1B revision][2B 长度][数据] → 整段跳过
+                            //⚠ revision 1 字节必须读掉（与 SaveIO.writeMap 的 writeByte(revision) 对齐），
+                            //  漏读会让每个实体格错位 1 字节 → 后续 EOF
+                            mapData.readUnsignedByte(); //revision（预览用不到）
+                            int len = mapData.readUnsignedShort();
+                            if(len > scratch.length) scratch = new byte[len];
+                            mapData.readFully(scratch, 0, len);
+                        }
+
+                        if(block instanceof CoreBlock){
+                            map.teams.add(teamId);
+                        }
+
+                        int c = colorFor(Blocks.air, block, Blocks.air, Team.get(teamId));
+                        if(c == black) continue;
+
+                        //占地区域（多格建筑按 size 补画卫星格；单格就是本格）
+                        int size = block.size;
+                        int offset = -(size - 1) / 2;
+                        for(int dy = 0; dy < size; dy++){
+                            for(int dx = 0; dx < size; dx++){
+                                int px = x + dx + offset, py = height - 1 - (y + dy + offset);
+                                if(px < 0 || px >= width || py < 0 || py >= height) continue;
+                                walls.drawPixel(px, py, c);
+                                //原版：每个方块格在「下一格」画半透明阴影（py+1 = 世界坐标再低一格）
+                                if(py + 1 < height) floors.drawPixel(px, py + 1, shade);
+                            }
+                        }
+                    }
+                }
+
+                floors.drawPixmap(walls, 0, 0);
+            }finally{
+                walls.dispose();
+            }
+
+            return floors;
+        }
+    }
+
+    /** @return 名字表里第 {@code index} 个方块；越界/缺失按 air（与 {@code SaveIO.blockOf} 同口径）。 */
+    private static Block blockAt(java.util.ArrayList<Block> blocks, int index){
+        return index > 0 && index < blocks.size() ? blocks.get(index) : Blocks.air;
+    }
+
+    /**
+     * 从内存瓦片生成缩略图（1 像素 = 1 格）。对应原版 {@code MapIO.generatePreview(Tile[][])}（F14）。
+     * <p>注意 {@code tiles} 是 {@code [x][y]} 索引（原版 {@code World.getTiles()} 的形状）；
+     * 本调用点目前没有生产者（编辑器/导出路径统一走 {@link #generatePreview(Map)} 的文件路径），
+     * 保留是为 API 完整性。
+     */
+    public static Pixmap generatePreview(Tile[][] tiles){
+        Pixmap pixmap = new Pixmap(tiles.length, tiles[0].length, Pixmap.Format.RGBA8888);
+        for(int x = 0; x < pixmap.getWidth(); x++){
+            for(int y = 0; y < pixmap.getHeight(); y++){
+                Tile tile = tiles[x][y];
+                pixmap.drawPixel(x, pixmap.getHeight() - 1 - y, colorFor(tile.floor(), tile.block(), tile.overlay(), tile.getTeam()));
+            }
+        }
+        return pixmap;
     }
 
     /**

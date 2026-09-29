@@ -287,6 +287,9 @@ public class Vars {
         saves.load();
         maps = new com.phoenix.game.maps.Maps();
         maps.load();
+        //恢复每张地图的预览纹理（PNG 直载；缺失的排进队列延后生成，F14）。
+        //GL 上下文此时已就绪（本方法在 ClientLauncher.create() 内被调）。
+        maps.loadPreviews();
         mods = new com.phoenix.game.mod.Mods();
         mods.load();
 

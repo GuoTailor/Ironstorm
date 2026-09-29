@@ -1,13 +1,19 @@
 package com.phoenix.game.maps;
 
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.graphics.Pixmap;
+import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.IntSet;
 import com.phoenix.game.Vars;
 import com.phoenix.game.content.Blocks;
+import com.phoenix.game.core.Core;
+import com.phoenix.game.io.MapIO;
 import com.phoenix.game.io.SaveIO;
 import com.phoenix.game.io.SaveMeta;
 import com.phoenix.game.maps.filters.GenerateFilter;
+import com.phoenix.game.util.Fi;
+import com.phoenix.game.util.Log;
 import com.phoenix.game.world.Block;
 import com.phoenix.game.world.Tile;
 import com.phoenix.game.world.blocks.storage.CoreBlock;
@@ -35,9 +41,9 @@ import java.nio.file.StandardCopyOption;
  *       {@code width}/{@code height}/{@code spawns}/{@code teams}（不解析整张地图）。</li>
  * </ul>
  * <p>TODO 原版 {@code Maps} 还有：内置地图列表、workshop 地图、mod 地图、
- * {@code loadPreviews}/{@code createNewPreview}（缩略图生成）、
  * {@code ShuffleMode}/{@code MapProvider}（轮换策略）。
- * 其中缩略图依赖未移植的 {@code MapIO.generatePreview}，暂缓；
+ * 缩略图链已补（F14：{@link #loadPreviews}/{@link #queueNewPreview}/{@link #createNewPreview} +
+ * {@code MapIO.generatePreview}）；
  * {@code readFilters}/{@code addDefaultOres} 已补（见方法）；
  * {@code importMap}/{@code removeMap} 已补（T14，见方法）。
  */
@@ -95,6 +101,8 @@ public class Maps {
         if(byName(map.name) == null){
             maps.add(map);
         }
+        //对应原版 Maps.saveMap 的收尾：落盘后立刻生成缩略图（文件刚写出，离线读与内存瓦片等价）
+        createNewPreview(map, null);
         return map;
     }
 
@@ -130,10 +138,12 @@ public class Maps {
 
     /**
      * 把一张外部地图文件导入地图目录并加入列表（对应原版 {@code Maps.importMap(Fi)}，T14 追加）。
-     * <p>原版流程：复制到 {@link #nextMapFile()} 生成的新文件名 → {@code loadMap(dest, true)}
-     * （建 {@link Map} 并加进列表）→ 异步生成缩略图（失败则回滚并抛 {@code IOException}）。
-     * 本项目没有缩略图生成（{@link #queueNewPreview} 只打日志）→ 同步建 {@code Map} + 读元数据 + 加入列表，
-     * 因此不会因预览失败回滚（也就不抛那种异常）。
+     * <p>流程与原版一致：复制到 {@link #nextMapFile()} 生成的新文件名 → 建 {@link Map} 并加进列表 →
+     * 同步生成缩略图（{@link #createNewPreview}，F14 补齐）。
+     * <p>⚠ 与原版的一处**刻意偏离**：原版在缩略图生成失败时会回滚（从列表移除 + 删文件 + 抛
+     * {@code IOException}）——它假设"预览读不了 = 地图坏"。本项目放宽：v6 旧格式地图**可正常游玩**
+     * 但离线预览读不了（见 {@code SaveIO} version 注释），此时保留地图、缩略图占位 nomap、
+     * 只记日志，不再回滚也不抛异常。
      * <p>⚠ 与 {@link #loadMap(Map)} 无关：那个方法把地图**载入当前世界**，本方法只做"导入到列表"，
      * {@code loadMap} 的现有行为未改动。
      * <p>⚠ 文件名由 {@code map_N.msav} 派生，显示名仍取自存档 meta 的 {@code name} 标签（与 {@link #load()} 同口径）。
@@ -146,7 +156,7 @@ public class Maps {
         Map map = new Map(dest);
         readStats(map);
         maps.add(map);
-        queueNewPreview(map);
+        createNewPreview(map, null);
         return map;
     }
 
@@ -165,13 +175,94 @@ public class Maps {
         map.file.delete();
     }
 
+    // ---- 缩略图（F14；对应原版 Maps 的 loadPreviews / queueNewPreview / createNewPreview）----
+
     /**
-     * TODO 原版把地图排进预览生成队列（{@code Core.app.post} + AsyncExecutor 里生成缩略图并写盘）。
-     * <p>本项目没有地图缩略图生成（{@code MapIO.generatePreview} 未移植）→ 只打日志，
-     * 供 {@link MapPreviewLoader} 加载失败时调用。
+     * 启动时恢复每张地图的预览纹理。对应原版 {@code Maps.loadPreviews()}（在 {@code Vars.init} 里
+     * {@link #load()} 之后调用一次）。
+     * <p>预览 PNG 已存在 → 直接 {@code new Texture(FileHandle)} 同步加载（**刻意偏离**：原版走
+     * AssetManager + {@code MapPreviewLoader} 异步加载，本项目 {@code Core.assets} 没有逐帧
+     * {@code update()} 循环，注册异步加载器只会卡死；预览 PNG 很小，同步加载的开销可忽略，
+     * {@code MapPreviewLoader} 保持未注册）；PNG 缺失/未生成过 → {@link #queueNewPreview} 延后生成。
+     * <p>「缓存侧车文件」（原版 {@code -cache.dat}，存 spawns/teams）不需要：本项目把这两个统计
+     * 写在存档 meta 的 tags 里，{@link #load()} 时已恢复。
+     * <p>headless（{@code Core.graphics == null}）直接返回：服务端不生成也不加载预览。
+     */
+    public void loadPreviews(){
+        if(Core.graphics == null) return;
+
+        for(int i = 0; i < maps.size; i++){
+            Map map = maps.get(i);
+            Fi preview = map.previewFile();
+            if(preview.exists()){
+                try{
+                    if(map.texture != null) map.texture.dispose();
+                    map.texture = new Texture(preview.handle());
+                }catch(Exception e){
+                    //PNG 损坏：删掉让它走重新生成（对应原版"加载失败 → queueNewPreview"的口径）
+                    System.err.println("地图预览 PNG 加载失败 " + map.name + ": " + e);
+                    preview.delete();
+                    map.texture = null;
+                    queueNewPreview(map);
+                }
+            }else{
+                queueNewPreview(map);
+            }
+        }
+    }
+
+    /**
+     * 把地图排进预览生成队列。对应原版 {@code Maps.queueNewPreview(Map)}。
+     * <p>**刻意偏离**：原版 post 进 {@code previewList}、由 content 加载完成回调统一 drain
+     * （{@code createAllPreviews}）；本项目没有那个时序锚点，直接 post 单张生成任务
+     * （{@link #createNewPreview}），同样保证生成发生在主线程、不阻塞当前帧。
+     * 消费点：{@link #loadPreviews}（PNG 缺失）与 {@code MapPreviewLoader} 加载失败兜底。
      */
     public void queueNewPreview(Map map){
-        System.out.println("TODO 地图缩略图生成未移植，跳过: " + map.name);
+        Core.app.postRunnable(() -> createNewPreview(map, null));
+    }
+
+    /**
+     * 同步生成一张地图的缩略图并挂到 {@code map.texture}。对应原版 {@code Maps.createNewPreview(Map, Cons)}
+     * （原版 private，这里公开给编辑器保存/导入/导出三个入档点复用）。
+     * <p>流程：{@link MapIO#generatePreview(Map)} 离线读存档渲出 1px=1 格的 Pixmap →
+     * {@code new Texture(pixmap)} 挂纹理 → 写预览 PNG（下次启动 {@link #loadPreviews} 直载）。
+     * <p>与原版的差异（已声明）：
+     * <ul>
+     *   <li>原版 PNG 写盘走 {@code AsyncExecutor} 异步线程；本项目同步写（缩略图最多几百 KB，
+     *       且必须先于 {@code pix.dispose()}，异步反而要复制像素）。</li>
+     *   <li>原版不释放旧纹理（依赖 AssetManager unload 兜底）；本项目不走 AssetManager →
+     *       换纹理前显式 {@code dispose} 旧的。</li>
+     *   <li>原版还会顺手写 {@code -cache.dat}；本项目 spawns/teams 在 meta tags 里（见 {@link #loadPreviews}）。</li>
+     *   <li>headless（无 GL）与生成失败都不抛异常：失败时记日志、调 {@code failed}（可为 null）、
+     *       {@code map.texture} 保持原值（调用方按 {@code texture == null} 显示占位图）。</li>
+     * </ul>
+     * @param failed 生成失败回调（原版用于导入回滚；可为 null = 只记日志）
+     */
+    public void createNewPreview(Map map, com.phoenix.game.func.Cons<Exception> failed){
+        try{
+            if(Core.graphics == null) return;
+
+            Pixmap pix = MapIO.generatePreview(map);
+            try{
+                //先摘掉旧引用再释放旧纹理：若 new Texture 半路抛异常，map.texture 不会指向已释放对象
+                Texture old = map.texture;
+                map.texture = null;
+                if(old != null) old.dispose();
+                map.texture = new Texture(pix);
+                try{
+                    map.previewFile().writePNG(pix);
+                }catch(Exception pe){
+                    //PNG 落盘失败不回滚纹理：本次会话仍有图，下次启动再重生成
+                    Log.err(pe);
+                }
+            }finally{
+                pix.dispose();
+            }
+        }catch(Exception e){
+            Log.err(e);
+            if(failed != null) failed.get(e);
+        }
     }
 
     // ---- 元数据 ----

@@ -73,7 +73,8 @@ public class Map implements Comparable<Map>, Publishable{
     public boolean workshop;
     /** Map width/height, shorts. */
     public int width, height;
-    /** Preview texture. 本项目尚未加载每张地图的预览 PNG，恒为 null（见 {@link #safeTexture()}）。 */
+    /** Preview texture. 预览链（F14）填充：{@code Maps.loadPreviews} 启动直载预览 PNG /
+     * {@code Maps.createNewPreview} 入档时离线生成；null = 尚无预览（消费方显示 nomap 占位，勿用 {@link #safeTexture()}）。 */
     public Texture texture;
     /** Build that this map was created in. -1 = unknown or custom build. */
     public int build;

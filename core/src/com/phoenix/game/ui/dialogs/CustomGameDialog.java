@@ -34,9 +34,9 @@ import io.anuke.mindustry.gen.Tex;
  *       + {@code image.clicked(() -> dialog.show(map))} <b>已落实</b>：本项目
  *       {@link com.phoenix.game.core.Control#playMap} 已补齐，点卡片改为弹出 {@link MapPlayDialog}
  *       （选模式 → 开局），与 {@code MapPlayDialog.play} 里的 {@code ui.custom.hide()} 成对。</li>
- *   <li><b>地图缩略图：半落实</b>：{@link Map#safeTexture()} 现已存在，但本项目 {@link Map#texture}
- *       恒为 null（尚未加载每张地图的预览 PNG，见 {@code Maps} 类注释的 TODO）→
- *       预览区用 {@link Tex#nomap} 占位，见 {@link #previewOf}。</li>
+ *   <li><b>地图缩略图：F14 已接线</b>：{@link Map#texture} 由预览链填充
+ *       （{@code Maps.loadPreviews} 直载 PNG / {@code Maps.createNewPreview} 离线生成），
+ *       预览区出真图；仍为 null 时（v6 旧图未重存）用 {@link Tex#nomap} 占位，见 {@link #previewOf}。</li>
  *   <li>模式小图标：原版走 {@code Vars.ui.getIcon("mode" + Strings.capitalize(name) + "Small")}。
  *       {@code UI.getIcon} 现已支持（会先把 camelCase 还原成 kebab-case 再查图集，见 {@code core/UI.java}
  *       的 {@code getIcon}/{@code camelToKebab}）→ 该写法可用；但这里直接用生成的 {@code Icon.modeXxxSmall}
