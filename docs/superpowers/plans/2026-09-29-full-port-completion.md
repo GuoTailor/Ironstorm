@@ -63,7 +63,7 @@
 | A3 | 审计 | UI/输入/渲染/核心包功能对照（ui/input/graphics/core/meta/net） | ☑ 缺失8/偏离2/断裂3 → docs/port/audit-A3-ui-input-graphics.md |
 | N1 | 数值 | 运行时 dump 三方对照（BLKSIZE/BLKDATA/UNITDATA ↔ 原版源码 ↔ 图集）修复差异；已知待修：burning.damage、wet.speedMultiplier | ☑ 检查161/不一致23/全修/复验归零 → docs/port/n1-report.md（提交 4849e59）；根因=8 个方块类构造器自设默认 health |
 | T0 | 清理 | 254 条 TODO 全量分类（过时/缺失功能/刻意偏离/待议）→ docs/port/todo-classified.md | ☑ ①过时11 ②缺失26 ③刻意偏离217 ④待议0 |
-| T1 | 清理 | **T0-① 过时 11 条**：Mechs 弹药 javadoc×7、MusicControl 接 UI 可见性、Bresenham2 注释、**Block.useContent 接解锁链**（GlobalData.isUnlocked/unlockContent 已在）、SaveVersion javadoc 按现状改写 | ☐ |
+| T1 | 清理 | **T0-① 过时 11 条**：Mechs 弹药 javadoc×7、MusicControl 接 UI 可见性、Bresenham2 注释、**Block.useContent 接解锁链**（GlobalData.isUnlocked/unlockContent 已在）、SaveVersion javadoc 按现状改写 | ☑（提交 2a700d3）；11 条清理 + useContent 真接线（!headless && 玩家队 && isZone → data.unlockContent，instanceof 过滤液体）；autoplay 冒烟无异常 |
 | T1~Tn | 清理 | 按分类逐批消化 TODO（过时注释直接修；缺失功能转 F 批） | ☐ |
 | F1 | 功能 | **单位物理五项**（A1 高）：卡墙 kill / 深水溺亡 drownTime / 出界 kill+warp 推回 / spawner 失效 kill / 液体地板状态+伤害+walkEffect（原版 Unit.java:99,183,196-216,236-260,288）；**含 Block.unitOn 钩子与 Conveyor 单位推动**（A2：Conveyor.java:141，原版 Unit.java:226 调用点） | ☑ 六项全落（提交 410166c）；FlyingUnit.updateVelocity 冗余覆写删除改走基类飞行分支；**实测：深水 dagger ~f230 溺亡、飞行玩家悬停满血** |
 | F2 | 功能 | **开波整链**（A1 高）：出生点清场（spawnShockwave+全额伤害）、延迟分批出生（Time.run+spawn 特效）、attack 模式核心增援（WaveSpawner.java:72-150） | ☑（提交 02e230c）；**实测：wave+0/+10 敌人 0 → +100 出齐 4 个（延迟分批），清场未误伤玩家**；附带修 groundSpawns 空 early-return（attack 图跳过增援） |
@@ -171,3 +171,4 @@ UI 类以"功能等价"判（arc→libgdx 已知缺口见 转换.md，不算缺�
 - 2026-09-30 F6 完成：tileDamage 菱形蔓延（GridBits/IntQueue 复用）+ 多波伤害伤建筑接线 + 入口对齐（删 damageAll、核爆半径漏乘 tilesize 修正）；**实测抓到 IntQueue.resize 满环回绕越界并修复**（墙 320→168 衰减生效）（提交 f284a92）；派发 F8
 - 2026-09-30 F8 完成：索敌语义三项全落（derelict 豁免/tilePred 透传/range 口径）；LOGTEST 冒烟无异常（提交 3f21acb）；派发 F9
 - 2026-09-30 F9 完成：状态存档 v6 整链 + getStatusColor；**存读实测闭环**（burning 恢复、旧档拒绝）（提交 328cd35）；A1 审计项全部清零；派发 T1
+- 2026-09-30 T1 完成：11 条过时 TODO 清理 + useContent 解锁链接线；冒烟无异常（提交 2a700d3）；派发 F14
