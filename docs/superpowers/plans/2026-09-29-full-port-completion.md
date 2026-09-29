@@ -60,7 +60,7 @@
 | --- | --- | --- | --- |
 | A1 | 审计 | 实体/AI/游戏逻辑包功能对照（entities/ai/game） | ☑ 缺失15/偏离6/断裂4 → docs/port/audit-A1-entities-ai-game.md |
 | A2 | 审计 | 世界/内容包功能对照（world/content） | ☑ 缺失4/偏离4/断裂3 → docs/port/audit-A2-world-content.md |
-| A3 | 审计 | UI/输入/渲染/核心包功能对照（ui/input/graphics/core/meta/net） | ☐ |
+| A3 | 审计 | UI/输入/渲染/核心包功能对照（ui/input/graphics/core/meta/net） | ☑ 缺失8/偏离2/断裂3 → docs/port/audit-A3-ui-input-graphics.md |
 | N1 | 数值 | 运行时 dump 三方对照（BLKSIZE/BLKDATA/UNITDATA ↔ 原版源码 ↔ 图集）修复差异；**已知待修：burning.damage 0.5→0.06（8.3 倍）、wet.speedMultiplier 0.85→0.9**（A2 定位） | ☐ |
 | T0 | 清理 | 254 条 TODO 全量分类（过时/缺失功能/刻意偏离/待议）→ docs/port/todo-classified.md | ☐ |
 | T1~Tn | 清理 | 按分类逐批消化 TODO（过时注释直接修；缺失功能转 F 批） | ☐ |
@@ -73,10 +73,11 @@
 | F7 | 功能 | **断裂接线四件**（A1 中，小改）：launchWaveMultiplier 消费、Zone.updateWave/bestWave、护甲减免 calculateDamage（**补 freezing.armorMultiplier=0.8**——A2）、Fire.extinguish 发 fireExtinguish + Fire 接已移植的 Puddle | ☐ |
 | F8 | 功能 | **索敌语义**（A1 中）：derelict 豁免、findEnemyTile tilePred、targetClosest 用 max(weapon.range, type.range)（Units.java:84-150、BaseUnit.java:181-186） | ☐ |
 | F9 | 功能 | **状态存档与染色**（A1 中/低）：Statuses writeSave/readSave、getStatusColor | ☐ |
+| F13 | 功能 | **输入/UX 补齐**（A3）：解锁提示 showUnlock（Control 监听 UnlockEvent + HudFragment，断裂）、E 键暂停建造队列（Player.isBuilding/buildWasAutoPaused + buildautopause 消费，断裂）、P 键地图截图（takeMapScreenshot）、中键吸取方块（Binding.pick）、R 键旋转已放置方块（rotateplaced/rotateBlock，注意项目现把 R 用作放置朝向——按原版 DesktopInput.java:225-227 恢复语义并共存）、drawConfigure 配置叠加绘制（Block+ItemBridge/MassDriver/PowerNode）、buildUI 建造提示条、投递物品光标预览（isDroppingItem 消费）、Ctrl 对角放置、canShoot 输入层守卫（hasMouse/onConfigurable/isDroppingItem） | ☐ |
 | F10 | 功能 | **A2 产出**：世界暗化层 isDarkened 整链（Tile/World/FloorRenderer，原版 core/World.java:308-344）、Door 手动开合+门音效+开关刷新寻路（Door.java:20-46）、**canDeconstruct 未调 canBreak → 自家核心可拆**（Build.java:192 + CoreBlock.canBreak） | ☐ |
 | F11 | 功能 | A3 审计产出（待 A3 完成后登记） | ☐ |
 | F12 | 功能 | T0 分类产出的"缺失功能"项（待 T0 完成后登记） | ☐ |
-| F-LOW | 功能 | 低优先级合集（A1 表尾）：EventType 缺失事件类、Schematics.overwrite、SpawnGroup 序列化、SoundLoop 工作音效、GlobalData 资源池、TileEntity 休眠优化 | ☐ |
+| F-LOW | 功能 | 低优先级合集：EventType 缺失事件类、Schematics.overwrite、SpawnGroup 序列化、SoundLoop 工作音效、GlobalData 资源池、TileEntity 休眠优化；**ContentInfoDialog.show + ContentDisplay.displayItem/displayLiquid/displayUnit（数据库点物品/单位无反应——A3）**、Administration 子网封禁/strict/Config（A3 中低） | ☐ |
 | R1 | 残留 | 死代码/占位实现/`// removed` 残留清扫（含 S3d-5 主菜单背景）；**含 StatusEffect.reactive 死字段、Edges.getPixelPolygon 死方法**（A2） | ☐ |
 | V1 | 终验 | 全量验证：编译绿 + autoplay 实跑 + 截图核对 + 联机冒烟 + 数值 dump 复检 | ☐ |
 
@@ -151,3 +152,4 @@ UI 类以"功能等价"判（arc→libgdx 已知缺口见 转换.md，不算缺�
 - 2026-09-29 方案建立；基线提交 9bdbefc；派发 A1
 - 2026-09-29 A1 完成（缺失15/偏离6/断裂4，报告 docs/port/audit-A1-entities-ai-game.md）；登记 F1~F9/F-LOW；派发 A2
 - 2026-09-29 A2 完成（缺失4/偏离4/断裂3，报告 docs/port/audit-A2-world-content.md；内容名全覆盖、子弹数值一致）；F1/F4/F7/N1/R1 吸收 A2 项 + F10 落地；派发 A3
+- 2026-09-29 A3 完成（缺失8/偏离2/断裂3，报告 docs/port/audit-A3-ui-input-graphics.md）；登记 F13 + F-LOW 扩充。**三片审计齐**：合计缺失 27/偏离 12/断裂 10。进入修复流水线：派 T0（后台）+ 主会话跑 N1 dump
