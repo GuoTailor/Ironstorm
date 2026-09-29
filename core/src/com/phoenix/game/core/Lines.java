@@ -38,6 +38,14 @@ public class Lines{
         line(x, y, x + Angles.trnsx(angle, len), y + Angles.trnsy(angle, len));
     }
 
+    /** 空心矩形，(x,y) 为左下角（对应 arc 的 {@code Lines.rect}；教程指引高亮框用）。 */
+    public static void rect(float x, float y, float width, float height){
+        line(x, y, x + width, y);
+        line(x + width, y, x + width, y + height);
+        line(x + width, y + height, x, y + height);
+        line(x, y + height, x, y);
+    }
+
     /** 以 (x,y) 为中心、长 len 的线段（对应 arc 的 {@code Lines.lineAngleCenter}）。 */
     public static void lineAngleCenter(float x, float y, float angle, float len){
         float hx = Angles.trnsx(angle, len / 2f), hy = Angles.trnsy(angle, len / 2f);

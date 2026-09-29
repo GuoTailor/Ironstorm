@@ -25,7 +25,6 @@ import com.phoenix.game.core.Time;
 import com.phoenix.game.game.Team;
 import com.phoenix.game.graphics.Pal;
 import com.phoenix.game.input.Binding;
-import com.phoenix.game.input.InputDevice;
 import com.phoenix.game.input.InputHandler;
 import com.phoenix.game.input.KeyBinds;
 import com.phoenix.game.math.Mathf;
@@ -241,6 +240,8 @@ public class PlacementFragment extends Fragment{
             TextureRegion icon = categoryIcon(category);
             if(icon != null) button.getStyle().imageUp = new TextureRegionDrawable(icon);
             button.setChecked(currentCategory == category);
+            //教程 outline 按这个名字找分类按钮（对应原版 PlacementFragment.java:402 的 .name("category-" + cat.name())）
+            button.setName("category-" + category.name());
             button.addListener(new ClickListener(){
                 @Override public void clicked(com.badlogic.gdx.scenes.scene2d.InputEvent event, float x, float y){
                     currentCategory = category;
@@ -445,6 +446,8 @@ public class PlacementFragment extends Fragment{
                 }
             });
             buttons.add(button);
+            //教程 outline 按这个名字找方块按钮（对应原版 PlacementFragment.java:219 的 .name("block-" + block.name)）
+            button.setName("block-" + block.name);
 
             if(i % ROW_WIDTH == 0) grid.row();
             grid.add(button).size(Scl.scl(SLOT_SIZE)).pad(Scl.scl(2f));
@@ -952,9 +955,9 @@ public class PlacementFragment extends Fragment{
      * @return Binding 的默认键码；本项目没有"Binding → 当前生效键码"的查询表
      * （{@code Core.keybinds} 未移植），用 {@code defaultValue} 代替（无重绑定入口，两者等价）。
      */
+    /** @return 绑定的生效键码（F15 起走 {@link KeyBinds#key}，重绑后跟着变）。 */
     private static int defaultKey(Binding binding){
-        KeyBinds.KeybindValue value = binding.defaultValue(InputDevice.DeviceType.keyboard);
-        return value instanceof KeyBinds.KeyValue ? ((KeyBinds.KeyValue)value).key : -1;
+        return KeyBinds.key(binding);
     }
 
     /**

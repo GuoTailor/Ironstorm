@@ -2,12 +2,20 @@ package com.phoenix.game.game;
 
 import com.badlogic.gdx.utils.ObjectIntMap;
 import com.badlogic.gdx.utils.ObjectSet;
+import com.badlogic.gdx.scenes.scene2d.Actor;
+import com.badlogic.gdx.scenes.scene2d.Group;
+import com.badlogic.gdx.scenes.scene2d.ui.Button;
 import com.phoenix.game.content.Blocks;
 import com.phoenix.game.content.Items;
 import com.phoenix.game.core.Core;
+import com.phoenix.game.core.Draw;
+import com.phoenix.game.core.Drawf;
 import com.phoenix.game.core.Events;
 import com.phoenix.game.core.Logic;
+import com.phoenix.game.core.Lines;
+import com.phoenix.game.core.Scl;
 import com.phoenix.game.core.Strings;
+import com.phoenix.game.core.Tmp;
 import com.phoenix.game.entities.type.TileEntity;
 import com.phoenix.game.func.Boolp;
 import com.phoenix.game.func.Func;
@@ -20,9 +28,13 @@ import com.phoenix.game.game.EventType.LineConfirmEvent;
 import com.phoenix.game.game.EventType.Trigger;
 import com.phoenix.game.game.EventType.TurretAmmoDeliverEvent;
 import com.phoenix.game.game.EventType.WithdrawEvent;
+import com.phoenix.game.graphics.Pal;
+import com.phoenix.game.input.DesktopInput;
+import com.phoenix.game.math.Angles;
 import com.phoenix.game.math.Mathf;
 import com.phoenix.game.struct.Array;
 import com.phoenix.game.type.Item;
+import com.phoenix.game.ui.dialogs.FloatingDialog;
 import com.phoenix.game.world.Block;
 import com.phoenix.game.world.Tile;
 import com.phoenix.game.world.meta.I18n;
@@ -35,8 +47,9 @@ import static com.phoenix.game.Vars.*;
  * <ul>
  *   <li>当前实例通过 {@code Vars.control.tutorial} 获取（与 {@link TutorialStage} 的工具方法一致，
  *       与原版同构）：{@link Tutorial} 是 {@code Control} 的字段，本类内部反向引用它。</li>
- *   <li>{@code Core.scene}（arc 的 Scene）没有对应物 → {@code draw()} 的对话框判定与
- *       {@link TutorialStage#outline} 的 UI 元素描边/箭头整段注释保留（B 类）。</li>
+ *   <li>{@code Core.scene}（arc 的 Scene）没有对应物 → outline/toggled 的元素查找用
+ *       {@link #findVisible} 在 libgdx Stage 上按名 DFS（F15 起 UI 元素已按原版名字命名）；
+ *       浮层由 {@code ClientLauncher} 在 HUD 绘制之后调 {@link #draw()}。</li>
  *   <li>{@code Teams.playerCores()} 已接线（S3 批次）→ 直接用玩家阵营的核心列表取核心。
  *       {@code state.rules.defaultTeam} <b>已存在</b>，放置阵营/读库存已改用它。</li>
  * </ul>
@@ -93,8 +106,21 @@ public class Tutorial{
 
     /** draw UI overlay */
     public void draw(){
-        //TODO 原版是 if(!Core.scene.hasDialog()) —— 本项目没有 Core.scene（arc 的 Scene 未移植）
-        stage.draw();
+        //原版是 if(!Core.scene.hasDialog()) —— 本项目没有 Core.scene，用输入层的同款判定（F15 补）
+        if(DesktopInput.hasDialog()) return;
+        if(FloatingDialog.scene == null) return;
+
+        //浮层画在 HUD（stage）之上，坐标系是 stage 的 1:1 屏幕坐标：
+        //几何会话（Drawf.begin）会取"批次当前投影"，所以要自己开一个 batch 会话 ——
+        //stage.draw() 刚结束时批次投影仍是 stage 矩阵，begin 后直接复用（对应原版
+        //UI.update 里 scene.draw() 之后的 control.tutorial.draw(); Draw.flush()）
+        Core.batch.begin();
+        try{
+            stage.draw();
+        }finally{
+            Drawf.end();
+            Core.batch.end();
+        }
     }
 
     /** Resets tutorial state. */
@@ -344,17 +370,15 @@ public class Tutorial{
         }
 
         static boolean toggled(String name){
-            //TODO 原版 Core.scene.findVisible(name) instanceof Button && isChecked()
-            //（本项目没有 Core.scene，Scene/UI 系统尚未移植）
-            return false;
+            //对应原版 Core.scene.findVisible(name) instanceof Button && isChecked()
+            //（F15：本项目 stage 元素已按原版名字命名，libgdx 的 Button 同样有 isChecked）
+            Actor element = findVisible(name);
+            return element instanceof Button && ((Button)element).isChecked();
         }
 
         static void outline(String name){
-            //TODO 原版通过 Core.scene.findVisible(name) 取到 UI 元素，再用
-            // Lines.stroke/Lines.rect/Drawf.tri 描边并画一个指向它的箭头（含 Mathf.absin 呼吸动画）。
-            // 本项目没有 Core.scene（arc 的 Scene 未移植），也没有 Lines.rect 重载 → 整段原码注释保留。
-            /*
-            Element element = Core.scene.findVisible(name);
+            //教程指引框：按名字找可见 UI 元素，画呼吸高亮框 + 从屏幕中心指向它的箭头（F15 补，原 TutorialStage.outline）
+            Actor element = findVisible(name);
             if(element != null && !toggled(name)){
                 element.localToStageCoordinates(Tmp.v1.setZero());
                 float sin = Mathf.sin(11f, Scl.scl(4f));
@@ -363,7 +387,8 @@ public class Tutorial{
 
                 float size = Math.max(element.getWidth(), element.getHeight()) + Mathf.absin(11f/2f, Scl.scl(18f));
                 float angle = Angles.angle(Core.graphics.getWidth()/2f, Core.graphics.getHeight()/2f, Tmp.v1.x + element.getWidth()/2f, Tmp.v1.y + element.getHeight()/2f);
-                Tmp.v2.trns(angle + 180f, size*1.4f);
+                //arc 的 Vector2.trns（极坐标设置方向+长度）在 libgdx 无对应 → 用本项目 Angles 等价
+                Tmp.v2.set(Angles.trnsx(angle + 180f, size*1.4f), Angles.trnsy(angle + 180f, size*1.4f));
                 float fs = Scl.scl(40f);
                 float fs2 = Scl.scl(56f);
 
@@ -374,7 +399,30 @@ public class Tutorial{
                 Drawf.tri(Tmp.v1.x + element.getWidth()/2f + Tmp.v2.x, Tmp.v1.y + element.getHeight()/2f + Tmp.v2.y, fs, fs, angle);
                 Draw.color();   //原版是 Draw.reset()
             }
-            */
+        }
+
+        /** @return 按名字在 HUD stage 上查找**可见**元素（对应原版 {@code Core.scene.findVisible}）。 */
+        static Actor findVisible(String name){
+            com.badlogic.gdx.scenes.scene2d.Stage scene = FloatingDialog.scene;
+            if(scene == null) return null;
+            return findVisible(scene.getRoot(), name);
+        }
+
+        /** 照 arc {@code Group.findVisible}：先查直接子节点，再递归**可见**子组。 */
+        private static Actor findVisible(Group group, String name){
+            com.badlogic.gdx.utils.Array<Actor> children = group.getChildren();
+            for(int i = 0; i < children.size; i++){
+                Actor child = children.get(i);
+                if(name.equals(child.getName()) && child.isVisible()) return child;
+            }
+            for(int i = 0; i < children.size; i++){
+                Actor child = children.get(i);
+                if(child instanceof Group && child.isVisible()){
+                    Actor found = findVisible((Group)child, name);
+                    if(found != null) return found;
+                }
+            }
+            return null;
         }
     }
 

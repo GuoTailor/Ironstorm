@@ -96,6 +96,8 @@ public class HudFragment extends Fragment{
 
         //原版 HUD 左上只放波次面板；玩家状态由选中/悬停信息层提供。
         Table waveTable = new Table();
+        //教程 outline 按这个名字找波次面板（对应原版 HudFragment.java:624 的 table.setName("waves")）
+        waveTable.setName("waves");
 
         waveLabel = new Label("", Styles.outlineLabel);
         waveTable.add(waveLabel).padRight(Scl.scl(10f));

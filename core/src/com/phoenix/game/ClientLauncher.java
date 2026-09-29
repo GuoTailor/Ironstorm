@@ -35,6 +35,7 @@ import com.phoenix.game.core.Renderer;
 import com.phoenix.game.core.Scl;
 import com.phoenix.game.core.Time;
 import com.phoenix.game.core.Version;
+import com.phoenix.game.input.KeyBinds;
 import com.phoenix.game.ui.Styles;
 import com.phoenix.game.ui.fragments.ChatFragment;
 import com.phoenix.game.ui.fragments.HudFragment;
@@ -169,6 +170,11 @@ public class ClientLauncher extends ApplicationAdapter {
             //⚠ s > 240 的语义是"无限制"（该滑块的最大档）→ libgdx 传 0。
             int fpscap = Core.settings.getInt("fpscap", 240);
             Gdx.graphics.setForegroundFPS(fpscap > 240 ? 0 : fpscap);
+
+            //键位绑定加载（对应原版 Core.keybinds.setDefaults(Binding.values()) + load()：
+            //默认表就是 Binding 枚举自身，这里只把 ~/.prefs 里已保存的重绑读进来；
+            //必须在任何输入消费/UI 构造之前，因为 ControlsDialog 构造器就会查绑定表）
+            KeyBinds.init();
 
             Core.assets.finishLoading();
             Fonts.outline.getData().markupEnabled = true;
@@ -355,6 +361,8 @@ public class ClientLauncher extends ApplicationAdapter {
         Gdx.app.exit();
     }
     //DEBUG-SHOT-END
+
+
 
 
 
@@ -571,6 +579,12 @@ public class ClientLauncher extends ApplicationAdapter {
                 hudfrag.show();
                 stage.act(Gdx.graphics.getDeltaTime());
                 stage.draw();
+            }
+
+            //教程指引浮层（对应原版 UI.update 里 scene.draw() 之后的 control.tutorial.draw(); Draw.flush()）：
+            //画在 HUD 之上 —— 高亮框 + 指向箭头用 stage 的屏幕坐标
+            if(Vars.state.rules.tutorial && Vars.control != null && Vars.control.tutorial != null){
+                Vars.control.tutorial.draw();
             }
 
         

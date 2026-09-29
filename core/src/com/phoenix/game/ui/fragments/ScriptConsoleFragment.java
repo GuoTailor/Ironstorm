@@ -16,7 +16,6 @@ import com.phoenix.game.core.Fill;
 import com.phoenix.game.core.Fonts;
 import com.phoenix.game.core.Scl;
 import com.phoenix.game.input.Binding;
-import com.phoenix.game.input.InputDevice;
 import com.phoenix.game.input.KeyBinds;
 import com.phoenix.game.math.Mathf;
 import com.phoenix.game.struct.Array;
@@ -140,15 +139,11 @@ public class ScriptConsoleFragment extends Table{
 
     /**
      * 按键判定（对应原版 {@code input.keyTap(Binding)}）。
-     * <p>本项目没有"Binding → 当前生效键码"的查询表（{@code KeyBinds} 只保留了类型定义；键位设置界面与
-     *     持久化都未移植，也没有 {@code Vars.platform} 落盘），这里读 {@link Binding#defaultValue} 的默认键码。
-     *     由于项目里不存在重绑定入口，默认键码 == 实际生效键码，行为等价。
+     * <p>F15 起经 {@link KeyBinds} 查生效键码（默认值 == 未重绑时的生效值）；
+     * 鼠标键/滚轮在本项目用负数编码（见 KeyCode 类注释），libgdx 的 isKeyJustPressed 只认键盘键码。
      */
     private static boolean keyTap(Binding binding){
-        KeyBinds.KeybindValue value = binding.defaultValue(InputDevice.DeviceType.keyboard);
-        if(!(value instanceof KeyBinds.KeyValue)) return false;
-        int key = ((KeyBinds.KeyValue)value).key;
-        //鼠标键/滚轮在本项目用负数编码（见 KeyCode 类注释），libgdx 的 isKeyJustPressed 只认键盘键码
+        int key = KeyBinds.key(binding);
         return key >= 0 && Gdx.input.isKeyJustPressed(key);
     }
 

@@ -1250,16 +1250,21 @@ public abstract class InputHandler extends InputAdapter{
 
     // ---- 基础输入查询（对应 arc 的 Core.input）----
 
-    /** @return 水平移动轴：-1 / 0 / 1（对应 Binding.move_x） */
+    /**
+     * @return 水平移动轴：-1 / 0 / 1（对应 Binding.move_x 的 Axis(min=A, max=D)，经 KeyBinds 查生效键位）。
+     * <p>方向键（LEFT/RIGHT）是本项目附加的行为，不随该绑定重绑（保持既有手感，见方法尾注）。
+     */
     public float axisX(){
-        return (keyDown(Input.Keys.D) || keyDown(Input.Keys.RIGHT) ? 1f : 0f)
-                + (keyDown(Input.Keys.A) || keyDown(Input.Keys.LEFT) ? -1f : 0f);
+        KeyBinds.Axis axis = KeyBinds.get(Binding.move_x);
+        return (keyDown(axis.max) || keyDown(Input.Keys.RIGHT) ? 1f : 0f)
+                + (keyDown(axis.min) || keyDown(Input.Keys.LEFT) ? -1f : 0f);
     }
 
-    /** @return 垂直移动轴：-1 / 0 / 1（对应 Binding.move_y） */
+    /** @return 垂直移动轴：-1 / 0 / 1（对应 Binding.move_y 的 Axis(min=S, max=W)；方向键为本项目附加）。 */
     public float axisY(){
-        return (keyDown(Input.Keys.W) || keyDown(Input.Keys.UP) ? 1f : 0f)
-                + (keyDown(Input.Keys.S) || keyDown(Input.Keys.DOWN) ? -1f : 0f);
+        KeyBinds.Axis axis = KeyBinds.get(Binding.move_y);
+        return (keyDown(axis.max) || keyDown(Input.Keys.UP) ? 1f : 0f)
+                + (keyDown(axis.min) || keyDown(Input.Keys.DOWN) ? -1f : 0f);
     }
 
     /** @return 当前本地玩家水平输入（网络上报用；无输入处理器时为 0）。 */
@@ -1273,11 +1278,35 @@ public abstract class InputHandler extends InputAdapter{
     }
 
     public boolean keyDown(int key){
-        return Gdx.input.isKeyPressed(key);
+        //负数键码（鼠标/滚轮，见 KeyCode 类注释）不进键盘轮询管道，恒 false（重绑后轴键可能落到鼠标域，防越界）
+        return key >= 0 && Gdx.input.isKeyPressed(key);
     }
 
     public boolean keyTap(int key){
-        return Gdx.input.isKeyJustPressed(key);
+        return key >= 0 && Gdx.input.isKeyJustPressed(key);
+    }
+
+    // ---- Binding 感知判定（对应原版 Core.input.keyDown/keyTap(Binding)，经 KeyBinds 查生效键位）----
+
+    /** @return 绑定键当前是否按住（对应原版 {@code input.keyDown(Binding)}）。 */
+    public boolean keyDown(Binding binding){
+        return keyDown(KeyBinds.key(binding));
+    }
+
+    /** @return 绑定键本帧是否刚按下（对应原版 {@code input.keyTap(Binding)}）。 */
+    public boolean keyTap(Binding binding){
+        return keyTap(KeyBinds.key(binding));
+    }
+
+    /** @return 绑定的鼠标键当前是否按住（libgdx 的鼠标键在 isButtonPressed 管道，键码换算见 {@link #mouseCode(int)}）。 */
+    public boolean isButtonPressed(Binding binding){
+        int key = KeyBinds.key(binding);
+        return key < 0 && Gdx.input.isButtonPressed(-(key) - 1);
+    }
+
+    /** @return libgdx 的 Buttons 常量（0..4）对应的本项目鼠标键码（负数，见 {@link KeyCode} 类注释）。 */
+    protected static int mouseCode(int button){
+        return -(button) - 1;
     }
 
     /** @return 鼠标 X（屏幕左边缘为 0） */

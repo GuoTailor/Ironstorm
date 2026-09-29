@@ -34,12 +34,12 @@ public class DesktopInput extends InputHandler{
         Player player = Vars.player;
 
         //M 键开关全屏小地图（对应原版 DesktopInput 的 Binding.minimap -> ui.minimapfrag.toggle()）
-        if(Vars.hud != null && keyTap(Input.Keys.M)){
+        if(Vars.hud != null && keyTap(Binding.minimap)){
             Vars.hud.minimapFragment().toggle();
         }
 
         //T 键开关蓝图库（对应原版 Binding.schematic_menu = KeyCode.T → ui.schematics 的显隐切换）
-        if(keyTap(Input.Keys.T)){
+        if(keyTap(Binding.schematic_menu)){
             toggleSchematics();
         }
 
@@ -61,10 +61,10 @@ public class DesktopInput extends InputHandler{
         //!isPlacing() || !block.rotate 与 !keyDown(Binding.rotateplaced)（DesktopInput.java:161）。
         float zoomAmount = scroll();
         if(Math.abs(zoomAmount) > 0.0001f){
-            if(!isPlacing() && keyDown(Input.Keys.R)){
+            if(!isPlacing() && keyDown(Binding.rotateplaced)){
                 //按住 R（Binding.rotateplaced）滚动：旋转光标下的已放置方块，不缩放（对应原版 DesktopInput.java:225-227）
                 rotatePlacedAt(zoomAmount > 0f);
-            }else if(isPlacing() && buildBlock != null && buildBlock.rotate && !keyDown(Input.Keys.CONTROL_LEFT)){
+            }else if(isPlacing() && buildBlock != null && buildBlock.rotate && !keyDown(Binding.diagonal_placement)){
                 //原版 rotation 序列是逆时针（0=右/1=上/2=左/3=下），上滚 = +1 就是逆时针；
                 //本项目序列是顺时针（0=上/1=右/2=下/3=左），逆时针要 -1（等价 +3）。
                 //⚠ 按住 Ctrl（diagonal_placement）时不转朝向：对应原版 update 的
@@ -80,7 +80,7 @@ public class DesktopInput extends InputHandler{
 
         //玩家死亡或暂停时：WASD 平移相机（对应原版 DesktopInput.update 的相机部分）
         if(player == null || player.isDead() || Vars.state.isPaused()){
-            float camSpeed = !keyDown(Input.Keys.SHIFT_LEFT) ? 3f : 8f;
+            float camSpeed = !keyDown(Binding.dash) ? 3f : 8f;
 
             Tmp.v1.set(axisX(), axisY());
             if(!Tmp.v1.isZero()){
@@ -89,8 +89,8 @@ public class DesktopInput extends InputHandler{
                 Core.camera.position.y += Tmp.v1.y;
             }
 
-            //按住鼠标侧键：相机朝鼠标方向移动
-            if(Gdx.input.isButtonPressed(Input.Buttons.BACK)){
+            //按住鼠标侧键：相机朝鼠标方向移动（对应原版 Binding.mouse_move）
+            if(isButtonPressed(Binding.mouse_move)){
                 Core.camera.position.x += Mathf.clamp((mouseX() - Core.graphics.getWidth() / 2f) * 0.005f, -1f, 1f) * camSpeed;
                 Core.camera.position.y += Mathf.clamp((mouseY() - Core.graphics.getHeight() / 2f) * 0.005f, -1f, 1f) * camSpeed;
             }
@@ -98,7 +98,7 @@ public class DesktopInput extends InputHandler{
 
         //玩家单位控制（存活且未暂停）：Shift 加速 + WASD 移动 + 鼠标瞄准射击
         if(player != null && !player.isDead() && !Vars.state.isPaused()){
-            player.isBoosting = keyDown(Input.Keys.SHIFT_LEFT);
+            player.isBoosting = keyDown(Binding.dash);
 
             updateMovement();
             updateShooting();
@@ -112,7 +112,7 @@ public class DesktopInput extends InputHandler{
         updateDash();
 
         //松开左键停止射击（对应原版 keyRelease(Binding.select)）
-        if(player != null && !Gdx.input.isButtonPressed(Input.Buttons.LEFT)){
+        if(player != null && !isButtonPressed(Binding.select)){
             player.isShooting = false;
         }
 
@@ -141,7 +141,7 @@ public class DesktopInput extends InputHandler{
         //  1) 命令模式 → 退出命令模式
         //  2) 建造/拆除预览 → 取消
         //  3) 否则 → 打开暂停菜单
-        if(keyTap(Input.Keys.ESCAPE)){
+        if(keyTap(Binding.menu)){
             if(commandMode){
                 exitCommandMode();
             }else if(isPlacing()){
@@ -160,7 +160,7 @@ public class DesktopInput extends InputHandler{
             }
 
             //拖框超过阈值后视为框选而非点选
-            if(commandRect && Gdx.input.isButtonPressed(Input.Buttons.LEFT)){
+            if(commandRect && isButtonPressed(Binding.select)){
                 if(Mathf.dst(commandRectX, commandRectY, targetX, targetY) > 8f){
                     tappedOne = false;
                 }
@@ -205,18 +205,18 @@ public class DesktopInput extends InputHandler{
         }
 
         //F11 切换全屏（对应 Binding.fullscreen）
-        if(keyTap(Input.Keys.F11)){
+        if(keyTap(Binding.fullscreen)){
             toggleFullscreen();
         }
 
         //空格暂停/继续（对应 Binding.pause）
-        if(keyTap(Input.Keys.SPACE)){
+        if(keyTap(Binding.pause)){
             Vars.state.set(Vars.state.isPaused() ? GameState.State.playing : GameState.State.paused);
         }
 
         //Tab 打开玩家列表（对应原版 DesktopInput 的 `net.active() && keyTap(Binding.player_list)` → `ui.listfrag.toggle()`；
         //原版守卫 net.active()，本项目 Vars.net 恒 null → 用 Vars.isClient()/isServer() 判"联机中"）
-        if(keyTap(Input.Keys.TAB) && Vars.ui != null && Vars.ui.listfrag != null
+        if(keyTap(Binding.player_list) && Vars.ui != null && Vars.ui.listfrag != null
             && (Vars.isClient() || Vars.isServer())){
             Vars.ui.listfrag.toggle();
         }
@@ -233,7 +233,7 @@ public class DesktopInput extends InputHandler{
         //E 键暂停/恢复建造队列（对应原版 pollInput 的 Binding.pause_building 分支，DesktopInput.java:346-349）：
         //手动切换时清掉自动暂停标记
         com.badlogic.gdx.scenes.scene2d.Stage keyStage = com.phoenix.game.ui.dialogs.FloatingDialog.scene;
-        if(keyTap(Input.Keys.E) && player != null
+        if(keyTap(Binding.pause_building) && player != null
             && !(keyStage != null && keyStage.getKeyboardFocus() instanceof com.badlogic.gdx.scenes.scene2d.ui.TextField)){
             player.isBuilding = !player.isBuilding;
             player.buildWasAutoPaused = false;
@@ -242,21 +242,21 @@ public class DesktopInput extends InputHandler{
         //C 切换 HUD 建造菜单（对应原版 Binding.toggle_menus = KeyCode.C，原版在 HudFragment.update 里处理）。
         //守卫照原版：有对话框 / 输入框有焦点时不响应（原版还判 !ui.chatfrag.shown()，本项目 ChatFragment
         //由 ClientLauncher 私有持有、没有 shown() 接口 → 该条未接）
-        if(keyTap(Input.Keys.C) && Vars.hud != null && !hasDialog()
+        if(keyTap(Binding.toggle_menus) && Vars.hud != null && !hasDialog()
             && !(keyStage != null && keyStage.getKeyboardFocus() instanceof com.badlogic.gdx.scenes.scene2d.ui.TextField)){
             Vars.hud.toggleMenus();
         }
 
         //P 键整图截图（对应原版 Control.update 的 Binding.screenshot 分支，Control.java:468-470：
         //!mobile && 无文本焦点 → renderer.takeMapScreenshot()）
-        if(!Vars.mobile && keyTap(Input.Keys.P) && Vars.renderer != null && !hasDialog()
+        if(!Vars.mobile && keyTap(Binding.screenshot) && Vars.renderer != null && !hasDialog()
             && !(keyStage != null && keyStage.getKeyboardFocus() instanceof com.badlogic.gdx.scenes.scene2d.ui.TextField)){
             Vars.renderer.takeMapScreenshot();
         }
 
         //F7 切换电力激光显隐（对应原版 Binding.toggle_power_lines = KeyCode.F7）：关掉时记下偏好值，
         //再按一次还原（设置页拖动 lasersopacity 滑块也会同步更新偏好值）
-        if(keyTap(Input.Keys.F7)){
+        if(keyTap(Binding.toggle_power_lines)){
             if(Core.settings.getInt("lasersopacity", 100) == 0){
                 Core.settings.put("lasersopacity", Core.settings.getInt("preferredlaseropacity", 100));
             }else{
@@ -279,7 +279,7 @@ public class DesktopInput extends InputHandler{
         }
 
         //拆除模式：按住左键拖动可沿路径连续拆除（快速拖动也不会漏格）
-        if(breaking && Vars.world != null && !Vars.state.isPaused() && Gdx.input.isButtonPressed(Input.Buttons.LEFT)){
+        if(breaking && Vars.world != null && !Vars.state.isPaused() && isButtonPressed(Binding.select)){
             int tx = Vars.world.toTile(targetX), ty = Vars.world.toTile(targetY);
 
             if(lastBreakX == Integer.MIN_VALUE){
@@ -309,7 +309,7 @@ public class DesktopInput extends InputHandler{
         if(commandMode && !isPlacing() && Vars.player != null && !Vars.player.isDead() && !Vars.state.isPaused()){
             float wx = mouseWorldX(screenX), wy = mouseWorldY(screenY);
 
-            if(button == Input.Buttons.LEFT){
+            if(mouseCode(button) == KeyBinds.key(Binding.select)){
                 //开始框选（对应原版 keyTap(select) && commandMode → commandRect = true）
                 commandRect = true;
                 tappedOne = true;
@@ -318,6 +318,7 @@ public class DesktopInput extends InputHandler{
                 return true;
             }else if(button == Input.Buttons.RIGHT){
                 //移动/攻击命令（对应原版 Binding.commandQueue 的 touchDown 分支 —— 原版右键即命令）
+                //⚠ commandQueue/commandMode 键不在 126.2 的 Binding 枚举里（v8 特性）→ 不参与重绑
                 commandTap(wx, wy, false);
                 return true;
             }else if(button == Input.Buttons.MIDDLE){
@@ -328,14 +329,16 @@ public class DesktopInput extends InputHandler{
             return false;
         }
 
-        if(button == Input.Buttons.RIGHT){
+        //右键取消建造/拆除（对应原版 Binding.deselect；libgdx 的 Buttons 常量先换算成
+        //本项目负数鼠标键码再与绑定比对，见 InputHandler.mouseCode）
+        if(mouseCode(button) == KeyBinds.key(Binding.deselect)){
             clearBuild();
             return false;
         }
 
         //中键吸取方块（对应原版 PlacementFragment.gridUpdate 的 Binding.pick 分支，PlacementFragment.java:93-109：
         //按住/按下中键，把光标下的方块或建造队列里的占位方块设为当前建造方块）
-        if(button == Input.Buttons.MIDDLE){
+        if(mouseCode(button) == KeyBinds.key(Binding.pick)){
             if(Vars.world != null && Vars.player != null && !Vars.player.isDead() && !Vars.state.isPaused()
                 && Vars.hud != null && Vars.hud.placement() != null
                 && Vars.hud.placement().pickBlock(mouseWorldX(screenX), mouseWorldY(screenY))){
@@ -344,7 +347,8 @@ public class DesktopInput extends InputHandler{
             return false;
         }
 
-        if(button != Input.Buttons.LEFT) return false;
+        //左键（对应原版 Binding.select）：建造/开火等主要交互
+        if(mouseCode(button) != KeyBinds.key(Binding.select)) return false;
 
         if(isPlacing() && Vars.world != null){
             if(pasteSchematic != null){
@@ -412,7 +416,7 @@ public class DesktopInput extends InputHandler{
 
     @Override
     public boolean touchUp(int screenX, int screenY, int pointer, int button){
-        if(button == Input.Buttons.LEFT){
+        if(mouseCode(button) == KeyBinds.key(Binding.select)){
             //命令模式松开左键：结算框选/点选（对应原版 keyRelease(select) && commandRect → selectUnitsRect）
             if(commandMode && commandRect){
                 commandRect = false;
@@ -605,13 +609,10 @@ public class DesktopInput extends InputHandler{
 
     /**
      * @return 键位显示名（对应原版 {@code Core.keybinds.get(Binding).key.toString()}）。
-     * <p>本项目没有"Binding → 生效键码"查询表（Core.keybinds 未移植，无重绑定入口）
-     * → 用默认值即生效值，与 {@code PlacementFragment.defaultKey} 同口径。
+     * <p>F15 起经 {@link KeyBinds} 查生效键码（重绑后显示新键位），键名统一走 {@link KeyBinds#keyCodeName}。
      */
     private static String bindingKey(Binding binding){
-        KeyBinds.KeybindValue value = binding.defaultValue(InputDevice.DeviceType.keyboard);
-        return value instanceof KeyBinds.KeyValue
-            ? com.badlogic.gdx.Input.Keys.toString(((KeyBinds.KeyValue)value).key) : "?";
+        return KeyBinds.keyCodeName(KeyBinds.key(binding));
     }
 
     /** 全屏切换：退出全屏时恢复默认窗口尺寸。 */
@@ -659,8 +660,9 @@ public class DesktopInput extends InputHandler{
      * @return 当前 stage 上是否还有打开的对话框（对应原版 {@code Core.scene.hasDialog()}）。
      * <p>判定依据：{@code FloatingDialog.hide()} 走 {@code remove()}，从 stage 上摘掉后
      * {@code getStage()} 变成 null；遮罩是 {@code Image}（不是 {@code Dialog}），不会误判。
+     * <p>F15 起教程浮层（{@code Tutorial.draw}）也用它做"有对话框不画"判定。
      */
-    private static boolean hasDialog(){
+    public static boolean hasDialog(){
         com.badlogic.gdx.scenes.scene2d.Stage stage = com.phoenix.game.ui.dialogs.FloatingDialog.scene;
         if(stage == null) return false;
         com.badlogic.gdx.utils.Array<com.badlogic.gdx.scenes.scene2d.Actor> children = stage.getActors();
