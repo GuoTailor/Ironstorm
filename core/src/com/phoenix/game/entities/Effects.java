@@ -115,6 +115,11 @@ public class Effects{
         effect(effect, Color.WHITE, x, y, rotation, null);
     }
 
+    /** 带 data 的版本（对应 arc 的 5 参 {@code effect(effect, x, y, rotation, data)}，Fx.unitSpawn 用它传单位）。 */
+    public static void effect(Effect effect, float x, float y, float rotation, Object data){
+        effect(effect, Color.WHITE, x, y, rotation, data);
+    }
+
     public static void effect(Effect effect, Position loc){
         effect(effect, Color.WHITE, loc.getX(), loc.getY(), 0f, null);
     }

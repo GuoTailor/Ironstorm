@@ -138,6 +138,19 @@ public class BaseUnit extends SolidEntity implements TargetTrait, HealthTrait, M
         added();
     }
 
+    /**
+     * 加入场景并触发 added()（对应原版 {@code SyncTrait.add}：此刻才挂进 targetGroup 并回调 added()）。
+     * <p>本项目 {@link #init} 在 {@code type.create()} 时就直接入组了，所以正常创建路径不会走到这里；
+     * 唯一调用方是 {@code WaveSpawner.spawnEffect} —— 波次敌人"先 create、延迟数帧才 add"的
+     * 分批进场（create 后先 {@code Units.remove} 摘出，等价原版"未 add 的单位"）。
+     */
+    public void add(){
+        //防重入（对应原版 isAdded() 判定）；contains 线性扫描可接受：add 只发生在出生延迟点，不在热路径
+        if(Units.units.contains(this, true)) return;
+        Units.add(this);
+        added();
+    }
+
     public UnitType getType(){
         return type;
     }

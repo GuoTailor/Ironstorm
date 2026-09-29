@@ -7,7 +7,9 @@ import com.badlogic.gdx.graphics.Color;
 import com.phoenix.game.Vars;
 import com.phoenix.game.content.Blocks;
 import com.phoenix.game.content.Fx;
+import com.phoenix.game.core.Events;
 import com.phoenix.game.core.Tmp;
+import com.phoenix.game.game.EventType.Trigger;
 import com.phoenix.game.game.Team;
 import com.phoenix.game.math.Angles;
 import com.phoenix.game.math.Mathf;
@@ -17,8 +19,9 @@ import com.phoenix.game.world.Tile;
 import java.util.HashSet;
 
 /**
- * 最小实现：伤害/爆炸工具类。参照 Mindustry mindustry.entities.Damage 移植。
- * 只做单位范围伤害，瓦片伤害待建筑系统完善后补充。
+ * 伤害/爆炸工具类。参照 Mindustry mindustry.entities.Damage 移植。
+ * 含 4 参旧口径（无衰减）与 6 参原版口径（衰减+击退+complete 摧毁建筑）两套重载；
+ * tileDamage 传播算法与 dynamicExplosion 大件归 F6 批。
  */
 public class Damage{
 
@@ -34,6 +37,74 @@ public class Damage{
 
             unit.damage(damage);
         }
+    }
+
+    /**
+     * 对范围内敌方单位（距离衰减 + 击退）与敌方建筑（{@code complete=true} 时整块摧毁）造成伤害。
+     * 对应原版 {@code Damage.damage(Team, float, float, float, float, boolean)}（Damage.java:180）。
+     * <p>与上面 4 参旧口径并存：4 参是早期最小实现（无衰减/击退/建筑摧毁），消费方是
+     * 溅射子弹（BulletType）与闪电（Lightning）；本重载按原版结构新写，消费方是
+     * 波次开场的空投区清场（WaveSpawner.spawnEnemies）。
+     * <p>{@code complete=true} 时对范围内敌方建筑调 {@code TileEntity.handleDamage}（等价原版
+     * {@code tile.entity.damage}）；{@code complete=false} 的 tileDamage 传播算法归 F6 批，此处留 TODO。
+     */
+    public static void damage(Team team, float x, float y, float radius, float damage, boolean complete){
+        java.util.function.Consumer<BaseUnit> cons = entity -> {
+            if(entity.getTeam() == team || entity.dst(x, y) > radius){
+                return;
+            }
+            float amount = calculateDamage(x, y, entity.getX(), entity.getY(), radius, damage);
+            entity.damage(amount);
+            //击退（原版 TODO 注释保留：TODO better velocity displacement）
+            float dst = Tmp.v1.set(entity.getX() - x, entity.getY() - y).len();
+            entity.velocity().add(Tmp.v1.setLength((1f - dst / radius) * 2f / entity.mass()));
+
+            //玩家被"排除区清场"级别的伤害波及致死 → 广播事件（原版给 mod/重生逻辑用的钩子；126.2 里只有 fire 没有内置监听者）
+            //⚠ 本项目 Player 不是 BaseUnit 子类，"玩家实体"等价物是玩家当前控制的单位
+            if(complete && damage >= 9999999f && Vars.player != null && entity == Vars.player.unit()){
+                Events.fire(Trigger.exclusionDeath);
+            }
+        };
+
+        //rect.setSize(radius * 2).setCenter(x, y) 的矩形粗筛 + cons 里的圆形精筛，口径与原版一致
+        if(team != null){
+            Units.nearbyEnemies(team, x - radius, y - radius, radius * 2f, radius * 2f, cons);
+        }else{
+            Units.nearby(x - radius, y - radius, radius * 2f, radius * 2f, cons);
+        }
+
+        if(!complete){
+            //TODO F6 批：原版这里走 tileDamage(team, tile.x, tile.y, trad, damage) 的伤害传播算法，尚未移植；当前只伤单位不动瓦片
+        }else{
+            completeDamage(team, x, y, radius, damage);
+        }
+    }
+
+    /**
+     * 摧毁范围内敌方建筑（对应原版 {@code Damage.completeDamage}，Damage.java:257）。
+     * 波次开场用它清空投区里玩家堵门的建筑/炮塔（{@code 99999999f} 一击必拆）。
+     */
+    private static void completeDamage(Team team, float x, float y, float radius, float damage){
+        if(Vars.world == null) return;
+
+        int trad = (int)(radius / Vars.tilesize);
+        for(int dx = -trad; dx <= trad; dx++){
+            for(int dy = -trad; dy <= trad; dy++){
+                Tile tile = Vars.world.tile(Math.round(x / Vars.tilesize) + dx, Math.round(y / Vars.tilesize) + dy);
+                if(tile != null && tile.entity != null && (team == null || team.isEnemy(tile.getTeam())) && Mathf.dst(dx, dy) <= trad){
+                    //本项目 TileEntity.handleDamage 即原版 TileEntity.damage（含血量归零销毁）
+                    tile.entity.handleDamage(damage);
+                }
+            }
+        }
+    }
+
+    /** 距离衰减（对应原版 {@code Damage.calculateDamage}，Damage.java:269）：中心全额、边缘打 6 折。 */
+    private static float calculateDamage(float x, float y, float tx, float ty, float radius, float damage){
+        float dist = Mathf.dst(x, y, tx, ty);
+        float falloff = 0.4f;
+        float scaled = Mathf.lerp(1f - dist / radius, 1f, falloff);
+        return damage * scaled;
     }
 
     /** 对区域内所有单位造成伤害（不分敌我）。 */
