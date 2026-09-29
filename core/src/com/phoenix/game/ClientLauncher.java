@@ -181,6 +181,9 @@ public class ClientLauncher extends ApplicationAdapter {
             Fonts.def.getData().markupEnabled = true;
             Fonts.def.setOwnsTexture(false);
             Styles.load();
+            //字体图标码点表（icons/icons.properties → Fonts.unicodeIcons，DatabaseDialog 复制彩蛋的数据源；
+            //对应原版 UI 初始化里的 Fonts.loadContentIcons()）
+            Fonts.loadContentIcons();
             menufrag.build(table);
             hudfrag = new HudFragment();
             Vars.hud = hudfrag;
@@ -2849,6 +2852,8 @@ public class ClientLauncher extends ApplicationAdapter {
         renderer.pixelator.dispose();
         //方块落影/地图变暗两张全图缓冲同理
         renderer.blocks.dispose();
+        //bloom 后处理（no-op 实现无资源，仅为生命周期对齐——见 graphics/Bloom 类注释）
+        renderer.disposeBloom();
         //蓝图预览图是运行时 new 的 FrameBuffer，也要显式释放
         if(Vars.schematics != null) Vars.schematics.disposePreviews();
         batch.dispose();

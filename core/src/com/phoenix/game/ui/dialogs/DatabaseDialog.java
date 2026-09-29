@@ -11,6 +11,7 @@ import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.badlogic.gdx.utils.Array;
 import com.phoenix.game.Vars;
 import com.phoenix.game.core.Core;
+import com.phoenix.game.core.Fonts;
 import com.phoenix.game.core.Scl;
 import com.phoenix.game.ctype.Content;
 import com.phoenix.game.ctype.ContentType;
@@ -36,8 +37,10 @@ import io.anuke.mindustry.gen.Tex;
  *   <li>刻意降级 {@code Icon.lockOpen}：本项目图集里没有该图标（只有 {@code Icon.locked}）→ 用 {@code Icon.locked} 代替。</li>
  *   <li>刻意降级 {@code image.update(Runnable)}（arc 的每帧回调）libgdx 没有 → 悬停高亮直接去掉。</li>
  *   <li>刻意降级 {@code new HandCursorListener()} / {@code new Tooltip(...)}（arc 的鼠标手型与提示气泡）未移植 → 跳过。</li>
- *   <li>TODO {@code Fonts.getUnicode(name)}（本项目 {@code core/Fonts} 没有该方法）→ SHIFT+点击复制
- *       "名字首字符" 的分支降级为复制 {@code localizedName}。</li>
+ *   <li><b>F18 已补 {@code Fonts.getUnicode}</b>（{@code icons/icons.properties} →
+ *       {@code Fonts.unicodeIcons}）→ SHIFT+点击复制图标字符的分支已照原版接线；
+ *       注意本项目没有 icon 字体（原版 {@code fonts/icon.ttf}），复制出的是码点字符本身、
+ *       聊天框里不会渲染成图标 —— 数据与复制行为与原版一致，字体渲染那半边不在本项目。</li>
  *   <li><b>{@code Vars.ui} 门面已接线</b>：{@code Vars.ui.content}（{@code ContentInfoDialog}）与
  *       {@code UI.showInfoFade} 都存在 → {@code $copied} 提示与内容详情都走真实门面
  *       （{@code ContentInfoDialog.show} 多一个 Stage 参数，从 {@code getStage()} 取）。</li>
@@ -139,14 +142,14 @@ public class DatabaseDialog extends FloatingDialog{
                     image.addListener(new ClickListener(){
                         @Override
                         public void clicked(InputEvent event, float x, float y){
-                            //TODO 原版：if(Core.input.keyDown(KeyCode.SHIFT_LEFT) && Fonts.getUnicode(unlock.name) != 0)
-                            //      → 复制名字首字符并提示 "$copied"
-                            //  —— core/Fonts 没有 getUnicode（B）→ 复制整个 localizedName 顶替
+                            //原版：if(Core.input.keyDown(KeyCode.SHIFT_LEFT) && Fonts.getUnicode(unlock.name) != 0)
+                            //      → 复制图标字符并提示 "$copied"（F18 已补 Fonts.getUnicode：
+                            //        icons/icons.properties → Fonts.unicodeIcons）
                             //Core.input 没有 keyDown(int) → 用 libgdx 的 Gdx.input.isKeyPressed
                             //（KeyCode.SHIFT_LEFT 就等于 Input.Keys.SHIFT_LEFT，见 KeyCode 类注释）
-                            if(Gdx.input.isKeyPressed(KeyCode.SHIFT_LEFT)){
+                            if(Gdx.input.isKeyPressed(KeyCode.SHIFT_LEFT) && Fonts.getUnicode(unlock.name) != 0){
                                 //libgdx 的 Application 没有 setClipboardText → 用 Gdx.app.getClipboard()
-                                Gdx.app.getClipboard().setContents(unlock.localizedName);
+                                Gdx.app.getClipboard().setContents((char)Fonts.getUnicode(unlock.name) + "");
                                 //原版 ui.showInfoFade("$copied")：Vars.ui 门面已存在（判空）
                                 if(Vars.ui != null){
                                     Vars.ui.showInfoFade("$copied");

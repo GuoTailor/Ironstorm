@@ -45,10 +45,14 @@ import java.util.zip.InflaterInputStream;
  *       （菜单/headless 未建世界时）。</li>
  *   <li><b>不改任何既有方法签名</b>：{@link #colorFor(Block, Block, Block, Team)} 保持原样，
  *       本类仍是"无状态工具类"，只是多了一个实例方法，调用方 {@code new MapIO()} 即可当 provider 用。</li>
- *   <li>TODO：原版「载入地图时逐个滤镜改写瓦片」的循环在 {@code World.FilterContext.end()} 里
- *       （{@code input.begin(filter, width(), height(), (x,y) -> tiles[x][y])} + 双层循环 apply）。
- *       本项目 {@code World} 还没有对应实现（已 grep 确认无 {@code FilterContext}）→
- *       {@code GenerateInput.begin(...)} 目前**没有调用点**，本类只是把 provider 这一半补齐。</li>
+ *   <li><b>F18 追加：滤镜应用链已闭环</b> —— 原版「载入地图时逐个滤镜改写瓦片」的循环在
+ *       {@code World.FilterContext.end()} 里（{@code input.begin(filter, width(), height(), (x,y) -> tiles[x][y])}
+ *       + 双层循环 apply）。现已照原版移进 {@link com.phoenix.game.core.World#applyFilters}（本项目
+ *       {@code SaveIO} 是自有 PHNX 格式、无 WorldContext 钩子 → 拆成显式方法），由 {@code Maps.loadMap}
+ *       （游玩加载，对应原版 {@code World.loadMap} 的消费点）在 {@code SaveIO.load} 成功后调用；
+ *       编辑器路径（{@code MapEditor.beginEdit}）照原版语义不应用滤镜。
+ *       本类的 {@link #get(int, int)} 仍是「按坐标取当前世界的瓦片」的统一 TileProvider 入口
+ *       （编辑器 {@code MapGenerateDialog} 的交互式滤镜应用也在用它）。</li>
  * </ul>
  *
  * <p><b>F14 追加：地图缩略图生成</b> —— {@link #generatePreview(Map)}（离线读存档文件，不解世界）与

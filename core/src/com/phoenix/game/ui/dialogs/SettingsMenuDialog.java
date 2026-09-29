@@ -41,8 +41,9 @@ import io.anuke.mindustry.gen.Tex;
  *       整体打包/覆盖有删光资源的风险 → 导出/导入两个按钮只记日志。</li>
  *   <li>已接线 原版 {@code Core.app.openFolder(...)}：libgdx 的 {@code Application} 没有该方法 →
  *       等价替代 {@code Gdx.net.openURI(file URI)}（见 {@link #buildDataDialog()}）。</li>
- *   <li>TODO {@code renderer.toggleBloom(val)}：本项目 {@code core/Renderer} 没有 bloom 后处理管线
- *       （无 {@code bloom}/{@code toggleBloom}）→ bloom 复选框只存值（画面不变）。</li>
+ *   <li>F18 已接线 {@code renderer.toggleBloom(val)}：{@code core/Renderer} 已补
+ *       {@code bloom}/{@code toggleBloom} 与帧内 capture/render 挂接；⚠ 管线本体是 no-op 降级
+ *       （{@code graphics/Bloom} 类注释）→ 开关链路通了、画面暂不变化。</li>
  *   <li>已接线 原版教程重试按钮（{@code "$tutorial.retake"} → {@code control.playTutorial()}）：{@code Zones}/
  *       {@code Generator} 与 {@link com.phoenix.game.core.Control#playTutorial()} 均已就绪（T17），
  *       按钮在 {@link #addSettings()} 里注册（bundle 键 {@code tutorial.retake} 中英均已存在）。</li>
@@ -177,8 +178,8 @@ public class SettingsMenuDialog extends FloatingDialog{
         //     本项目 Build.canPlace 只处理"同方块换朝向"（replaceSame，与该设置无关）
         game.checkPref("blockreplace", true);
         game.checkPref("conveyorpathfinding", true);
-        //TODO 原版：Schematics 保存蓝图时用它决定是否把核心写进蓝图；
-        //     本项目蓝图保存未接该判据 → 只存值
+        //F18 已接线 原版：Schematics.create 保存蓝图时用它决定是否把核心写进蓝图（Schematics.java 的
+        //     收集判据 `isVisible() || (CoreBlock && coreselect)`）→ 只存值 → 真实消费
         game.checkPref("coreselect", false);
         //消费方不存在：原版 DesktopInput 的放置提示层未移植（用它显隐操作提示文字）
         game.checkPref("hints", true);
@@ -286,7 +287,10 @@ public class SettingsMenuDialog extends FloatingDialog{
         }
         if(!Vars.ios){
             graphics.checkPref("bloom", !Vars.mobile, val -> {
-                //TODO 原版：renderer.toggleBloom(val)（本项目 core/Renderer 没有 bloom/toggleBloom）→ 只存值，画面不变
+                //F18 已接线：调 Renderer.toggleBloom 建/弃 bloom 实例（对应原版 renderer.toggleBloom(val)）。
+                //⚠ 管线本体当前是 no-op 降级（graphics/Bloom 类注释：libgdx 无现成等价物、完整 shader
+                //  管线未移植）→ 开关链路已通、画面暂不变化
+                if(Vars.renderer != null) Vars.renderer.toggleBloom(val);
             });
         }else{
             Core.settings.put("bloom", false);

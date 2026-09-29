@@ -418,6 +418,49 @@ public class World {
         this.generating = generating;
     }
 
+    /**
+     * 载入地图后应用其生成滤镜（对应原版 {@code World.FilterContext.end()}，原版 World.java:442-486；
+     * 原版是 {@code loadMap} 里 {@code SaveIO.load(map.file, new FilterContext(map))} 在读档收尾时触发，
+     * 本项目 {@code SaveIO} 是自有 PHNX 格式、无 WorldContext 钩子 → 拆成显式方法，
+     * 由 {@code Maps.loadMap}（对应原版 {@code World.loadMap(Map, Rules)} 的加载段）在 {@code SaveIO.load}
+     * 成功后调用；编辑器路径（{@code MapEditor.beginEdit}）照原版语义**不应用**滤镜
+     * （原版编辑器走的是无 context 的 {@code SaveIO.load(map.file)}）。
+     * <p>循环体照原版逐字：对每个滤镜 {@code input.begin(...)} 后，双层循环把每格的
+     * floor/block/overlay 喂给 {@code filter.apply}，再把输出写回瓦片
+     * （floor/overlay 无条件写；block 仅在"原方块与新方块都不是合成建筑"时写，
+     * 避免滤镜把核心/炮塔这类玩家建筑抹掉）。
+     * <p>⚠ 与原版 {@code tile.block()} 对应的是本项目 {@link Tile#blockRaw()}——原版 {@code block()}
+     * 就是原始值，本项目 {@code block()} 会解析多格链接。
+     */
+    public void applyFilters(com.phoenix.game.maps.Map map){
+        com.phoenix.game.struct.Array<com.phoenix.game.maps.filters.GenerateFilter> filters = map.filters();
+        if(filters.size == 0) return;
+
+        com.phoenix.game.maps.filters.GenerateFilter.GenerateInput input =
+            new com.phoenix.game.maps.filters.GenerateFilter.GenerateInput();
+
+        for(int f = 0; f < filters.size; f++){
+            com.phoenix.game.maps.filters.GenerateFilter filter = filters.get(f);
+            input.begin(filter, width(), height(), this::rawTile);
+
+            //actually apply the filter（热路径：下标循环）
+            for(int x = 0; x < width(); x++){
+                for(int y = 0; y < height(); y++){
+                    Tile tile = rawTile(x, y);
+                    input.apply(x, y, tile.floor(), tile.blockRaw(), tile.overlay());
+                    filter.apply(input);
+
+                    tile.setFloor((Floor)input.floor);
+                    tile.setOverlay(input.ore);
+
+                    if(!tile.blockRaw().synthetic() && !input.block.synthetic()){
+                        tile.setBlock(input.block);
+                    }
+                }
+            }
+        }
+    }
+
     /** 更新所有带实体的瓦片。 */
     public void updateTiles(){
         updatePower();

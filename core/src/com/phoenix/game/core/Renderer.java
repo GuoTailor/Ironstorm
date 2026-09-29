@@ -109,6 +109,21 @@ public class Renderer {
      */
     private FrameBuffer shieldBuffer;
 
+    /**
+     * bloom 后处理管线（对应原版 {@code Renderer.bloom}，原版是 arc 的 {@code arc.graphics.g2d.Bloom}）。
+     * <p><b>F18 刻意降级</b>：libgdx 无现成等价物（gdx-vfx 是第三方依赖、禁引入），完整 shader 管线
+     * 移植量过大 → 本体是 no-op 空实现（见 {@link com.phoenix.game.graphics.Bloom} 类注释，内含真实现
+     * 步骤清单）。挂接链路已全通：设置项回调 → {@link #toggleBloom(boolean)} → 帧内 capture/render
+     * 两个调用点，真实现落地后调用方零改动。
+     */
+    private com.phoenix.game.graphics.Bloom bloom;
+    /**
+     * bloom 设置的一次性读取标记：对应原版 {@code Renderer.init()} 里的
+     * {@code if(settings.getBool("bloom")) setupBloom()}；本项目 Renderer 没有 init 钩子 →
+     * 在 {@link #draw()} 首帧懒做一次。
+     */
+    private boolean bloomChecked;
+
     /** 本帧收集到的"有可见护盾"的方块瓦片（对应原版 {@code shieldGroup} 的可见集，见 {@link #drawShields}）。 */
     private final Array<Tile> shieldTiles = new Array<>();
 
@@ -310,6 +325,12 @@ public class Renderer {
 
         initScale();
 
+        //bloom 初始化（对应原版 Renderer.init() 的 `if(settings.getBool("bloom")) setupBloom()`，首帧懒做）
+        if(!bloomChecked){
+            bloomChecked = true;
+            if(Core.settings.getBool("bloom")) setupBloom();
+        }
+
         float ox = 0f, oy = 0f;
         if(Effects.shakeTime > 0f){
             //震屏强度乘设置 screenshake（滑块 0~8，默认 4 → 设置值 4 即 1x）：对应原版 Renderer.updateShake 的
@@ -345,11 +366,23 @@ public class Renderer {
         //飞行单位的投影（对应原版 Renderer.draw 里的 `drawFlyerShadows()`）
         drawFlyerShadows();
         drawUnits();
+        //bloom 捕获开始（对应原版 Renderer.java:273-275 的 `Draw.flush(); if(bloom != null) bloom.capture();`）：
+        //此后的子弹/特效层是泛光源；地形/单位层不参与（no-op 实现下是空操作）
+        Draw.flush();
+        if(bloom != null){
+            bloom.capture();
+        }
         drawBullets();
         //特效实体组（对应原版 Renderer.draw 里的 `bulletGroup.draw(); effectGroup.draw();`）：
         //"物品飞向目标"的传输动画（ItemTransfer）就画在这里
         if(Vars.effectGroup != null){
             Vars.effectGroup.draw();
+        }
+        //bloom 合成（对应原版 Renderer.java:280-283 的 `Draw.flush(); if(bloom != null) bloom.render();`，
+        //原版排在 effectGroup 之后、overlays.drawBottom 之前；no-op 实现下是空操作）
+        Draw.flush();
+        if(bloom != null){
+            bloom.render();
         }
         drawPowerLinks(world);
         drawHealthBars(world);
@@ -407,6 +440,57 @@ public class Renderer {
 
         Core.camera.position.sub(ox, oy, 0f);
         Core.camera.update();
+    }
+
+    /**
+     * 初始化 bloom 管线（对应原版 {@code Renderer.setupBloom}，原版 Renderer.java:174-190）：
+     * 先弃旧实例再建新的，失败时回写设置并提示（原版 {@code settings.put("bloom", false)} +
+     * {@code ui.showErrorMessage("$error.bloom")}）。
+     * <p>当前 {@link com.phoenix.game.graphics.Bloom} 是 no-op 降级（不抛异常、不建 GPU 资源），
+     * 本方法只是让"开关 → 实例化"的链路真实存在。
+     */
+    void setupBloom(){
+        try{
+            if(bloom != null){
+                bloom.dispose();
+                bloom = null;
+            }
+            bloom = new com.phoenix.game.graphics.Bloom(true);
+            bloom.setClearColor(0f, 0f, 0f, 0f);
+        }catch(Exception e){
+            e.printStackTrace();
+            Core.settings.put("bloom", false);
+            Core.settings.save();
+            if(Vars.ui != null) Vars.ui.showErrorMessage("$error.bloom");
+        }
+    }
+
+    /**
+     * 开关 bloom（对应原版 {@code Renderer.toggleBloom}，原版 Renderer.java:191-202）。
+     * 设置菜单的 bloom 复选框回调实时调它；开启时若无实例则建、关闭时弃掉实例。
+     */
+    public void toggleBloom(boolean enabled){
+        if(enabled){
+            if(bloom == null){
+                setupBloom();
+            }
+        }else{
+            if(bloom != null){
+                bloom.dispose();
+                bloom = null;
+            }
+        }
+    }
+
+    /**
+     * 释放 bloom 资源（对应原版 {@code Renderer.dispose} 里的 {@code bloom.dispose()}）；
+     * 由 {@code ClientLauncher.dispose} 调用。no-op 实现下无资源，仅为生命周期对齐。
+     */
+    public void disposeBloom(){
+        if(bloom != null){
+            bloom.dispose();
+            bloom = null;
+        }
     }
 
     /**

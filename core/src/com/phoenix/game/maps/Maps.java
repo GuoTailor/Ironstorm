@@ -128,6 +128,9 @@ public class Maps {
     public boolean loadMap(Map map){
         try{
             SaveIO.load(map.file);
+            //应用地图自带生成滤镜（对应原版 World.loadMap 里 FilterContext.end() 的双层循环；
+            //F18 补齐——此前带 genfilters 标签的地图载入时滤镜不生效）
+            if(Vars.world != null) Vars.world.applyFilters(map);
             System.out.println("已加载地图 " + map.name);
             return true;
         }catch(IOException e){

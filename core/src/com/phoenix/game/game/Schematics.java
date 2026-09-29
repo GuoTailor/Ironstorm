@@ -7,6 +7,7 @@ import com.badlogic.gdx.utils.IntMap;
 import com.badlogic.gdx.utils.ObjectMap;
 import com.phoenix.game.Vars;
 import com.phoenix.game.content.Blocks;
+import com.phoenix.game.core.Core;
 import com.phoenix.game.world.Block;
 import com.phoenix.game.world.BuildRequest;
 import com.phoenix.game.world.Pos;
@@ -198,6 +199,12 @@ public class Schematics{
                 if(block == null || block == Blocks.air) continue;
                 //在建占位方块不算建筑；卫星格由 link() 归到中心格，不会重复
                 if(block instanceof BuildBlock) continue;
+
+                //可见性判据（对应原版 Schematics.java:347 的
+                //`tile.entity.block.isVisible() || (tile.entity.block instanceof CoreBlock && Core.settings.getBool("coreselect"))`）：
+                //只抓建造栏可见的方块；核心默认 buildVisibility=hidden（不可见）→ 默认不进蓝图，
+                //勾选设置里的"允许蓝图包含核心"（coreselect）后才写入（F18 补齐，此前核心无条件进蓝图）
+                if(!(block.isVisible() || (block instanceof CoreBlock && Core.settings.getBool("coreselect")))) continue;
 
                 int config = tile.entity.config();
                 if(block.posConfig && config >= 0){
