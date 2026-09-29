@@ -1,14 +1,26 @@
 package com.phoenix.game.entities.units;
 
+import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.utils.Array;
+import com.phoenix.game.Vars;
 import com.phoenix.game.core.Time;
+import com.phoenix.game.core.Tmp;
+import com.phoenix.game.entities.traits.Saveable;
 import com.phoenix.game.entities.type.BaseUnit;
+import com.phoenix.game.ctype.ContentType;
 import com.phoenix.game.type.StatusEffect;
+
+import java.io.DataInput;
+import java.io.DataOutput;
+import java.io.IOException;
 
 /**
  * 最小实现：单位状态效果容器。参照 Mindustry mindustry.entities.units.Statuses 移植。
+ * <p>状态色混合 {@link #getStatusColor()}（原版 Statuses.java:61-73）与存档序列化
+ * {@link #writeSave}/{@link #readSave}（原版 Statuses.java:123-148，任务书里写的 StatusComp
+ * 在 Build 126.2 里不存在，状态逻辑都集中在 Statuses）已补齐。
  */
-public class Statuses{
+public class Statuses implements Saveable{
     /** 最多同时存在的状态数量 */
     public static final int maxEffects = 8;
 
@@ -65,6 +77,27 @@ public class Statuses{
         effect.applied(unit);
     }
 
+    /**
+     * 状态色混合（对应原版 {@code Statuses.getStatusColor()}，mindustry/entities/units/Statuses.java:61-73）：
+     * 把所有激活状态的 {@code effect.color} 的 r/g/b **取简单平均**（原版并没有按剩余时间加权），
+     * 无状态时返回白色。供单位绘制染色用。
+     * <p>单位绘制时可能嵌套在渲染迭代里（热路径约束）→ 用下标循环。
+     */
+    public Color getStatusColor(){
+        if(effects.size == 0){
+            return Tmp.c1.set(Color.WHITE);
+        }
+
+        float r = 0f, g = 0f, b = 0f;
+        for(int i = 0; i < effects.size; i++){
+            StatusEntry entry = effects.get(i);
+            r += entry.effect.color.r;
+            g += entry.effect.color.g;
+            b += entry.effect.color.b;
+        }
+        return Tmp.c1.set(r / effects.size, g / effects.size, b / effects.size, 1f);
+    }
+
     public boolean hasEffect(StatusEffect effect){
         return hasEffect(effect, 0f);
     }
@@ -102,5 +135,39 @@ public class Statuses{
 
     public Array<StatusEntry> all(){
         return effects;
+    }
+
+    /**
+     * 状态列表存档（对应原版 {@code Statuses.writeSave}，mindustry/entities/units/Statuses.java:123-130）：
+     * {@code byte 数量} + 每项 {@code byte effect.id + float time}。
+     * <p>effect.id 是 {@code ContentType.status} 的注册序（本项目 {@code Content.id} 为 short，
+     * 状态数远小于 128，窄化到 byte 与原版一致）。调用点：{@code io/SaveIO.writeEntities}（v6 起单位记录末尾）。
+     */
+    @Override
+    public void writeSave(DataOutput stream) throws IOException{
+        stream.writeByte(effects.size);
+        for(int i = 0; i < effects.size; i++){
+            StatusEntry entry = effects.get(i);
+            stream.writeByte(entry.effect.id);
+            stream.writeFloat(entry.time);
+        }
+    }
+
+    /**
+     * 状态列表读档（对应原版 {@code Statuses.readSave}，mindustry/entities/units/Statuses.java:132-148）。
+     * <p>两处刻意偏离：① 原版条目走 {@code Pools}（free/obtain），本项目 StatusEntry 无池化 → 直接
+     * {@code clear()} + {@code new}；② 原版 {@code content.getByID(...)} 无 null 守卫（坏 id 会往列表里塞
+     * null，之后在 update 里 NPE），本项目 {@code ContentLoader.getByID} 越界同样返回 null → 保持原行为不守卫。
+     */
+    @Override
+    public void readSave(DataInput stream, byte version) throws IOException{
+        effects.clear();
+
+        byte amount = stream.readByte();
+        for(int i = 0; i < amount; i++){
+            byte id = stream.readByte();
+            float time = stream.readFloat();
+            effects.add(new StatusEntry().set(Vars.content.getByID(ContentType.status, id), time));
+        }
     }
 }

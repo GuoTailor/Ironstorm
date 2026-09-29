@@ -79,11 +79,14 @@ public class SaveIO{
      * （v2 档读到这里会报"不支持的存档版本"）。
      * <p>v4：实体区给每个非玩家单位追加**载物背包**（item/amount），并在末尾追加**玩家背包**记录
      * （玩家单位被刻意跳过、由 {@code Control.enterWorld} 重建，见 {@link #writeEntities}）→ **不兼容 v3 旧档**。
-     * <p>v5（本批）：队伍段给每队追加**被摧毁可重建方块队列** {@code Teams.brokenBlocks}
+     * <p>v5：队伍段给每队追加**被摧毁可重建方块队列** {@code Teams.brokenBlocks}
      * （对应原版 {@code Teams.TeamData.brokenBlocks}，由 {@code Control} 的监听器维护、
      * 由 {@code Renderer.drawDestroyed()} 绘制重建幽灵轮廓、由 {@code BuilderDrone} 消费自动重建）
-     * → **不兼容 v4 旧档**。 */
-    public static final int version = 5;
+     * → **不兼容 v4 旧档**。
+     * <p>v6（本批 F9）：单位记录末尾追加**状态效果列表**（对应原版 {@code Statuses.writeSave/readSave}：
+     * {@code byte 数量} + 每项 {@code byte effect.id + float time}，id 为 {@code ContentType.status} 注册序；
+     * 玩家单位本来就被跳过、不写状态）→ **不兼容 v5 旧档**。 */
+    public static final int version = 6;
     /** 单个区块的长度上限（防损坏文件导致 OOM）。 */
     private static final int maxChunkLength = 64 * 1024 * 1024;
 
@@ -420,6 +423,9 @@ public class SaveIO{
             //v4：单位载物背包（对应原版 Unit.write 里的 item）
             out.writeShort(unit.item == null ? -1 : Items.all.indexOf(unit.item, true));
             out.writeInt(unit.itemAmount);
+            //v6：状态效果列表（对应原版 Unit.writeSave 末尾的 status.writeSave，
+            //    见 entities/units/Statuses：byte 数量 + 每项 byte effect.id + float time）
+            unit.status().writeSave(out);
         }
 
         //v4：玩家背包。
@@ -711,7 +717,17 @@ public class SaveIO{
             int itemAmount = in.readInt();
 
             UnitType type = typeIndex < unitTable.size ? unitTable.get(typeIndex) : null;
-            if(type == null) continue;
+
+            //v6：状态效果块（变长：byte 数量 + 每项 byte effect.id + float time）。同样必须在
+            //    type == null 的 continue 之前消费掉，否则流会错位 → 该分支按相同格式空读跳过。
+            if(type == null){
+                int statusCount = in.readUnsignedByte();
+                for(int j = 0; j < statusCount; j++){
+                    in.readByte();  //effect.id（ContentType.status 注册序）
+                    in.readFloat(); //剩余时长
+                }
+                continue;
+            }
 
             BaseUnit unit = type.create();
             unit.setTeam(Team.get(teamId));
@@ -722,6 +738,9 @@ public class SaveIO{
             if(itemIndex >= 0 && itemIndex < Items.all.size){
                 unit.addItem(Items.all.get(itemIndex), itemAmount);
             }
+            //v6：状态效果（对应原版 Unit.readSave 的 this.status.readSave(stream, version)；
+            //    type.create() 新建单位的 status 为空，readSave 内部先 clear 再读，直接委托）
+            unit.status().readSave(in, (byte)version);
         }
 
         //v4：玩家背包（暂存，等 Control.load 在 enterWorld 重建玩家后套用）
