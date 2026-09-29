@@ -14,6 +14,8 @@ import com.badlogic.gdx.utils.Array;
 import com.phoenix.game.content.Items;
 import com.phoenix.game.core.Core;
 import com.phoenix.game.core.Draw;
+import com.phoenix.game.core.Lines;
+import com.phoenix.game.graphics.Pal;
 import com.phoenix.game.entities.type.TileEntity;
 import com.phoenix.game.math.Mathf;
 import com.phoenix.game.type.Item;
@@ -694,6 +696,23 @@ public class Block extends com.phoenix.game.ctype.UnlockableContent {
      * @param tile 本方块所在瓦片
      */
     public void drawSelect(Tile tile){
+    }
+
+    /**
+     * 配置面板打开时绘制本方块的配置叠加（对应原版 {@code Block.drawConfigure(Tile)}，Block.java:520-525）：
+     * 默认画一圈 accent 色描边方框；由具体方块覆写（物品桥/质量驱动器/电力节点会叠加连线范围等）。
+     * <p>调用点：{@code Renderer.draw()} 在 {@code input.drawTop()} 之前对
+     * {@code input.configTile}（配置面板正打开的瓦片）调用（对应原版 OverlayRenderer.drawTop 的
+     * {@code if(input.frag.config.isShown()) tile.block().drawConfigure(tile)}）。
+     * <p>⚠ 坐标口径：原版 {@code tile.drawx()} 就是贴图中心；本项目那是"左下角 + offset()"
+     * → 用 {@link #centerX}/{@link #centerY}。
+     */
+    public void drawConfigure(Tile tile){
+        Draw.color(Pal.accent);
+        Lines.stroke(1f);
+        Lines.square(centerX(tile), centerY(tile), size * tilesize / 2f + 1f);
+        Draw.color();
+        Lines.stroke(1f);
     }
 
     /** @return 是否向相邻建筑输出物品（对应原版 Block.outputsItems），传送带贴图拼接会用到。 */

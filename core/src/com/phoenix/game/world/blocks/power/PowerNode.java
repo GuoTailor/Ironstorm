@@ -2,9 +2,13 @@ package com.phoenix.game.world.blocks.power;
 
 import com.badlogic.gdx.utils.Array;
 import com.phoenix.game.Vars;
+import com.phoenix.game.core.Draw;
 import com.phoenix.game.core.Drawf;
+import com.phoenix.game.core.Lines;
+import com.phoenix.game.core.Time;
 import com.phoenix.game.entities.type.TileEntity;
 import com.phoenix.game.graphics.Pal;
+import com.phoenix.game.math.Mathf;
 import com.phoenix.game.world.Block;
 import com.phoenix.game.world.blocks.PowerBlock;
 import com.phoenix.game.world.meta.BlockStat;
@@ -95,6 +99,52 @@ public class PowerNode extends PowerBlock{
                     other.block().size * tilesize / 2f + 2f, Pal.place);
             }
         }
+    }
+
+    /**
+     * 配置叠加（对应原版 {@code PowerNode.drawConfigure}，PowerNode.java:214-240）：
+     * 本体呼吸圆圈 + 激光连线范围圈 + 范围内**已连上**的其他节点画 place 色方框。
+     * <p><b>与原版的差异（判据等价替换）</b>：原版用 {@code linkValid(tile, link, false)} +
+     * {@code linked(tile, link)}；本项目节点连接 = "同队节点 + laserRange 内"（见
+     * {@link #getPowerConnections}），linked 用 {@code NodeEntity.links}（每帧缓存）判。
+     * 坐标口径同 {@link #drawSelect(Tile)}：中心 = centerX/centerY。
+     */
+    @Override
+    public void drawConfigure(Tile tile){
+        Tile anchor = tile.link();
+        if(!(anchor.entity instanceof NodeEntity)) return;
+        NodeEntity entity = (NodeEntity)anchor.entity;
+
+        Draw.color(Pal.accent);
+
+        Lines.stroke(1.5f);
+        Lines.circle(centerX(anchor), centerY(anchor),
+            size * tilesize / 2f + 1f + Mathf.absin(Time.time(), 4f, 1f));
+
+        Drawf.circles(centerX(anchor), centerY(anchor), laserRange * tilesize);
+
+        Lines.stroke(1.5f);
+
+        int r = (int)laserRange + 2;
+        for(int x = anchor.x - r; x <= anchor.x + r; x++){
+            for(int y = anchor.y - r; y <= anchor.y + r; y++){
+                Tile link = Vars.world == null ? null : Vars.world.tile(x, y);
+
+                if(link == null || link == anchor) continue;
+                if(!(link.block() instanceof PowerNode) || link.getTeam() != anchor.getTeam()) continue;
+                //范围内（linkValid(tile, link, false) 的本项目等价判据）
+                int dx = anchor.x - link.x, dy = anchor.y - link.y;
+                if((float)(dx * dx + dy * dy) > laserRange * laserRange) continue;
+
+                if(entity.links.contains(link, true)){
+                    Drawf.square(link.block().centerX(link), link.block().centerY(link),
+                        link.block().size * tilesize / 2f + 1f, Pal.place);
+                }
+            }
+        }
+
+        Draw.color();
+        Lines.stroke(1f);
     }
 
     /** 连线候选：范围内的其他节点，按距离近的优先，取前 {@link #maxLinks} 个。 */

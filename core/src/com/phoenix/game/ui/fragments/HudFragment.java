@@ -2,6 +2,7 @@ package com.phoenix.game.ui.fragments;
 
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.scenes.scene2d.ui.Button;
+import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.WidgetGroup;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
@@ -13,6 +14,7 @@ import com.phoenix.game.game.Team;
 import com.phoenix.game.input.InputHandler;
 import com.phoenix.game.ui.Label;
 import com.phoenix.game.ui.Styles;
+import com.phoenix.game.ui.dialogs.FloatingDialog;
 import com.phoenix.game.world.meta.BlockFlag;
 import com.phoenix.game.world.Tile;
 import io.anuke.mindustry.gen.Icon;
@@ -48,6 +50,15 @@ public class HudFragment extends Fragment{
     public final BlockInventoryFragment inv = new BlockInventoryFragment();
     private final MinimapFragment minimapFragment = new MinimapFragment();
     private boolean menusShown = true;
+
+    // ---- 解锁提示（对应原版 HudFragment.lastUnlockTable/lastUnlockLayout/lastToast）----
+
+    /** 上一次解锁提示的外层容器；非 null 表示当前有一条解锁 toast 还在展示。 */
+    private Table lastUnlockTable;
+    /** 上一次解锁提示的图标叠放区（连续解锁把图标堆进同一个 toast）。 */
+    private Table lastUnlockLayout;
+    /** 上一次 toast 弹出的时间戳（scheduleToast 排队用）。 */
+    private long lastToast;
 
     public HudFragment(){
     }
@@ -201,6 +212,15 @@ public class HudFragment extends Fragment{
         overlay.setTouchable(com.badlogic.gdx.scenes.scene2d.Touchable.childrenOnly);
         group.addActor(overlay);
         inv.build(overlay);
+
+        //桌面端：底部建造提示条（对应原版 DesktopInput.buildUI 往 uiGroup 塞的第一张 fill 表；
+        //本类建好容器、由输入处理器往里填内容 —— 与原版 buildUI(group) 的分工等价）
+        if(!Vars.mobile && input() != null){
+            Table hintTable = new Table();
+            hintTable.setFillParent(true);
+            input().buildUI(hintTable);
+            group.addActor(hintTable);
+        }
 
         //移动端：左下角的"取消 / 蓝图面板"按钮（对应原版 MobileInput.buildUI）。
         //放在建造菜单之后、全屏小地图之前，这样它盖在世界上但压不住小地图。
@@ -420,6 +440,155 @@ public class HudFragment extends Fragment{
     /** @return 当前输入处理器 */
     private InputHandler input(){
         return Vars.control == null ? null : Vars.control.input;
+    }
+
+    /** @return 建造菜单（DesktopInput 中键吸取用）。 */
+    public PlacementFragment placement(){
+        return placementFragment;
+    }
+
+    /**
+     * toast 排队（对应原版 {@code HudFragment.scheduleToast}，HudFragment.java:396-406）：
+     * 距上次 toast 足够久（3.5s）就立即弹，否则按剩余间隔排进延迟任务 —— 连续解锁的提示逐条出现、不叠屏。
+     */
+    private void scheduleToast(Runnable run){
+        long duration = (int)(3.5 * 1000);
+        long since = com.phoenix.game.core.Time.timeSinceMillis(lastToast);
+        if(since > duration){
+            lastToast = com.phoenix.game.core.Time.millis();
+            run.run();
+        }else{
+            com.phoenix.game.core.Time.run((duration - since) / 1000f * 60f, run);
+            lastToast += duration;
+        }
+    }
+
+    /**
+     * 解锁提示（对应原版 {@code HudFragment.showUnlock}，HudFragment.java:440-526；由
+     * {@code Control} 构造器的 UnlockEvent 监听器经 postRunnable 调用）：
+     * 第一条弹「内容图标 + $unlocked」toast（顶部滑入、停 2.5s、滑出）；
+     * 短时间内连续解锁则把图标堆进同一条 toast（3 列、9 格容量，满了显示加号图标）。
+     * <p>⚠ <b>libgdx 适配</b>：原版用 {@code table.update(...)} 每帧回调 + arc 的 actions(...) 并行
+     * 动作；libgdx 无每帧回调 → 用 {@code MenuFragment.Act} 做菜单态自删；
+     * {@code container.actions(a, b, c)} → {@code Actions.parallel(动作, sequence(delay, run))}。
+     * 原版图标 {@code content.icon(Cicon.xlarge/medium)} 可能缺图（图集缺区域）→ null 时跳过该图标。
+     */
+    public void showUnlock(com.phoenix.game.ctype.UnlockableContent content){
+        //菜单态不弹；教程里不弹以免困惑（原版同款守卫）
+        if(Vars.state == null || Vars.state.isMenu()
+            || (Vars.state.rules != null && Vars.state.rules.tutorial)) return;
+        com.badlogic.gdx.scenes.scene2d.Stage stage = FloatingDialog.scene;
+        if(stage == null) return;
+
+        io.anuke.mindustry.gen.Sounds.message.play();
+
+        //如果当前没有解锁提示 → 弹一条新 toast（对应原版 lastUnlockTable == null 分支）
+        if(lastUnlockTable == null){
+            scheduleToast(() -> {
+                com.badlogic.gdx.scenes.scene2d.Stage s = FloatingDialog.scene;
+                if(s == null) return;
+
+                Table table = new Table();
+                table.setBackground(io.anuke.mindustry.gen.Tex.button);
+                table.pad(Scl.scl(12f));
+                //菜单态自删（对应原版 table.update(...)）
+                table.addActor(new com.phoenix.game.ui.MenuFragment.Act(() -> {
+                    if(Vars.state != null && Vars.state.isMenu()){
+                        table.remove();
+                        lastUnlockLayout = null;
+                        lastUnlockTable = null;
+                    }
+                }));
+
+                Table in = new Table();
+
+                //内容图标（xlarge）；缺图时跳过（原版注释：some content may not have icons... yet）
+                com.badlogic.gdx.graphics.g2d.TextureRegion icon = content.icon(com.phoenix.game.ui.Cicon.xlarge);
+                if(icon != null){
+                    Image image = new Image(new com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable(icon));
+                    image.setScaling(com.badlogic.gdx.utils.Scaling.fit);
+                    in.add(image).size(Scl.scl(8 * 6)).pad(Scl.scl(2f));
+                }
+
+                //add to table
+                table.add(in).padRight(Scl.scl(8f));
+                table.add(new Label(com.phoenix.game.world.meta.I18n.get("unlocked", "New content unlocked!"),
+                    Styles.outlineLabel));
+                table.pack();
+
+                //create container table which will align and move
+                Table container = new Table();
+                container.setFillParent(true);
+                container.top();
+                container.setTouchable(com.badlogic.gdx.scenes.scene2d.Touchable.childrenOnly);
+                container.add(table);
+                s.addActor(container);
+
+                float height = table.getPrefHeight();
+                //原版用 arc Element 的 setTranslation(0, height) + translateBy 做滑入/滑出——libgdx 没有
+                //该渲染偏移 API → 等价改为淡入/淡出（滑出后自删，lastUnlock 两字段同步清空）
+                container.getColor().a = 0f;
+                container.addAction(com.badlogic.gdx.scenes.scene2d.actions.Actions.parallel(
+                    com.badlogic.gdx.scenes.scene2d.actions.Actions.fadeIn(1f,
+                        com.badlogic.gdx.math.Interpolation.fade),
+                    com.badlogic.gdx.scenes.scene2d.actions.Actions.sequence(
+                        com.badlogic.gdx.scenes.scene2d.actions.Actions.delay(2.5f),
+                        com.badlogic.gdx.scenes.scene2d.actions.Actions.run(() -> container.addAction(
+                            com.badlogic.gdx.scenes.scene2d.actions.Actions.sequence(
+                                com.badlogic.gdx.scenes.scene2d.actions.Actions.fadeOut(1f,
+                                    com.badlogic.gdx.math.Interpolation.fade),
+                                com.badlogic.gdx.scenes.scene2d.actions.Actions.run(() -> {
+                                    lastUnlockTable = null;
+                                    lastUnlockLayout = null;
+                                }),
+                                com.badlogic.gdx.scenes.scene2d.actions.Actions.removeActor()))))));
+
+                lastUnlockTable = container;
+                lastUnlockLayout = in;
+            });
+        }else{
+            //堆叠分支：把新图标塞进上一条 toast（对应原版 else 分支）
+            //max column size
+            int col = 3;
+            //max amount of elements minus extra 'plus'
+            int cap = col * col - 1;
+
+            //get old elements（libgdx getChildren 返回 SnapshotArray → 拷贝一份再重建）
+            com.badlogic.gdx.utils.Array<com.badlogic.gdx.scenes.scene2d.Actor> elements =
+                new com.badlogic.gdx.utils.Array<>(lastUnlockLayout.getChildren());
+            int esize = elements.size;
+
+            //...if it's already reached the cap, ignore everything
+            if(esize > cap) return;
+
+            //get size of each element
+            float size = 48f / Math.min(elements.size + 1, col);
+
+            lastUnlockLayout.clearChildren();
+            lastUnlockLayout.defaults().size(Scl.scl(size)).pad(Scl.scl(2f));
+
+            for(int i = 0; i < esize; i++){
+                lastUnlockLayout.add(elements.get(i));
+
+                if(i % col == col - 1){
+                    lastUnlockLayout.row();
+                }
+            }
+
+            //if there's space, add it
+            if(esize < cap){
+                com.badlogic.gdx.graphics.g2d.TextureRegion icon = content.icon(com.phoenix.game.ui.Cicon.medium);
+                if(icon != null){
+                    Image image = new Image(new com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable(icon));
+                    image.setScaling(com.badlogic.gdx.utils.Scaling.fit);
+                    lastUnlockLayout.add(image);
+                }
+            }else{ //else, add a specific icon to denote no more space
+                lastUnlockLayout.add(new Image(io.anuke.mindustry.gen.Icon.add));
+            }
+
+            lastUnlockLayout.pack();
+        }
     }
 
     /**

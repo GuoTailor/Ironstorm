@@ -8,6 +8,7 @@ import com.phoenix.game.content.Fx;
 import com.phoenix.game.content.Items;
 import com.phoenix.game.core.Core;
 import com.phoenix.game.core.Drawf;
+import com.phoenix.game.core.Time;
 import com.phoenix.game.entities.Effects;
 import com.phoenix.game.entities.type.Bullet;
 import com.phoenix.game.entities.type.Player;
@@ -211,6 +212,38 @@ public class MassDriver extends Block{
 
         MassDriverEntity e = (MassDriverEntity)other.entity;
         return e.link == tile.pos() && tile.dst(other) <= range;
+    }
+
+    /**
+     * 配置叠加（对应原版 {@code MassDriver.drawConfigure}，MassDriver.java:186-207）：
+     * 本体 accent 圆圈 + 呼吸脉动；正在瞄着本座的 shooter 画圆 + 指向本座的箭头；
+     * 已配对的对端画圆 + 本座指向对端的箭头；最后画一圈 range 虚线圆。
+     * <p>坐标口径同 {@link Block#drawConfigure}：中心 = centerX/centerY（原版 drawx 即中心）。
+     */
+    @Override
+    public void drawConfigure(Tile tile){
+        float sin = Mathf.absin(Time.time(), 6f, 1f);
+
+        Drawf.circles(centerX(tile), centerY(tile), (size / 2f + 1) * tilesize + sin - 2f, Pal.accent);
+
+        if(!(tile.entity instanceof MassDriverEntity)) return;
+        MassDriverEntity entity = (MassDriverEntity)tile.entity;
+
+        for(int i = 0; i < entity.waitingShooters.size; i++){
+            Tile shooter = entity.waitingShooters.get(i);
+            Drawf.circles(centerX(shooter), centerY(shooter), (size / 2f + 1) * tilesize + sin - 2f, Pal.place);
+            Drawf.arrow(centerX(shooter), centerY(shooter), centerX(tile), centerY(tile),
+                size * tilesize + sin, 4f + sin, Pal.place);
+        }
+
+        if(linkValid(tile)){
+            Tile target = Vars.world.tile(entity.link);
+            Drawf.circles(centerX(target), centerY(target), (target.block().size / 2f + 1) * tilesize + sin - 2f, Pal.place);
+            Drawf.arrow(centerX(tile), centerY(tile), centerX(target), centerY(target),
+                size * tilesize + sin, 4f + sin);
+        }
+
+        Drawf.dashCircle(centerX(tile), centerY(tile), range, Pal.accent);
     }
 
     /** 炮弹承载的数据（对应原版 DriverBulletData）：谁发的、发给谁、装了什么。 */

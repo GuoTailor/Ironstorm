@@ -170,11 +170,92 @@ public class Renderer {
     /**
      * 开始"开局降落"镜头动画（对应原版 {@code Renderer.zoomIn}）：把缩放瞬间压到最小，
      * 随后在 duration 秒内拉远到正常缩放。
-     * <p>由 {@code Control} 监听 {@code Trigger.newGame} 时调用，duration 传 {@code Fx.coreLand.lifetime}。
+     * 由 {@code Control} 监听 {@code Trigger.newGame} 时调用，duration 传 {@code Fx.coreLand.lifetime}。
      */
     public void zoomIn(float duration){
         landscale = minZoomScl();
         landTime = duration;
+    }
+
+    /**
+     * 整图截图（对应原版 {@code Renderer.takeMapScreenshot}，Renderer.java:409-451；由 Control 的
+     * P 键（Binding.screenshot）消费点调用）：
+     * 把整张地图按「1 世界单位 = 1 像素」渲进一张 FrameBuffer，写 PNG 到 {@code screenshots/} 子目录，
+     * 并用 $screenshot 提示保存路径；地图太大（≥65MB 显存）时改弹 $screenshot.invalid。
+     *
+     * <p>⚠ <b>FBO 不能嵌套</b>：{@code draw()} 内部的灯光/护盾 FBO 由 {@code FboUtil.save/restore}
+     * 兜底（S10），这里同样在外层进/出前保存恢复绑定与视口。
+     *
+     * <p>⚠ <b>相机口径</b>：原版直接改 arc 相机的 width/height（两轴独立）；libgdx 的
+     * OrthographicCamera 只有统一 zoom → 临时把 viewportWidth/viewportHeight 设为地图尺寸并把
+     * {@code camerascale} 置 1（{@code applyScale()} 得 zoom=1），这样可视世界宽高 = 地图宽高。
+     * 相机中心 = (w/2, h/2)：本项目 {@code tile.worldx()} 是左下角、地图内容世界区间为
+     * [0, w]×[0, h]（原版 +tilesize/2 是它的"worldx 即中心"口径，照抄会整体偏半格）。
+     *
+     * <p>⚠ 渲走的是 {@link #draw()} 本体（原版同款）→ 含方块/单位/特效/灯光/护盾，不含 HUD（HUD 在 stage 层）。
+     */
+    public void takeMapScreenshot(){
+        World world = Vars.world;
+        if(world == null || world.tiles.length == 0) return;
+
+        int w = world.width() * tilesize, h = world.height() * tilesize;
+        int memory = w * h * 4 / 1024 / 1024;
+
+        if(memory >= 65){
+            if(Vars.ui != null) Vars.ui.showInfo("$screenshot.invalid");
+            return;
+        }
+
+        FrameBuffer buffer = new FrameBuffer(Pixmap.Format.RGBA8888, w, h, false);
+
+        //保存相机与缩放 → 改成"整图正交视角"
+        float px = Core.camera.position.x, py = Core.camera.position.y;
+        float vpw = Core.camera.viewportWidth, vph = Core.camera.viewportHeight, savedScale = camerascale;
+
+        Core.camera.viewportWidth = w;
+        Core.camera.viewportHeight = h;
+        camerascale = 1f;
+        Core.camera.position.set(w / 2f, h / 2f, 0f);
+        Core.camera.update();
+
+        int[] prevFbo = FboUtil.save();
+        Draw.flush();
+
+        buffer.begin();
+        draw();
+        Draw.flush();
+        buffer.end();
+
+        //恢复相机与缩放（draw() 内部 applyScale 会重设 zoom，这里手动同步一次）
+        Core.camera.viewportWidth = vpw;
+        Core.camera.viewportHeight = vph;
+        Core.camera.position.set(px, py, 0f);
+        camerascale = savedScale;
+        applyScale();
+        Core.camera.update();
+
+        //读回像素（再 begin 一次；flipY=true 让 PNG 保持正立）并把 alpha 通道填满（FBO 无内容处 alpha=0）
+        buffer.begin();
+        byte[] lines = com.badlogic.gdx.utils.ScreenUtils.getFrameBufferPixels(0, 0, w, h, true);
+        for(int i = 3; i < lines.length; i += 4){
+            lines[i] = (byte)255;
+        }
+        buffer.end();
+        FboUtil.restore(prevFbo);
+
+        Pixmap fullPixmap = new Pixmap(w, h, Pixmap.Format.RGBA8888);
+        com.badlogic.gdx.utils.BufferUtils.copy(lines, 0, fullPixmap.getPixels(), lines.length);
+
+        //写 screenshots/ 子目录（数据目录 = assets 根，绝不碰根下既有文件，只新建子目录）
+        com.badlogic.gdx.files.FileHandle dir = Gdx.files.local("screenshots");
+        if(!dir.exists()) dir.mkdirs();
+        com.badlogic.gdx.files.FileHandle file = dir.child("screenshot-" + Time.millis() + ".png");
+        com.badlogic.gdx.graphics.PixmapIO.writePNG(file, fullPixmap);
+        fullPixmap.dispose();
+
+        if(Vars.ui != null) Vars.ui.showInfoFade(Core.bundle.format("screenshot", file.path()));
+
+        buffer.dispose();
     }
 
     /** @return 降落动画期间的缩放；动画结束后恒为 1f（对应原版 {@code Renderer.landScale}）。 */
@@ -285,6 +366,13 @@ public class Renderer {
                 Vars.player.unit().drawBuildRequests();
             }
 
+            //配置面板打开时的方块配置叠加（对应原版 OverlayRenderer.drawTop 的
+            //`if(input.frag.config.isShown()) tile.block().drawConfigure(tile)`，OverlayRenderer.java:84-87；
+            //本项目等价状态 = configTile 非空）。排在 input.drawTop() 之前（原版顺序）。
+            if(Vars.control.input.configTile != null){
+                Vars.control.input.configTile.block().drawConfigure(Vars.control.input.configTile);
+            }
+
             Vars.control.input.drawTop();
 
             //RTS 命令系统：选中单位指示（圈/连线/目的标记）与框选矩形
@@ -351,6 +439,46 @@ public class Renderer {
         if(Vars.player.isDead()) return;
         drawEnemyCoreRadius();
         drawDropZones();
+        //投递物品光标预览（对应原版 OverlayRenderer.drawTop 末尾的 isDroppingItem 分支）
+        drawDropItemPreview();
+    }
+
+    /**
+     * 投递物品的光标预览（对应原版 {@code OverlayRenderer.drawTop} 末尾的 isDroppingItem 分支，
+     * OverlayRenderer.java:137-155）：
+     * 点着自己进入投递状态后，光标处画背包物品图标 + accent 脉动圆环；
+     * 目标方块能收下时（{@code acceptStack > 0} 且同队可交互）再画双层描边高亮。
+     * <p>⚠ 坐标口径：目标方块的描边中心用 centerX/centerY（原版 drawx 即中心，照抄会偏到左下角）。
+     */
+    private void drawDropItemPreview(){
+        com.phoenix.game.input.InputHandler input = Vars.control == null ? null : Vars.control.input;
+        if(input == null || !input.isDroppingItem() || Vars.player == null || Vars.world == null) return;
+
+        Player player = Vars.player;
+        float vx = input.targetX, vy = input.targetY;
+
+        //物品图标 + accent 圆环
+        if(player.item != null){
+            TextureRegion icon = player.item.icon(Cicon.medium);
+            if(icon != null) Draw.rect(icon, vx, vy, 8f, 8f);
+        }
+        Draw.color(Pal.accent);
+        Lines.circle(vx, vy, 6f + Mathf.absin(Time.time(), 5f, 1f));
+        Draw.color();
+
+        //目标方块能收下时：双层描边高亮（外层灰 3px、内层 place 色 1px，带呼吸脉动）
+        Tile tile = Vars.world.tileWorld(vx, vy);
+        if(tile != null && player.item != null
+            && tile.interactable(player.getTeam())
+            && tile.block().acceptStack(player.item, player.itemAmount, tile, player.unit()) > 0){
+            float cx = tile.block().centerX(tile), cy = tile.block().centerY(tile);
+            Lines.stroke(3f, Pal.gray);
+            Lines.square(cx, cy, tile.block().size * tilesize / 2f + 3f + Mathf.absin(Time.time(), 5f, 1f));
+            Lines.stroke(1f, Pal.place);
+            Lines.square(cx, cy, tile.block().size * tilesize / 2f + 2f + Mathf.absin(Time.time(), 5f, 1f));
+            Lines.stroke(1f);
+            Draw.color();
+        }
     }
 
     /**

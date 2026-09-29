@@ -5,11 +5,13 @@ import com.badlogic.gdx.Input;
 import com.phoenix.game.Vars;
 import com.phoenix.game.core.Core;
 import com.phoenix.game.core.GameState;
+import com.phoenix.game.core.Scl;
 import com.phoenix.game.core.Time;
 import com.phoenix.game.core.Tmp;
 import com.phoenix.game.entities.type.Player;
 import com.phoenix.game.game.Team;
 import com.phoenix.game.math.Mathf;
+import com.phoenix.game.ui.Styles;
 import com.phoenix.game.world.Build;
 import com.phoenix.game.world.Tile;
 import io.anuke.mindustry.gen.Sounds;
@@ -53,14 +55,20 @@ public class DesktopInput extends InputHandler{
             return;
         }
 
-        //滚轮：正在放置可旋转方块时旋转朝向，否则缩放相机。
+        //滚轮：正在放置可旋转方块时旋转朝向，按住 R 时旋转光标下的已放置方块，否则缩放相机。
         //原版 Binding.rotate 与 Binding.zoom 都绑在滚轮轴上（Binding.java 的 rotate(new Axis(SCROLL)) / zoom(new Axis(SCROLL))），
-        //靠"是否在放置可旋转方块"区分——原版 zoom 分支的条件里带 !isPlacing() || !block.rotate。
+        //靠"是否在放置可旋转方块 / 是否按住 rotateplaced"区分——原版 zoom 分支的条件里带
+        //!isPlacing() || !block.rotate 与 !keyDown(Binding.rotateplaced)（DesktopInput.java:161）。
         float zoomAmount = scroll();
         if(Math.abs(zoomAmount) > 0.0001f){
-            if(isPlacing() && buildBlock != null && buildBlock.rotate){
+            if(!isPlacing() && keyDown(Input.Keys.R)){
+                //按住 R（Binding.rotateplaced）滚动：旋转光标下的已放置方块，不缩放（对应原版 DesktopInput.java:225-227）
+                rotatePlacedAt(zoomAmount > 0f);
+            }else if(isPlacing() && buildBlock != null && buildBlock.rotate && !keyDown(Input.Keys.CONTROL_LEFT)){
                 //原版 rotation 序列是逆时针（0=右/1=上/2=左/3=下），上滚 = +1 就是逆时针；
-                //本项目序列是顺时针（0=上/1=右/2=下/3=左），逆时针要 -1（等价 +3）
+                //本项目序列是顺时针（0=上/1=右/2=下/3=左），逆时针要 -1（等价 +3）。
+                //⚠ 按住 Ctrl（diagonal_placement）时不转朝向：对应原版 update 的
+                //!keyDown(Binding.diagonal_placement) 守卫（DesktopInput.java:188）
                 buildRotation = Mathf.mod(buildRotation + (zoomAmount > 0 ? 3 : 1), 4);
             }else if(Vars.renderer != null){
                 Vars.renderer.scaleCamera(zoomAmount);
@@ -213,13 +221,37 @@ public class DesktopInput extends InputHandler{
             Vars.ui.listfrag.toggle();
         }
 
+        //建造队列空了自动暂停（对应原版 pollInput 开头的 buildautopause 分支，DesktopInput.java:272-276；
+        //设置项在设置菜单"游戏"页 —— SettingsMenuDialog 的 buildautopause 检选框）。
+        //⚠ player.isBuilding 是玩家侧开关字段；isBuilding() 是"队列非空"，同名不同义（见 Player.java 注释）
+        if(player != null && Core.settings.getBool("buildautopause", false)
+            && player.isBuilding && !player.isBuilding()){
+            player.isBuilding = false;
+            player.buildWasAutoPaused = true;
+        }
+
+        //E 键暂停/恢复建造队列（对应原版 pollInput 的 Binding.pause_building 分支，DesktopInput.java:346-349）：
+        //手动切换时清掉自动暂停标记
+        com.badlogic.gdx.scenes.scene2d.Stage keyStage = com.phoenix.game.ui.dialogs.FloatingDialog.scene;
+        if(keyTap(Input.Keys.E) && player != null
+            && !(keyStage != null && keyStage.getKeyboardFocus() instanceof com.badlogic.gdx.scenes.scene2d.ui.TextField)){
+            player.isBuilding = !player.isBuilding;
+            player.buildWasAutoPaused = false;
+        }
+
         //C 切换 HUD 建造菜单（对应原版 Binding.toggle_menus = KeyCode.C，原版在 HudFragment.update 里处理）。
         //守卫照原版：有对话框 / 输入框有焦点时不响应（原版还判 !ui.chatfrag.shown()，本项目 ChatFragment
         //由 ClientLauncher 私有持有、没有 shown() 接口 → 该条未接）
-        com.badlogic.gdx.scenes.scene2d.Stage keyStage = com.phoenix.game.ui.dialogs.FloatingDialog.scene;
         if(keyTap(Input.Keys.C) && Vars.hud != null && !hasDialog()
             && !(keyStage != null && keyStage.getKeyboardFocus() instanceof com.badlogic.gdx.scenes.scene2d.ui.TextField)){
             Vars.hud.toggleMenus();
+        }
+
+        //P 键整图截图（对应原版 Control.update 的 Binding.screenshot 分支，Control.java:468-470：
+        //!mobile && 无文本焦点 → renderer.takeMapScreenshot()）
+        if(!Vars.mobile && keyTap(Input.Keys.P) && Vars.renderer != null && !hasDialog()
+            && !(keyStage != null && keyStage.getKeyboardFocus() instanceof com.badlogic.gdx.scenes.scene2d.ui.TextField)){
+            Vars.renderer.takeMapScreenshot();
         }
 
         //F7 切换电力激光显隐（对应原版 Binding.toggle_power_lines = KeyCode.F7）：关掉时记下偏好值，
@@ -234,10 +266,8 @@ public class DesktopInput extends InputHandler{
             Core.settings.save();
         }
 
-        //R 键切换放置朝向（与滚轮旋转等价，保留为键盘替代操作）
-        if(keyTap(Input.Keys.R)){
-            buildRotation = (buildRotation + 1) % 4;
-        }
+        //⚠ R 键不再切换"待放置朝向"（原版桌面端没有该绑定；R = Binding.rotateplaced，
+        //按住 + 滚轮旋转**已放置**的方块，见 update() 开头的滚轮分支）——原照抄偏差已拆除
 
         //拖拽中：按当前鼠标位置刷新连线路径（对应原版每帧检查 cursor 变化后 updateLine）
         if(lineMode){
@@ -300,6 +330,17 @@ public class DesktopInput extends InputHandler{
 
         if(button == Input.Buttons.RIGHT){
             clearBuild();
+            return false;
+        }
+
+        //中键吸取方块（对应原版 PlacementFragment.gridUpdate 的 Binding.pick 分支，PlacementFragment.java:93-109：
+        //按住/按下中键，把光标下的方块或建造队列里的占位方块设为当前建造方块）
+        if(button == Input.Buttons.MIDDLE){
+            if(Vars.world != null && Vars.player != null && !Vars.player.isDead() && !Vars.state.isPaused()
+                && Vars.hud != null && Vars.hud.placement() != null
+                && Vars.hud.placement().pickBlock(mouseWorldX(screenX), mouseWorldY(screenY))){
+                return true;
+            }
             return false;
         }
 
@@ -481,6 +522,96 @@ public class DesktopInput extends InputHandler{
                 Sounds.breaks.play(1f);
             }
         }
+    }
+
+    /**
+     * 按住 R + 滚动时旋转光标下的**已放置**方块（对应原版 DesktopInput.java:225-227 的
+     * {@code Call.rotateBlock(player, cursor, direction)}）。
+     * <p>原版 {@code Call.rotateBlock} 是 @Remote（本项目 Remote 注释态）→ 落到服务端后只做
+     * {@code tile.rotation(mod(rotation + sign(direction), 4))} + {@code updateProximity()} +
+     * {@code noSleep()}，这里等价本地直调（本项目 TileEntity 没有休眠机制，noSleep 省略）。
+     * <p>守卫照原版：{@code cursor.interactable(team) && !isPlacing() && keyDown(rotateplaced) && cursor.block().rotate}。
+     */
+    private void rotatePlacedAt(boolean direction){
+        if(Vars.world == null || Vars.player == null || Vars.player.isDead()) return;
+
+        Tile cursor = Vars.world.tile(
+            Vars.world.toTile(mouseWorldX(Gdx.input.getX())), Vars.world.toTile(mouseWorldY(Gdx.input.getY())));
+        if(cursor == null) return;
+        cursor = cursor.link();
+
+        if(!cursor.interactable(Vars.player.getTeam()) || !cursor.block().rotate) return;
+
+        //原版 Mathf.mod(tile.rotation() + Mathf.sign(direction), 4)；本项目 rotation 约定相反但
+        //"+1/-1 循环"在两种约定下都是旋转 90°，直接用 sign(Boolean) 的 ±1 即可
+        cursor.rotation(Mathf.mod(cursor.rotation() + Mathf.sign(direction), 4));
+
+        if(cursor.entity != null){
+            cursor.entity.updateProximity();
+        }
+    }
+
+    /**
+     * 底部建造提示条（对应原版 DesktopInput.buildUI 的第一张 fill 表，DesktopInput.java:44-58；
+     * 受 hints 设置控制）：
+     * 三行提示 —— 暂停/恢复建造（E）、清除建造规划（Q）、选择蓝图（F），玩家正在建造时淡入、闲时淡出。
+     * <p>原版用 arc 的 label(Prov)/visible(Boolp)/update(Runnable) 每帧钩子；libgdx 是静态文本
+     * → 用 {@link com.phoenix.game.ui.MenuFragment.Act} 每帧刷新 alpha/显隐/首行文本。
+     * <p><b>降级</b>：原版 visible 还带 {@code selectRequests.isEmpty()}（桌面端框选蓝图期间隐藏）；
+     * 本项目桌面端没有该状态 → 省略。原版第二张 fill 表（蓝图翻转提示 + 保存按钮）未移植。
+     * <p>挂载点：由 HudFragment 建好 bottom 对齐的 fill-parent 容器传入（对应原版往 uiGroup 塞 fill 表）。
+     */
+    @Override
+    public void buildUI(com.badlogic.gdx.scenes.scene2d.ui.Table table){
+        table.bottom();
+
+        com.phoenix.game.ui.Label buildLabel = new com.phoenix.game.ui.Label("", Styles.outlineLabel);
+        com.phoenix.game.ui.Label cancelLabel = new com.phoenix.game.ui.Label(
+            com.phoenix.game.core.Core.bundle.format("cancelbuilding", bindingKey(Binding.clear_building)),
+            Styles.outlineLabel);
+        com.phoenix.game.ui.Label schemLabel = new com.phoenix.game.ui.Label(
+            com.phoenix.game.core.Core.bundle.format("selectschematic", bindingKey(Binding.schematic_select)),
+            Styles.outlineLabel);
+
+        com.badlogic.gdx.scenes.scene2d.ui.Table inner = new com.badlogic.gdx.scenes.scene2d.ui.Table();
+        inner.setBackground(Styles.black6);
+        inner.defaults().left();
+        inner.pad(Scl.scl(10f));
+        inner.add(buildLabel).row();
+        inner.add(cancelLabel).row();
+        inner.add(schemLabel).row();
+
+        table.add(inner);
+
+        table.addActor(new com.phoenix.game.ui.MenuFragment.Act(() -> {
+            //alpha 渐隐（对应原版 t.update 里的 lerpDelta(t.getColor().a, player.isBuilding() ? 1 : 0, 0.15f)）
+            Player player = Vars.player;
+            float target = player != null && player.isBuilding() ? 1f : 0f;
+            float a = table.getColor().a = Mathf.lerpDelta(table.getColor().a, target, 0.15f);
+
+            //显隐（对应原版 t.visible(...)）
+            table.setVisible(com.phoenix.game.core.Core.settings.getBool("hints", true));
+
+            //首行文本随玩家侧开关切换（对应原版 label(() -> bundle.format(!player.isBuilding ? "resumebuilding" : "pausebuilding", ...))）
+            buildLabel.setText(com.phoenix.game.core.Core.bundle.format(
+                player != null && !player.isBuilding ? "resumebuilding" : "pausebuilding",
+                bindingKey(Binding.pause_building)));
+
+            //触摸穿透（对应原版 t.touchable(...)；提示条纯展示 → 低透明度时彻底禁触摸）
+            table.setTouchable(a < 0.1f ? com.badlogic.gdx.scenes.scene2d.Touchable.disabled
+                : com.badlogic.gdx.scenes.scene2d.Touchable.childrenOnly);
+        }));
+    }
+
+    /**
+     * @return 键位显示名（对应原版 {@code Core.keybinds.get(Binding).key.toString()}）。
+     * <p>本项目没有"Binding → 生效键码"查询表（Core.keybinds 未移植，无重绑定入口）
+     * → 用默认值即生效值，与 {@code PlacementFragment.defaultKey} 同口径。
+     */
+    private static String bindingKey(Binding binding){
+        KeyBinds.KeybindValue value = binding.defaultValue(InputDevice.DeviceType.keyboard);
+        return value instanceof KeyBinds.KeyValue
+            ? com.badlogic.gdx.Input.Keys.toString(((KeyBinds.KeyValue)value).key) : "?";
     }
 
     /** 全屏切换：退出全屏时恢复默认窗口尺寸。 */

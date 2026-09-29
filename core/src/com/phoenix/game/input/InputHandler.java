@@ -175,6 +175,48 @@ public abstract class InputHandler extends InputAdapter{
     }
 
     /**
+     * @return 当前是否允许开火（对应原版 {@code InputHandler.canShoot}，InputHandler.java:731）：
+     * 非建造/拆除、鼠标不在 UI 上、不在可配置方块上、非投递物品状态。
+     * <p>消费点：{@link #updateShooting()}（原版是 DesktopInput.update 每帧
+     * {@code if(player.isShooting && !canShoot()) player.isShooting = false;}）。
+     */
+    public boolean canShoot(){
+        return buildBlock == null && !breaking && pasteSchematic == null
+            && !sceneHasMouse() && !onConfigurable() && !isDroppingItem();
+    }
+
+    /**
+     * @return 鼠标是否悬停在可交互的 UI 上（对应 arc 的 {@code Core.scene.hasMouse()}）。
+     * <p><b>等价替代</b>：libgdx 的 {@code stage.hit()} 对"无监听器的全屏容器表"也会命中自身
+     * （arc 的 HUD 树靠 touchable(childrenOnly) 挡住，本项目没做这层）→ 改按监听器判定：
+     * 命中链上任何一个 actor 挂了输入监听器才算"鼠标在 UI 上"（按钮/输入框/对话框遮罩都会命中，
+     * 裸的全屏布局表不会）。
+     */
+    public static boolean sceneHasMouse(){
+        com.badlogic.gdx.scenes.scene2d.Stage stage = com.phoenix.game.ui.dialogs.FloatingDialog.scene;
+        if(stage == null) return false;
+
+        mouseStageTmp.set(Gdx.input.getX(), Gdx.input.getY());
+        stage.screenToStageCoordinates(mouseStageTmp);
+        com.badlogic.gdx.scenes.scene2d.Actor actor = stage.hit(mouseStageTmp.x, mouseStageTmp.y, true);
+        for(; actor != null; actor = actor.getParent()){
+            if(actor.getListeners().size > 0) return true;
+        }
+        return false;
+    }
+
+    /** {@link #sceneHasMouse()} 用的临时坐标（每帧调用，避免分配）。 */
+    private static final com.badlogic.gdx.math.Vector2 mouseStageTmp = new com.badlogic.gdx.math.Vector2();
+
+    /**
+     * @return 鼠标是否悬停在可配置方块上（对应原版 {@code InputHandler.onConfigurable}）。
+     * <p>原版桌面端恒 false（只有移动端覆写）；本项目 DesktopInput 同样恒 false，此处照原版保留挂钩。
+     */
+    public boolean onConfigurable(){
+        return false;
+    }
+
+    /**
      * @return "点自己"的有效半径（对应原版 {@code playerSelectRange = mobile ? 17f : 11f}）。
      * <p>做成方法而不是静态常量：{@code Vars.mobile} 由启动器在 {@code Vars.init()} 里设置，
      * 类初始化阶段读取会拿到默认值（与项目里 {@code Scl.scl} 的懒初始化同因）。
@@ -615,7 +657,8 @@ public abstract class InputHandler extends InputAdapter{
 
     /**
      * 生成连线路径（对应原版 InputHandler.iterateLine）。
-     * <p>路径由 {@link #buildPath} 按原版 {@code Placement.normalizeLine} 生成（纯直线，不拐弯）。
+     * <p>路径由 {@link #buildPath} 按原版取点规则生成：默认轴对齐直线（normalizeLine），
+     * 按住 Ctrl（diagonal_placement）走阶梯直线（Bresenham）。
      * <p>多格方块按 {@code size} 占位：某格的占位范围若与前一个已放置的格子重叠，就**直接丢弃**
      * （原版靠 {@code Rectangle.overlaps} 做同样的事）——否则 2x2/3x3 方块会沿着路径叠成一串，
      * 表现就是拖放时预览互相重叠。
@@ -654,48 +697,36 @@ public abstract class InputHandler extends InputAdapter{
     }
 
     /**
-     * 生成连线路径并填充 {@link #pathX}/{@link #pathY}（对应原版 {@code InputHandler.iterateLine → Placement.pathfindLine}）。
-     * <p>传送带/导管走 {@link Placement#pathfindLine}（开 conveyorpathfinding 时 A*，否则阶梯直线）；
-     * 其余方块只沿偏差较大的一个轴走直线，**不拐弯**（原版普通方块默认也是直线）。
+     * 生成连线路径并填充 {@link #pathX}/{@link #pathY}（对应原版 {@code InputHandler.iterateLine} 的取点阶段）。
+     * <p>对应原版 iterateLine（InputHandler.java:825-841）的 diagonal 判定：按住 Ctrl
+     * （Binding.diagonal_placement）走 {@link Placement#pathfindLine} 阶梯直线（传送带开
+     * conveyorpathfinding 时 A*）；否则走 {@link Placement#normalizeLine} 轴对齐直线。
+     * PowerNode 反转（节点平时就该阶梯连线）。
      * @return 路径格数
      */
     public int buildPath(int startX, int startY, int endX, int endY){
         endX = startX + Mathf.clamp(endX - startX, -maxLineLength, maxLineLength);
         endY = startY + Mathf.clamp(endY - startY, -maxLineLength, maxLineLength);
 
-        //传送带/导管（conveyorPlacement）：原版走 Placement.pathfindLine（开 conveyorpathfinding 时 A*，否则阶梯直线）；
-        //其余方块仍是轴对齐纯直线，行为不变
-        if(buildBlock != null && buildBlock.conveyorPlacement){
-            com.phoenix.game.struct.Array<com.phoenix.game.math.geom.Point2> pts =
-                Placement.pathfindLine(true, startX, startY, endX, endY);
-            int count = Math.min(pts.size, maxPathLength);
-            for(int i = 0; i < count; i++){
-                com.phoenix.game.math.geom.Point2 p = pts.get(i);
-                pathX[i] = p.x;
-                pathY[i] = p.y;
-            }
-            pathSize = count;
-            return count;
-        }
+        //对应原版 InputHandler.iterateLine 的 diagonal 判定（InputHandler.java:827-841）：
+        //按住 Ctrl（Binding.diagonal_placement）走阶梯直线（Bresenham，Placement.pathfindLine），
+        //否则走轴对齐直线（Placement.normalizeLine）；PowerNode 反转（节点平时就该阶梯连线）。
+        //⚠ 传送带分支原版同样走这里：不带 Ctrl 时传送带也是 normalizeLine 纯直线（只有
+        //按住 Ctrl 且开 conveyorpathfinding 时才 A*），此处照原版统一，不再提前分流。
+        boolean diagonal = keyDown(Input.Keys.CONTROL_LEFT) || keyDown(Input.Keys.CONTROL_RIGHT);
+        if(buildBlock instanceof com.phoenix.game.world.blocks.power.PowerNode) diagonal = !diagonal;
 
-        int sx = Integer.signum(endX - startX), sy = Integer.signum(endY - startY);
-        int remainingX = Math.abs(endX - startX), remainingY = Math.abs(endY - startY);
+        com.phoenix.game.struct.Array<com.phoenix.game.math.geom.Point2> pts = diagonal
+            ? Placement.pathfindLine(buildBlock != null && buildBlock.conveyorPlacement, startX, startY, endX, endY)
+            : Placement.normalizeLine(startX, startY, endX, endY);
 
-        int count = 0;
-        if(remainingX > remainingY){
-            //走横轴（原版 normalizeLine 的 "go width"）
-            for(int i = 0; i <= remainingX && count < maxPathLength; i++){
-                pathX[count] = startX + i * sx;
-                pathY[count] = startY;
-                count++;
-            }
-        }else{
-            //走纵轴
-            for(int i = 0; i <= remainingY && count < maxPathLength; i++){
-                pathX[count] = startX;
-                pathY[count] = startY + i * sy;
-                count++;
-            }
+        //⚠ 原版数组可增长；本项目 pathX/pathY 是定长缓冲 → 超长截断
+        //（阶梯线最坏 dx+dy ≈ 2×maxLineLength，超出部分丢弃，与旧实现的单轴截断同口径）
+        int count = Math.min(pts.size, maxPathLength);
+        for(int i = 0; i < count; i++){
+            com.phoenix.game.math.geom.Point2 p = pts.get(i);
+            pathX[i] = p.x;
+            pathY[i] = p.y;
         }
 
         pathSize = count;
@@ -1340,12 +1371,19 @@ public abstract class InputHandler extends InputAdapter{
         if(player.isBuilding() || player.getMineTile() != null) return;
 
         if(player.isShooting){
-            unit.rotation = Mathf.slerpDelta(unit.rotation, Angles.angle(unit.x, unit.y, targetX, targetY), 0.25f);
-            //本地也开火（对应原版 Player.updateKeyboard → updateShooting）：视觉即时。
-            //服务端仍按 PlayerInput 权威开火；它广播的开火事件在射手自己的客户端会被跳过，不会重复生成子弹。
-            //F12c：canShoot 钩子（对应原版 Player.mech.canShoot；trident-ship 要求速度 >1.2 才投弹）
-            if(unit.getType().canShoot(unit)){
-                weapon.update(unit, targetX, targetY);
+            //对应原版 DesktopInput.update 的 `if(player.isShooting && !canShoot()) player.isShooting = false;`
+            //（canShoot = 非建造/拆除 && 鼠标不在 UI 上 && 不在可配置方块上 && 非投递物品）：
+            //按住左键开着火再把光标移进 HUD/可配置方块上时停止开火
+            if(!canShoot()){
+                player.isShooting = false;
+            }else{
+                unit.rotation = Mathf.slerpDelta(unit.rotation, Angles.angle(unit.x, unit.y, targetX, targetY), 0.25f);
+                //本地也开火（对应原版 Player.updateKeyboard → updateShooting）：视觉即时。
+                //服务端仍按 PlayerInput 权威开火；它广播的开火事件在射手自己的客户端会被跳过，不会重复生成子弹。
+                //F12c：canShoot 钩子（对应原版 Player.mech.canShoot；trident-ship 要求速度 >1.2 才投弹）
+                if(unit.getType().canShoot(unit)){
+                    weapon.update(unit, targetX, targetY);
+                }
             }
         }else if(!movement.isZero()){
             //原版 updateKeyboard:625：飞行单位转身朝**速度方向**（velocity.angle()），地面单位朝输入方向

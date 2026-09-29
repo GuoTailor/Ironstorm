@@ -150,6 +150,16 @@ public class Control{
             }
         });
 
+        //解锁提示（对应原版 Control 构造器里的 `Events.on(UnlockEvent.class, e -> ui.hudfrag.showUnlock(e.content))`，
+        //Control.java:129）：新内容解锁时在 HUD 顶部弹"图标 + 已解锁"toast。
+        //⚠ 本项目 Events.fire 是同步的（unlockContent 可能在 Logic.update 中途触发）→ 动 stage 用
+        //  Gdx.app.postRunnable 延后一帧，与 Trigger.newGame 监听器的处理一致。
+        Events.on(EventType.UnlockEvent.class, e -> {
+            if(Gdx.app != null) Gdx.app.postRunnable(() -> {
+                if(Vars.hud != null) Vars.hud.showUnlock(e.content);
+            });
+        });
+
         //UI 缩放确认框（对应原版 Control.init() 里的 uiscalechanged 分支）。
         //原版用 arc 的 Core.app.post(() -> Core.app.post(...)) 延后两帧（等 stage/UI 就绪）；
         //本项目 Control 的构造发生在 Vars 类初始化（ClientLauncher.create() 内）、此时 stage 还没建，

@@ -80,7 +80,7 @@
 | F16 | 功能 | **集结与命令 AI**（T0-②组G，3 条）：Pathfinder.rallyPoints 流场（扫 BlockFlag.rally，集结链当前断裂）、CommandAI.hit() 受击反击、afterRead() 读档恢复命令；blockingUnit 需先补 Units.nearbyCheck | ☐ |
 | F17 | 功能 | **贴图资源缺口**（T0-②组F，3 条）：message / illuminator(-top) / armored-conveyor 贴图从原版 assets 拷进 `core/assets-raw/sprites_out/`（**同时拷 sprites_out/ 顶层**），主会话跑 texturePacker + 区域名集合 diff 校验 | ☐ |
 | F18 | 功能 | **小功能合集**（T0-②组D/H/I，6 条）：bloom 后处理管线（设置项已存在）、MapIO.FilterContext 滤镜应用链、DatabaseDialog Fonts.getUnicode 复制彩蛋、coreselect 写蓝图判据 | ☐ |
-| F10 | 功能 | **A2 产出**：世界暗化层 isDarkened 整链（Tile/World/FloorRenderer，原版 core/World.java:308-344）、Door 手动开合+门音效+开关刷新寻路（Door.java:20-46）、**canDeconstruct 未调 canBreak → 自家核心可拆**（Build.java:192 + CoreBlock.canBreak） | ☐ |
+| F10 | 功能 | **A2 产出**：世界暗化层 isDarkened 整链（Tile/World/FloorRenderer，原版 core/World.java:308-344）、Door 手动开合+门音效+开关刷新寻路（Door.java:20-46）、**canDeconstruct 未调 canBreak → 自家核心可拆**（Build.java:192 + CoreBlock.canBreak） | ☑（提交 9ff7dea）；暗化=addDarkness 现算（rotation 存 0-5 暗度）+渲染/小地图/入档重算；**截图验证岩体暗度梯度**；含 rgba→toIntBits 编译修正 |
 | F11 | 功能 | A3 审计产出（待 A3 完成后登记） | ☐ |
 | F12 | 功能 | T0 分类产出的"缺失功能"项（待 T0 完成后登记） | ☐ |
 | F-LOW | 功能 | 低优先级合集：EventType 缺失事件类、Schematics.overwrite、SpawnGroup 序列化、SoundLoop 工作音效、GlobalData 资源池、TileEntity 休眠优化；**内容详情面板**（ContentInfoDialog.show + displayInfo 补 Item/UnitType/Liquid/StatusEffect 覆写 + ContentDisplay.displayItem/displayLiquid/displayUnit——A3+T0 组E）、Administration 子网封禁/strict/Config（A3 中低） | ☐ |
@@ -165,3 +165,4 @@ UI 类以"功能等价"判（arc→libgdx 已知缺口见 转换.md，不算缺�
 - 2026-09-29 F1 完成：6 项全落（卡墙/溺亡/液体交互/出界三件/spawner 失效/unitOn 钩子），FlyingUnit 冗余覆写删除；**深水溺亡专项实测通过**（dagger f230 死、飞行玩家满血）（提交 410166c）；派发 F2
 - 2026-09-29 F2 完成：清场/延迟分批出生/attack 增援三链 + Damage 6 参重载 + BaseUnit.add()；**波次专项实测通过**（runWave 后 +0/+10 敌 0、+100 出齐 4、玩家满血）（提交 02e230c）；派发 F3
 - 2026-09-29 F3 完成：沿途/链式/绝缘三段照原版重写 + Geometry.findFurthest 补齐 + insulated 字段（塑钢墙/二极管）；**闪电链实测 3 连纵队均匀 3 击**（提交 3adba0d，含 1 处 arc Color.white 编译修正）；派发 F10
+- 2026-09-29 F10 完成：darkness 整链 + Door 手动开合 + 核心不可拆（canBreak）；**截图验证岩体暗度梯度**（提交 9ff7dea，含 rgba→toIntBits 编译修正）；派发 F13

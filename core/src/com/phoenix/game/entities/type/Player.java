@@ -59,6 +59,17 @@ public class Player implements com.phoenix.game.entities.traits.TypeTrait, com.p
     public float pointerX, pointerY;
     public boolean isShooting, isBoosting;
 
+    /**
+     * 玩家侧的建造开关（对应原版 {@code Player.isBuilding} **字段**，Player.java:51；默认 true）。
+     * <p>⚠ 与 {@link #isBuilding()}（BuilderTrait 语义：建造队列非空）<b>同名不同义</b>——原版就是
+     * 这两个并存：字段控制"要不要推进建造队列"（E 键 Binding.pause_building 切换），
+     * 方法表示"当前有没有活干"（buildautopause 自动暂停判据用）。
+     */
+    public boolean isBuilding = true;
+    /** 上次暂停是否来自 buildautopause 自动暂停（对应原版 {@code Player.buildWasAutoPaused}）；
+     *  E 键手动切换时清零。 */
+    public boolean buildWasAutoPaused = false;
+
     // ---- 背包（对应原版 Unit.item：只能携带一种物品；容量由单位类型决定）----
     //刻意偏离：原版背包是 Unit 上的**可变** ItemStack（item.item / item.amount）；
     //本项目 Player 不是 Unit，且 type/ItemStack 是 final 不可变值对象（还被方块配方常量共享，

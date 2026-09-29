@@ -957,6 +957,50 @@ public class PlacementFragment extends Fragment{
         return value instanceof KeyBinds.KeyValue ? ((KeyBinds.KeyValue)value).key : -1;
     }
 
+    /**
+     * 中键吸取方块（对应原版 {@code PlacementFragment.gridUpdate} 的 {@code Binding.pick} 分支，
+     * PlacementFragment.java:93-109）：把光标下的方块（或建造队列里的占位方块）设为当前建造方块，
+     * 并切到它所属的分类（对应原版 {@code currentCategory = input.block.category}）。
+     * <p>消费点：{@code DesktopInput.touchDown} 的 MOUSE_MIDDLE 分支（原版是每帧 keyDown 轮询，
+     * 本项目输入层是事件式 → 改为在中键按下时调用一次，语义等价）。
+     *
+     * @return 是否成功选中（未选中任何可建造方块时 false，输入层不作处理）
+     */
+    public boolean pickBlock(float worldX, float worldY){
+        InputHandler input = input();
+        if(input == null || Vars.world == null) return false;
+
+        Block tryBlock = null;
+        Tile tile = Vars.world.tileWorld(worldX, worldY);
+        if(tile != null) tryBlock = tile.block();
+
+        //建造队列里的占位方块也能吸（对应原版 req.block.bounds(req.x, req.y, Tmp.r1).contains(mouse)）
+        if(Vars.player != null && Vars.player.unit() != null){
+            int tx = Vars.world.toTile(worldX), ty = Vars.world.toTile(worldY);
+            for(int i = 0; i < Vars.player.unit().buildQueue.size; i++){
+                com.phoenix.game.world.BuildRequest req = Vars.player.unit().buildQueue.get(i);
+                if(req.breaking || req.block == null) continue;
+                if(tx >= req.x && tx < req.x + req.block.size && ty >= req.y && ty < req.y + req.block.size){
+                    tryBlock = req.block;
+                    break;
+                }
+            }
+        }
+
+        //对应原版 tryRecipe.isVisible() && unlocked(tryRecipe)
+        if(tryBlock == null || !buildable(tryBlock) || !tryBlock.unlockedCur()) return false;
+
+        input.buildBlock = tryBlock;
+        input.breaking = false;
+        //选了方块就退出蓝图粘贴模式（与 selectBlockByIndex 一致）
+        input.pasteSchematic = null;
+        //切到该方块所属分类并刷新网格/分类选中态（对应原版调用方 rebuildCategory.run()）
+        currentCategory = tryBlock.category;
+        rebuildGrid();
+        rebuildCategories();
+        return true;
+    }
+
     private Tile hoveredTile(){
         if(input() == null || Vars.world == null || Core.camera == null) return null;
         float x = input().mouseWorldX(Gdx.input.getX());

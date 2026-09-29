@@ -623,11 +623,17 @@ public class BaseUnit extends SolidEntity implements TargetTrait, HealthTrait, M
             }
         }
 
-        //建造队列（对应原版 BuilderTrait.updateBuilding，由单位每帧驱动）
-        updateBuilding();
+        //建造队列（对应原版 Player.updateMechanics 的 `if(isBuilding) updateBuilding()`）。
+        //玩家侧开关挂在 Player.isBuilding 字段上（E 键切换，见 Player.java）；
+        //非玩家单位（建造机）不受影响，照常推进。
+        boolean buildEnabled = !(isPlayer && Vars.player != null && !Vars.player.isBuilding);
+        if(buildEnabled){
+            updateBuilding();
+        }
 
-        //玩家单位采矿（对应原版 Player.updateMechanics：不在建造时 updateMining）
-        if(isPlayer && buildRequest() == null){
+        //玩家单位采矿（对应原版 Player.updateMechanics：`buildRequest() == null || !isBuilding` 时
+        //updateMining —— 即建造被 E 键暂停时，队列里还有活也继续采矿）
+        if(isPlayer && (buildRequest() == null || !buildEnabled)){
             updateMining();
         }
 

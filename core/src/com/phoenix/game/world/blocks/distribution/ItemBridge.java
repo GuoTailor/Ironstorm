@@ -8,6 +8,7 @@ import com.phoenix.game.Vars;
 import com.phoenix.game.core.Core;
 import com.phoenix.game.core.Draw;
 import com.phoenix.game.core.Lines;
+import com.phoenix.game.core.Time;
 import com.phoenix.game.entities.type.Player;
 import com.phoenix.game.entities.type.TileEntity;
 import com.phoenix.game.graphics.Pal;
@@ -302,6 +303,40 @@ public class ItemBridge extends Block{
         }
 
         Core.batch.setColor(Color.WHITE);
+    }
+
+    /**
+     * 配置叠加（对应原版 {@code ItemBridge.drawConfigure}，ItemBridge.java:128-149）：
+     * 本体 accent 描边方框 + 四个方向上所有"可连但未连/已连"的桥格描边
+     * （已连 = Pal.place 实线，可连未连 = Pal.breakInvalid + 呼吸脉动）。
+     * <p><b>与原版的差异（d4 旋向）</b>：四个方向全遍历，方向集合相同，索引顺序不影响结果
+     * （本项目 d4 = {上,右,下,左}，原版 {右,上,左,下}，见 {@link #drawPlace} 的同款说明）。
+     * <p>坐标口径同 {@link Block#drawConfigure}：中心 = centerX/centerY（原版 drawx 即中心）。
+     */
+    @Override
+    public void drawConfigure(Tile tile){
+        if(!(tile.entity instanceof ItemBridgeEntity)) return;
+        ItemBridgeEntity entity = (ItemBridgeEntity)tile.entity;
+
+        Draw.color(Pal.accent);
+        Lines.stroke(1f);
+        Lines.square(centerX(tile), centerY(tile), size * tilesize / 2f + 1f);
+
+        for(int i = 1; i <= range; i++){
+            for(int j = 0; j < 4; j++){
+                Tile other = tile.getNearby(Geometry.d4[j].x * i, Geometry.d4[j].y * i);
+                if(linkValid(tile, other)){
+                    boolean linked = other.pos() == entity.link;
+                    Draw.color(linked ? Pal.place : Pal.breakInvalid);
+
+                    Lines.square(other.block().centerX(other), other.block().centerY(other),
+                        other.block().size * tilesize / 2f + 1f + (linked ? 0f : Mathf.absin(Time.time(), 4f, 1f)));
+                }
+            }
+        }
+
+        Draw.color();
+        Lines.stroke(1f);
     }
 
     public class ItemBridgeEntity extends TileEntity{
