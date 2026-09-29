@@ -1,5 +1,5 @@
 [小地图] 已采样 166 个方块颜色
-Menu background generated in 37 ms
+Menu background generated in 38 ms
 BLKDATA air 1 40 cat=effect bv=hidden cap=-1 req=
 BLKDATA grass 1 40 cat=effect bv=hidden cap=-1 req=
 BLKDATA stone 1 40 cat=effect bv=hidden cap=-1 req=
@@ -145,9 +145,9 @@ BLKDATA phase-conduit 1 40 cat=liquid bv=shown cap=-1 req=metaglass:20,titanium:
 BLKDATA solar-panel 1 40 cat=power bv=shown cap=-1 req=lead:10,silicon:15,
 BLKDATA solar-panel-large 3 360 cat=power bv=shown cap=-1 req=lead:100,silicon:145,phase-fabric:15,
 BLKDATA power-node 1 40 cat=power bv=shown cap=-1 req=copper:1,lead:3,
-BLKDATA power-node-large 2 40 cat=power bv=shown cap=-1 req=titanium:5,lead:10,silicon:3,
+BLKDATA power-node-large 2 160 cat=power bv=shown cap=-1 req=titanium:5,lead:10,silicon:3,
 BLKDATA surge-tower 2 160 cat=power bv=shown cap=-1 req=titanium:7,lead:10,silicon:15,surge-alloy:15,
-BLKDATA diode 1 260 cat=power bv=shown cap=-1 req=silicon:10,plastanium:5,metaglass:10,
+BLKDATA diode 1 40 cat=power bv=shown cap=-1 req=silicon:10,plastanium:5,metaglass:10,
 BLKDATA battery 1 40 cat=power bv=shown cap=-1 req=copper:4,lead:20,
 BLKDATA battery-large 3 360 cat=power bv=shown cap=-1 req=titanium:20,lead:40,silicon:20,
 BLKDATA combustion-generator 1 40 cat=power bv=shown cap=10 req=copper:25,lead:15,
@@ -157,29 +157,29 @@ BLKDATA differential-generator 3 360 cat=power bv=shown cap=10 req=copper:70,lea
 BLKDATA rtg-generator 2 160 cat=power bv=shown cap=10 req=lead:100,silicon:75,phase-fabric:25,plastanium:75,thorium:50,
 BLKDATA thorium-reactor 3 700 cat=power bv=shown cap=30 req=lead:300,silicon:200,graphite:150,thorium:150,metaglass:50,
 BLKDATA impact-reactor 4 900 cat=power bv=shown cap=10 req=lead:500,silicon:300,graphite:400,thorium:100,surge-alloy:250,metaglass:250,
-BLKDATA dagger-factory 2 350 cat=units bv=shown cap=30 req=copper:60,lead:40,
-BLKDATA draug-factory 2 350 cat=units bv=shown cap=30 req=copper:30,lead:70,
-BLKDATA spirit-factory 2 350 cat=units bv=shown cap=30 req=metaglass:45,lead:55,silicon:45,
-BLKDATA phantom-factory 2 350 cat=units bv=shown cap=30 req=titanium:50,thorium:60,lead:65,silicon:105,
-BLKDATA wraith-factory 2 350 cat=units bv=shown cap=30 req=titanium:30,lead:40,silicon:45,
-BLKDATA crawler-factory 2 350 cat=units bv=shown cap=30 req=lead:45,silicon:30,
-BLKDATA titan-factory 3 350 cat=units bv=shown cap=30 req=graphite:50,lead:50,silicon:45,
-BLKDATA ghoul-factory 3 350 cat=units bv=shown cap=30 req=titanium:75,lead:65,silicon:110,
-BLKDATA revenant-factory 4 350 cat=units bv=shown cap=30 req=plastanium:50,titanium:150,lead:150,silicon:200,
-BLKDATA fortress-factory 3 350 cat=units bv=shown cap=30 req=thorium:40,lead:110,silicon:75,
-BLKDATA repair-point 1 160 cat=units bv=shown cap=-1 req=lead:15,copper:15,silicon:15,
+BLKDATA dagger-factory 2 160 cat=units bv=shown cap=30 req=lead:55,silicon:35,
+BLKDATA draug-factory 2 160 cat=units bv=shown cap=30 req=copper:30,lead:70,
+BLKDATA spirit-factory 2 160 cat=units bv=shown cap=30 req=metaglass:45,lead:55,silicon:45,
+BLKDATA phantom-factory 2 160 cat=units bv=shown cap=30 req=titanium:50,thorium:60,lead:65,silicon:105,
+BLKDATA wraith-factory 2 160 cat=units bv=shown cap=30 req=titanium:30,lead:40,silicon:45,
+BLKDATA crawler-factory 2 160 cat=units bv=shown cap=30 req=lead:45,silicon:30,
+BLKDATA titan-factory 3 360 cat=units bv=shown cap=30 req=graphite:50,lead:50,silicon:45,
+BLKDATA ghoul-factory 3 360 cat=units bv=shown cap=30 req=titanium:75,lead:65,silicon:110,
+BLKDATA revenant-factory 4 640 cat=units bv=shown cap=30 req=plastanium:50,titanium:150,lead:150,silicon:200,
+BLKDATA fortress-factory 3 360 cat=units bv=shown cap=30 req=thorium:40,lead:110,silicon:75,
+BLKDATA repair-point 1 40 cat=units bv=shown cap=-1 req=lead:15,copper:15,silicon:15,
 BLKDATA command-center 2 220 cat=units bv=shown cap=-1 req=copper:200,lead:250,silicon:250,graphite:100,
 BLKDATA dart-mech-pad 2 160 cat=upgrade bv=shown cap=-1 req=lead:100,graphite:50,copper:75,
 BLKDATA delta-mech-pad 2 160 cat=upgrade bv=shown cap=-1 req=lead:175,titanium:175,copper:200,silicon:225,thorium:150,
 BLKDATA tau-mech-pad 2 160 cat=upgrade bv=shown cap=-1 req=lead:125,titanium:125,copper:125,silicon:125,
-BLKDATA omega-mech-pad 3 160 cat=upgrade bv=shown cap=-1 req=lead:225,graphite:275,silicon:325,thorium:300,surge-alloy:120,
+BLKDATA omega-mech-pad 3 360 cat=upgrade bv=shown cap=-1 req=lead:225,graphite:275,silicon:325,thorium:300,surge-alloy:120,
 BLKDATA javelin-ship-pad 2 160 cat=upgrade bv=shown cap=-1 req=lead:175,silicon:225,titanium:250,plastanium:200,phase-fabric:100,
 BLKDATA trident-ship-pad 2 160 cat=upgrade bv=shown cap=-1 req=lead:125,copper:125,silicon:125,titanium:150,plastanium:100,
-BLKDATA glaive-ship-pad 3 160 cat=upgrade bv=shown cap=-1 req=lead:225,silicon:325,titanium:350,plastanium:300,surge-alloy:100,
+BLKDATA glaive-ship-pad 3 360 cat=upgrade bv=shown cap=-1 req=lead:225,silicon:325,titanium:350,plastanium:300,surge-alloy:100,
 BLKDATA power-source 1 40 cat=power bv=sandboxOnly cap=-1 req=
-BLKDATA power-void 1 160 cat=power bv=sandboxOnly cap=-1 req=
-BLKDATA item-source 1 160 cat=distribution bv=sandboxOnly cap=1 req=
-BLKDATA item-void 1 160 cat=distribution bv=sandboxOnly cap=-1 req=
+BLKDATA power-void 1 40 cat=power bv=sandboxOnly cap=-1 req=
+BLKDATA item-source 1 40 cat=distribution bv=sandboxOnly cap=1 req=
+BLKDATA item-void 1 40 cat=distribution bv=sandboxOnly cap=-1 req=
 BLKDATA liquid-source 1 40 cat=liquid bv=sandboxOnly cap=-1 req=
 BLKDATA liquid-void 1 40 cat=liquid bv=sandboxOnly cap=-1 req=
 BLKDATA message 1 40 cat=effect bv=shown cap=-1 req=graphite:5,

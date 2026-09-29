@@ -1573,6 +1573,8 @@ public class Blocks implements com.phoenix.game.ctype.ContentList {
         powerNodeLarge = new PowerNode("power-node-large");
         powerNodeLarge.category = Category.power;
         powerNodeLarge.size = 2;
+        //原版 PowerNode 类无 health 覆写 → 2x2 默认 160（本项目类构造器误设 40，此处覆盖）
+        powerNodeLarge.health = 160;
         powerNodeLarge.laserRange = 9.5f;
         powerNodeLarge.maxLinks = 30;
         powerNodeLarge.requirements = new ItemStack[]{
@@ -1594,6 +1596,8 @@ public class Blocks implements com.phoenix.game.ctype.ContentList {
 
         //二极管：背面 → 正面 单向输电
         diode = new com.phoenix.game.world.blocks.power.PowerDiode("diode");
+        //原版 PowerDiode 类无 health 覆写 → 1x1 默认 40（本项目类构造器误设 260，此处覆盖）
+        diode.health = 40;
         diode.category = Category.power;
         diode.requirements = new ItemStack[]{
             new ItemStack(Items.silicon, 10), new ItemStack(Items.plastanium, 5), new ItemStack(Items.metaglass, 10)
@@ -1716,7 +1720,12 @@ public class Blocks implements com.phoenix.game.ctype.ContentList {
         daggerFactory.produceTime = 850f;
         daggerFactory.maxSpawn = 4;
         daggerFactory.inputItem = new ItemStack[]{ new ItemStack(Items.silicon, 6) };
-        daggerFactory.requirements = new ItemStack[]{ new ItemStack(Items.copper, 60), new ItemStack(Items.lead, 40) };
+        //原版 Blocks.java:1724 requirements = lead 55 + silicon 35（此前误写 copper 60 + lead 40）
+        daggerFactory.requirements = new ItemStack[]{ new ItemStack(Items.lead, 55), new ItemStack(Items.silicon, 35) };
+        //原版 UnitFactory 类无 health 覆写 → 走 Block 默认 size*size*40 = 160（本项目类构造器误设 350，此处覆盖）
+        daggerFactory.health = 160;
+        //原版 UnitTypes.java:1728 consumes.power(0.5f)（辅助方法外的独立工厂此前漏设，走了类默认 0.10f）
+        daggerFactory.consumes.power(0.5f);
         daggerFactory.buildVisibility = BuildVisibility.shown;
 
         //其余单位工厂：数值全部取自原版（produceTime / maxSpawn / 耗电 / 耗料）。
@@ -1728,38 +1737,48 @@ public class Blocks implements com.phoenix.game.ctype.ContentList {
         draugFactory = unitFactory("draug-factory", "draug", 2500f, 2, 1.2f, 1,
             new ItemStack[0], //原版是 consumes.items()（不带参数）→ 不耗材料，只耗电
             new ItemStack[]{ new ItemStack(Items.copper, 30), new ItemStack(Items.lead, 70) });
+        //原版 UnitFactory 类无 health 覆写 → 2x2 默认 160（本项目类构造器误设 350，此处覆盖；下同）
+        draugFactory.health = 160;
 
         spiritFactory = unitFactory("spirit-factory", "spirit", 4000f, 2, 1.2f, 1,
             new ItemStack[]{ new ItemStack(Items.silicon, 30), new ItemStack(Items.lead, 30) },
             new ItemStack[]{ new ItemStack(Items.metaglass, 45), new ItemStack(Items.lead, 55), new ItemStack(Items.silicon, 45) });
+        spiritFactory.health = 160;
 
         phantomFactory = unitFactory("phantom-factory", "phantom", 4400f, 2, 2.5f, 1,
             new ItemStack[]{ new ItemStack(Items.silicon, 50), new ItemStack(Items.lead, 30), new ItemStack(Items.titanium, 20) },
             new ItemStack[]{ new ItemStack(Items.titanium, 50), new ItemStack(Items.thorium, 60), new ItemStack(Items.lead, 65), new ItemStack(Items.silicon, 105) });
+        phantomFactory.health = 160;
 
         wraithFactory = unitFactory("wraith-factory", "wraith", 700f, 2, 0.5f, 1,
             new ItemStack[]{ new ItemStack(Items.silicon, 10), new ItemStack(Items.titanium, 5) },
             new ItemStack[]{ new ItemStack(Items.titanium, 30), new ItemStack(Items.lead, 40), new ItemStack(Items.silicon, 45) });
+        wraithFactory.health = 160;
 
         crawlerFactory = unitFactory("crawler-factory", "crawler", 300f, 2, 0.5f, 6,
             new ItemStack[]{ new ItemStack(Items.coal, 10) },
             new ItemStack[]{ new ItemStack(Items.lead, 45), new ItemStack(Items.silicon, 30) });
+        crawlerFactory.health = 160;
 
         titanFactory = unitFactory("titan-factory", "titan", 1050f, 3, 0.60f, 4,
             new ItemStack[]{ new ItemStack(Items.silicon, 12) },
             new ItemStack[]{ new ItemStack(Items.graphite, 50), new ItemStack(Items.lead, 50), new ItemStack(Items.silicon, 45) });
+        titanFactory.health = 360; //原版 3x3 默认（类构造器误设 350）
 
         ghoulFactory = unitFactory("ghoul-factory", "ghoul", 1150f, 3, 1.2f, 4,
             new ItemStack[]{ new ItemStack(Items.silicon, 15), new ItemStack(Items.titanium, 10) },
             new ItemStack[]{ new ItemStack(Items.titanium, 75), new ItemStack(Items.lead, 65), new ItemStack(Items.silicon, 110) });
+        ghoulFactory.health = 360; //原版 3x3 默认（类构造器误设 350）
 
         revenantFactory = unitFactory("revenant-factory", "revenant", 2000f, 4, 3f, 4,
             new ItemStack[]{ new ItemStack(Items.silicon, 40), new ItemStack(Items.titanium, 30) },
             new ItemStack[]{ new ItemStack(Items.plastanium, 50), new ItemStack(Items.titanium, 150), new ItemStack(Items.lead, 150), new ItemStack(Items.silicon, 200) });
+        revenantFactory.health = 640; //原版 4x4 默认（类构造器误设 350）
 
         fortressFactory = unitFactory("fortress-factory", "fortress", 2000f, 3, 1.4f, 3,
             new ItemStack[]{ new ItemStack(Items.silicon, 20), new ItemStack(Items.graphite, 10) },
             new ItemStack[]{ new ItemStack(Items.thorium, 40), new ItemStack(Items.lead, 110), new ItemStack(Items.silicon, 75) });
+        fortressFactory.health = 360; //原版 3x3 默认（类构造器误设 350）
 
         //维修点：给半径内最近的受伤友军回血（耗电 1/帧，只在锁定目标时耗）
         repairPoint = new com.phoenix.game.world.blocks.units.RepairPoint("repair-point");
@@ -1767,6 +1786,8 @@ public class Blocks implements com.phoenix.game.ctype.ContentList {
         repairPoint.repairSpeed = 0.5f;
         repairPoint.repairRadius = 65f;
         repairPoint.powerConsumption = 1f;
+        //原版 RepairPoint 类无 health 覆写 → 1x1 默认 40（本项目类构造器误设 160，此处覆盖）
+        repairPoint.health = 40;
         repairPoint.requirements = new ItemStack[]{
             new ItemStack(Items.lead, 15), new ItemStack(Items.copper, 15), new ItemStack(Items.silicon, 15)
         };
@@ -1802,6 +1823,8 @@ public class Blocks implements com.phoenix.game.ctype.ContentList {
             new ItemStack(Items.lead, 225), new ItemStack(Items.graphite, 275), new ItemStack(Items.silicon, 325),
             new ItemStack(Items.thorium, 300), new ItemStack(Items.surgealloy, 120)
         });
+        //原版 MechPad 类无 health 覆写 → 3x3 默认 360（本项目类构造器误设 160，此处覆盖）
+        mechPadOmega.health = 360;
 
         //飞船平台（3 个 ship-pad，原版顺序 omegaPad → javelin → trident → glaive）。
         //⚠ 原版这 3 个平台设的是 mech = Mechs.javelin/trident/glaive —— **飞船是 Mech，不是 UnitType**
@@ -1823,6 +1846,7 @@ public class Blocks implements com.phoenix.game.ctype.ContentList {
             new ItemStack(Items.lead, 225), new ItemStack(Items.silicon, 325), new ItemStack(Items.titanium, 350),
             new ItemStack(Items.plastanium, 300), new ItemStack(Items.surgealloy, 100)
         });
+        glaivePad.health = 360; //原版 3x3 默认（类构造器误设 160）
 
         //沙盒方块：无限电力/物品的源与虚空，只在 rules.sandbox 打开时出现在建造菜单里
         powerSource = new com.phoenix.game.world.blocks.sandbox.PowerSource("power-source");
@@ -1836,17 +1860,21 @@ public class Blocks implements com.phoenix.game.ctype.ContentList {
         powerVoid.category = Category.power;
         //原版 Blocks.java:1830 alwaysUnlocked
         powerVoid.alwaysUnlocked = true;
+        //原版 PowerVoid 类无 health 覆写 → 1x1 默认 40（本项目类构造器误设 160，此处覆盖；下同）
+        powerVoid.health = 40;
         //同上：PowerVoid.java 构造器里设 sandboxOnly 可见性（原版 Blocks.java:1829）
 
         itemSource = new com.phoenix.game.world.blocks.sandbox.ItemSource("item-source");
         itemSource.category = Category.distribution;
         //原版 Blocks.java:1835 alwaysUnlocked
         itemSource.alwaysUnlocked = true;
+        itemSource.health = 40; //原版 1x1 默认 40（类构造器误设 160）
 
         itemVoid = new com.phoenix.game.world.blocks.sandbox.ItemVoid("item-void");
         itemVoid.category = Category.distribution;
         //原版 Blocks.java:1840 alwaysUnlocked
         itemVoid.alwaysUnlocked = true;
+        itemVoid.health = 40; //原版 1x1 默认 40（类构造器误设 160）
         //item-source/item-void 的沙盒可见性由类构造器设置（ItemSource.java/ItemVoid.java 里
         //buildVisibility = BuildVisibility.sandboxOnly，对应原版 Blocks.java:1834/1839 的 requirements(...)）
 

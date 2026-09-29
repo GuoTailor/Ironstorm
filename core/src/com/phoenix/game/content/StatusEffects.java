@@ -23,7 +23,7 @@ public class StatusEffects implements com.phoenix.game.ctype.ContentList {
     /** 燃烧 */
     public static final StatusEffect burning = new StatusEffect("burning"){{
         color = Color.valueOf("ffa665");
-        damage = 0.5f;
+        damage = 0.06f;
         reactive = true;
         effect = Fx.burning;
 
@@ -37,10 +37,11 @@ public class StatusEffects implements com.phoenix.game.ctype.ContentList {
         });
     }};
 
-    /** 冰冻：减速 */
+    /** 冰冻：减速 + 减护甲 */
     public static final StatusEffect freezing = new StatusEffect("freezing"){{
         color = Color.valueOf("8fb2e6");
         speedMultiplier = 0.6f;
+        armorMultiplier = 0.8f;
         effect = Fx.freezing;
 
         init(() -> opposite(melting, burning));
@@ -49,7 +50,7 @@ public class StatusEffects implements com.phoenix.game.ctype.ContentList {
     /** 潮湿：减速 */
     public static final StatusEffect wet = new StatusEffect("wet"){{
         color = Color.valueOf("5296d6");
-        speedMultiplier = 0.85f;
+        speedMultiplier = 0.9f;
         effect = Fx.wet;
 
         init(() -> {
