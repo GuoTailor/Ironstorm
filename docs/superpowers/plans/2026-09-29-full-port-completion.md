@@ -79,7 +79,7 @@
 | F15 | 功能 | **键位系统 + 教程指引**（T0-②组B/C，4 条，玩家可感）：KeyBinds setDefaults/save/load + ControlsDialog 键位重绑定界面；Tutorial.outline/toggled（原版 TutorialStage.outline：scene.findVisible + Lines.rect + 呼吸箭头） | ☑（提交 51af32f）；KeyBinds(Binding 枚举默认表=settings 持久化 arc 同名键) + ControlsDialog 重绑定（键盘/鼠标/滚轮三路捕获）+ DesktopInput 21 处消费点 + Tutorial outline；**实测 seed select→G(34) 生效**；交付后修 trns 编译错 1 处；已知降级：鼠标↔键盘互换重绑暂不生效（管道分离，已声明） |
 | F16 | 功能 | **集结与命令 AI**（T0-②组G，3 条）：Pathfinder.rallyPoints 流场（扫 BlockFlag.rally，集结链当前断裂）、CommandAI.hit() 受击反击、afterRead() 读档恢复命令；blockingUnit 需先补 Units.nearbyCheck | ☑（提交 9864bbf）；rallyPoints 照原版接 getAllied(rally)（入口 CommandCenter 已刻意退役，链路待用）+ hit 反击（126.2 无 CommandAI，v146 对齐）挂 collision + nearbyCheck 两重载；考据：afterRead 命令存档任何版本均无→不做；**实测反击链闭环**（attackTarget 指向攻击者→进入射程按 stopAtTarget 释放=原版语义） |
 | F17 | 功能 | **贴图资源缺口**（T0-②组F，3 条）：message / illuminator(-top) / armored-conveyor 贴图从原版 assets 拷进 `core/assets-raw/sprites_out/`（**同时拷 sprites_out/ 顶层**），主会话跑 texturePacker + 区域名集合 diff 校验 | ☑（提交 a08a2f6）；主会话执行：25 张（message/illuminator+top/armored 20帧+2icon）拷入 sprites_out 对应子目录（icon 变体在 editor//generated/ 目录）→ texturePacker → **区域名 diff 校验 +25 零丢失**；冒烟无异常 |
-| F18 | 功能 | **小功能合集**（T0-②组D/H/I，6 条）：bloom 后处理管线（设置项已存在）、MapIO.FilterContext 滤镜应用链、DatabaseDialog Fonts.getUnicode 复制彩蛋、coreselect 写蓝图判据 | ☐ |
+| F18 | 功能 | **小功能合集**（T0-②组D/H/I，6 条）：bloom 后处理管线（设置项已存在）、MapIO.FilterContext 滤镜应用链、DatabaseDialog Fonts.getUnicode 复制彩蛋、coreselect 写蓝图判据 | ☑（提交 b5da34b）；bloom no-op 降级（挂接链路全通：设置回调→toggleBloom→capture/render 两调用点逐行对应原版 273-283）+ applyFilters（原版 FilterContext.end 逐字，blockRaw 口径声明）+ 复制彩蛋 + coreselect；冒烟无异常 |
 | F10 | 功能 | **A2 产出**：世界暗化层 isDarkened 整链（Tile/World/FloorRenderer，原版 core/World.java:308-344）、Door 手动开合+门音效+开关刷新寻路（Door.java:20-46）、**canDeconstruct 未调 canBreak → 自家核心可拆**（Build.java:192 + CoreBlock.canBreak） | ☑（提交 9ff7dea）；暗化=addDarkness 现算（rotation 存 0-5 暗度）+渲染/小地图/入档重算；**截图验证岩体暗度梯度**；含 rgba→toIntBits 编译修正 |
 | F11 | 功能 | A3 审计产出（待 A3 完成后登记） | ☐ |
 | F12 | 功能 | T0 分类产出的"缺失功能"项（待 T0 完成后登记） | ☐ |
@@ -176,3 +176,4 @@ UI 类以"功能等价"判（arc→libgdx 已知缺口见 转换.md，不算缺�
 - 2026-09-30 F15 完成：键位系统全链 + 教程指引框；实测 settings seed 重绑生效（select→G=34，M=41/SPACE=62 核对）；修 trns 编译错（提交 51af32f）；派发 F16
 - 2026-09-30 F16 完成：rally 流场/hit 反击/nearbyCheck；实测反击链闭环（含 Interval 开局冷却=arc 同款行为考据、stopAtTarget 释放=原版语义）（提交 9864bbf）；派发 F18，F17 主会话并行做
 - 2026-09-30 F17 完成：3 组贴图入集 +25 区域零丢失；**发现并修复提交裹挟**（F18 并行改动的 World/Maps 被拆出，F18 交付时一起提交）（提交 a08a2f6）
+- 2026-09-30 F18 完成：bloom 降级挂接/滤镜链/复制彩蛋/coreselect 全落；冒烟无异常（提交 b5da34b）；F14~F18 全部完成——T0-②组缺失功能清零
