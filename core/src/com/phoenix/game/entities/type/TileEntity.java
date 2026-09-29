@@ -284,13 +284,13 @@ public abstract class TileEntity extends SolidEntity implements com.phoenix.game
         if(tile != null){
             Events.fire(new EventType.BlockDestroyEvent(tile));
 
-            //残骸贴花（对应原版 {@code Block.onDestroyed} 末尾的
-            //`if(!tile.floor().solid && !tile.floor().isLiquid) RubbleDecal.create(tile.drawx(), tile.drawy(), size);`）。
-            //本项目没有 {@code Block.onDestroyed} 钩子（核爆等逻辑写在实体 kill() 里），所以接在这里。
-            //⚠ 坐标口径：原版 {@code tile.drawx()} 在原版口径下就是方块几何中心；本项目要加半格 → 用 centerX/centerY。
-            if(block != null && !tile.floor().solid && !tile.floor().isLiquid){
-                com.phoenix.game.entities.effect.RubbleDecal.create(
-                    block.centerX(tile), block.centerY(tile), block.size);
+            //破坏音效 + 破坏表现（对应原版 TileEntity.onDeath 里的
+            //`block.breakSound.at(tile); block.onDestroyed(tile);`，TileEntity.java:287-288）：
+            //库存物品爆炸 / 液体泼洒 / 电力缓冲爆炸 / 残骸贴花都在 Block.onDestroyed 里（原版同）。
+            //⚠ 原版 Sound.at(tile) 按位置播放；本项目音效无位置衰减，直接 play(1f)。
+            if(block != null){
+                block.breakSound.play(1f);
+                block.onDestroyed(tile);
             }
 
             tile.remove();

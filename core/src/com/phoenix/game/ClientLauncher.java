@@ -376,6 +376,9 @@ public class ClientLauncher extends ApplicationAdapter {
 
 
 
+
+
+
     //DEBUG-LOGTEST-START
     /** 物流链路自动化验证的帧计数 / 结束帧 / 模式 / 是否已搭建 / 链路瓦片 / 容器瓦片。 */
     private int logTestFrame, logTestEnd = 400, logTestMode = 1;

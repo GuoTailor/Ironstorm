@@ -11,11 +11,17 @@ import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.g2d.TextureAtlas;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.utils.Array;
+import com.badlogic.gdx.audio.Sound;
 import com.phoenix.game.content.Items;
 import com.phoenix.game.core.Core;
 import com.phoenix.game.core.Draw;
+import com.phoenix.game.core.Time;
 import com.phoenix.game.core.Lines;
+import com.phoenix.game.entities.Damage;
+import com.phoenix.game.entities.effect.Puddle;
+import com.phoenix.game.entities.effect.RubbleDecal;
 import com.phoenix.game.graphics.Pal;
+import io.anuke.mindustry.gen.Sounds;
 import com.phoenix.game.entities.type.TileEntity;
 import com.phoenix.game.math.Mathf;
 import com.phoenix.game.type.Item;
@@ -65,6 +71,10 @@ public class Block extends com.phoenix.game.ctype.UnlockableContent {
     public boolean insulated = false;
     /** 血量，-1 表示不可破坏 */
     public int health = -1;
+    /** 基础爆炸性（对应原版 {@code Block.baseExplosiveness}，Block.java:67）：被摧毁时计入爆炸威力。 */
+    public float baseExplosiveness = 0f;
+    /** 破坏音效（对应原版 {@code Block.breakSound}，Block.java:120）。 */
+    public Sound breakSound = Sounds.boom;
     /** 方块标记，用于 AI 索引 */
     public EnumSet<BlockFlag> flags = EnumSet.noneOf(BlockFlag.class);
     /** 显示颜色 */
@@ -1365,6 +1375,73 @@ public class Block extends com.phoenix.game.ctype.UnlockableContent {
     /** @return 本方块在指定锚点瓦片处的几何中心 Y */
     public float centerY(Tile tile){
         return tile.worldy() + offset() + tilesize / 2f;
+    }
+
+    /**
+     * 方块被摧毁时的破坏表现（对应原版 {@code Block.onDestroyed}，mindustry/world/Block.java:604-647）：
+     * 库存物品与液体储量计入爆炸威力（可燃物起火、爆炸物加冲击波）、液体泼洒成水洼（{@link Puddle#deposit}）、
+     * 电力缓冲按容量折算成闪电（{@code Damage.dynamicExplosion} 的 power 分支）、非液体地面留残骸贴花。
+     * <p>调用点：{@code TileEntity.kill()}（对应原版 {@code TileEntity.onDeath}，TileEntity.java:282-292：
+     * 派发 BlockDestroyEvent → 播 {@code breakSound} → 调本方法 → 移除瓦片）。玩家主动拆除走
+     * {@code Build.deconstruct}，不会经过这里（与原版一致，拆除只有碎裂特效不爆炸）。
+     * <p>⚠ 坐标口径：原版 {@code tile.worldx()/worldy()} 与 {@code tile.drawx()/drawy()} 都是方块中心；
+     * 本项目它们是瓦片角点（见 {@code Tile.drawx()} 注释）→ 爆炸中心与贴花落点改用
+     * {@link #centerX}/{@link #centerY}。
+     */
+    public void onDestroyed(Tile tile){
+        float x = centerX(tile), y = centerY(tile);
+        float explosiveness = baseExplosiveness;
+        float flammability = 0f;
+        float power = 0f;
+
+        if(hasItems && tile.entity != null && tile.entity.items != null){
+            //原版 for(Item item : content.items())；本项目等价集合是 Items.all
+            for(int i = 0; i < Items.all.size; i++){
+                Item item = Items.all.get(i);
+                int amount = tile.entity.items.get(item);
+                explosiveness += item.explosiveness * amount;
+                flammability += item.flammability * amount;
+            }
+        }
+
+        if(hasLiquids && tile.entity != null && tile.entity.liquids != null){
+            flammability += tile.entity.liquids.sum((liquid, amount) -> liquid.explosiveness * amount / 2f);
+            explosiveness += tile.entity.liquids.sum((liquid, amount) -> liquid.flammability * amount / 2f);
+        }
+
+        if(consumes.hasPower() && tile.entity != null && tile.entity.power != null){
+            com.phoenix.game.world.consumers.ConsumePower cons =
+                consumes.get(com.phoenix.game.world.consumers.ConsumeType.power);
+            if(cons.buffered){
+                power += tile.entity.power.status * cons.capacity;
+            }
+        }
+
+        if(hasLiquids && tile.entity != null && tile.entity.liquids != null){
+            //⚠ 捕获坐标 int 而不是 tile 引用：延迟任务最长 15 个时间单位后才跑，
+            //  期间 tile 可能已被 setBlock(air)/重建改写，捕获引用会拿到过期坐标。
+            final int tx = tile.x, ty = tile.y;
+            tile.entity.liquids.each((liquid, amount) -> {
+                float splash = Mathf.clamp(amount / 4f, 0f, 10f);
+
+                for(int i = 0; i < Mathf.clamp(amount / 5, 0, 30); i++){
+                    Time.run(i / 2f, () -> {
+                        //原版 world.tile(tile.x + Mathf.range(size / 2), ...)；arc 的 Mathf.range(int) 返回 int，
+                        //本项目 Mathf.range(float) 返回 float → 显式取整
+                        Tile other = com.phoenix.game.Vars.world == null ? null
+                            : com.phoenix.game.Vars.world.tile(tx + (int)Mathf.range(size / 2), ty + (int)Mathf.range(size / 2));
+                        if(other != null){
+                            Puddle.deposit(other, liquid, splash);
+                        }
+                    });
+                }
+            });
+        }
+
+        Damage.dynamicExplosion(x, y, flammability, explosiveness * 3.5f, power, tilesize * size / 2f, Pal.darkFlame);
+        if(!tile.floor().solid && !tile.floor().isLiquid){
+            RubbleDecal.create(centerX(tile), centerY(tile), size);
+        }
     }
 
     /**

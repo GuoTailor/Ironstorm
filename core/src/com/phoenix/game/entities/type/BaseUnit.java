@@ -30,6 +30,7 @@ import com.phoenix.game.entities.units.UnitDrops;
 import com.phoenix.game.entities.units.UnitState;
 import com.phoenix.game.game.EventType;
 import com.phoenix.game.graphics.Pal;
+import io.anuke.mindustry.gen.Sounds;
 import com.phoenix.game.math.Angles;
 import com.phoenix.game.math.Mathf;
 import com.phoenix.game.type.Item;
@@ -234,7 +235,12 @@ public class BaseUnit extends SolidEntity implements TargetTrait, HealthTrait, M
             Vars.player.addXp(1);
         }
 
-        Damage.dynamicExplosion(x, y, 0f, 2f, 0f, type.hitsize, Pal.darkFlame);
+        //爆炸威力/可燃性受携带物品加成（照原版 Unit.onDeath 开头，mindustry/entities/type/Unit.java:99-101：
+        //`explosiveness = 2f + item.item.explosiveness * item.amount; flammability = item.item.flammability * item.amount;`；
+        //原版 radius 是 getSize()/2f，本项目 getSize() 本就返回 type.hitsize，等价）
+        float explosiveness = 2f + (item == null ? 0f : item.explosiveness * itemAmount);
+        float flammability = item == null ? 0f : item.flammability * itemAmount;
+        Damage.dynamicExplosion(x, y, flammability, explosiveness, 0f, type.hitsize, Pal.darkFlame);
         //爆炸焦痕贴花（对应原版 Unit.onDeath 里紧跟在 dynamicExplosion 之后的 ScorchDecal.create(x, y)）
         ScorchDecal.create(x, y);
 
@@ -243,13 +249,26 @@ public class BaseUnit extends SolidEntity implements TargetTrait, HealthTrait, M
         Effects.effect(Fx.unitDebris, Pal.rubble, x, y, rotation);
         Effects.shake(2f, 2f, this);
 
+        //死亡音效（原版 Unit.onDeath 的 `Sounds.bang.at(this)`，Unit.java:107；
+        //音效无位置衰减 → play(1f)）
+        Sounds.bang.play(1f);
+        //单位类型专属死亡音效（对应原版 BaseUnit.onUnitDeath 的 `type.deathSound.at(unit)`，BaseUnit.java:63）
+        if(type.deathSound != null) type.deathSound.play(1f);
+
         status.clear();
         //溺水进度清零（照原版 Unit.onDeath，mindustry/entities/type/Unit.java:109）
         drownTime = 0f;
+        //携带物品清空（照原版 Unit.onDeath 的 `item.amount = 0`，Unit.java:108）
+        clearItem();
 
         //单位销毁事件（对应原版 Unit.onDeath 里在 remove() 前派发的 UnitDestroyEvent）：
         //结算框的"消灭敌人数"由监听它的 Control 按阵营累加
         Events.fire(new EventType.UnitDestroyEvent(this));
+
+        //自爆提示（照原版 Unit.onDeath 末尾，Unit.java:113-115；"玩家"等价物是玩家当前控制的单位）
+        if(explosiveness > 7f && Vars.player != null && this == Vars.player.unit()){
+            Events.fire(EventType.Trigger.suicideBomb);
+        }
 
         remove();
     }

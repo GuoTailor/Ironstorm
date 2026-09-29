@@ -1,7 +1,12 @@
 package com.phoenix.game.entities;
+import com.phoenix.game.content.Bullets;
+import com.phoenix.game.core.Time;
 import com.phoenix.game.entities.effect.Fire;
+import com.phoenix.game.entities.effect.Lightning;
+import com.phoenix.game.entities.traits.Entity;
 import com.phoenix.game.entities.type.BaseUnit;
 import com.phoenix.game.entities.type.Bullet;
+import com.phoenix.game.graphics.Pal;
 
 import com.badlogic.gdx.graphics.Color;
 import com.phoenix.game.Vars;
@@ -21,7 +26,7 @@ import java.util.HashSet;
 /**
  * 伤害/爆炸工具类。参照 Mindustry mindustry.entities.Damage 移植。
  * 含 4 参旧口径（无衰减）与 6 参原版口径（衰减+击退+complete 摧毁建筑）两套重载；
- * tileDamage 传播算法与 dynamicExplosion 大件归 F6 批。
+ * tileDamage 传播算法归 F6 批（dynamicExplosion 已按原版补全）。
  */
 public class Damage{
 
@@ -159,16 +164,54 @@ public class Damage{
         }
     }
 
-    /** 动态爆炸（带可燃/爆炸物属性）。 */
+    /**
+     * 动态爆炸（带可燃/爆炸物属性，对应原版 {@code Damage.dynamicExplosion}，Damage.java:33-65）。
+     * <ul>
+     *   <li>{@code power}（电力缓冲）：延迟放出的闪电（{@code Lightning.create}，队属 derelict），
+     *       即"电力缓冲爆炸"的电击视觉；</li>
+     *   <li>{@code flammability}（可燃物）：延迟甩出的火球（{@code Bullets.fireball}）；</li>
+     *   <li>{@code explosiveness}（爆炸物）：多波伤害（全场单位 + 建筑）与冲击波特效；</li>
+     *   <li>末尾固定：按威力震屏 + 可变强度爆炸特效（强度 = radius/8）。</li>
+     * </ul>
+     * <p>调用点：{@code Block.onDestroyed}（建筑摧毁）与 {@code BaseUnit.onDeath}（单位死亡）。
+     */
     public static void dynamicExplosion(float x, float y, float flammability, float explosiveness, float power, float radius, Color color){
-        Effects.effect(Fx.explosion, color, x, y, 0f);
-        Effects.shake(explosiveness + power, explosiveness + power, x, y);
-
-        damageAll(x, y, radius, 4f * (explosiveness + power + 1f));
-
-        if(flammability > 0f){
-            createIncend(x, y, radius, (int)Math.min(flammability, 8f));
+        //电力缓冲爆炸：闪电（原版 Lightning.create(Team.derelict, Pal.power, 3, x, y, angle, branches)）
+        for(int i = 0; i < Mathf.clamp(power / 20, 0, 6); i++){
+            int branches = 5 + Mathf.clamp((int)(power / 30), 1, 20);
+            Time.run(i * 2f + Mathf.random(4f), () -> Lightning.create(Team.derelict, Pal.power, 3,
+                x, y, Mathf.random(360f), branches + (int)Mathf.range(2)));
         }
+
+        //可燃物爆炸：火球（原版 Call.createBullet(Bullets.fireball, Team.derelict, ...)；
+        //本项目无网络层 Call → 本地直接生成，写法与 Fire/Puddle 的火球一致）
+        for(int i = 0; i < Mathf.clamp(flammability / 4, 0, 30); i++){
+            Time.run(i / 2f, () -> Bullet.create(Bullets.fireball, (Entity)null, Team.derelict, x, y, Mathf.random(360f), 1f, 1f, null));
+        }
+
+        int waves = Mathf.clamp((int)(explosiveness / 4), 0, 30);
+
+        for(int i = 0; i < waves; i++){
+            int f = i;
+            Time.run(i * 2f, () -> {
+                //原版 Damage.damage(x, y, rad, dmg) → damage(null, ..., false)：全场单位（含友军）+ 建筑。
+                //⚠ 建筑部分随原版 tileDamage 走（F6 批的 TODO），当前只伤单位
+                damage(null, x, y, Mathf.clamp(radius + explosiveness, 0, 50f) * ((f + 1f) / waves), explosiveness / 2f, false);
+                Effects.effect(Fx.blockExplosionSmoke, x + Mathf.range(radius), y + Mathf.range(radius));
+            });
+        }
+
+        if(explosiveness > 15f){
+            Effects.effect(Fx.shockwave, x, y);
+        }
+
+        if(explosiveness > 30f){
+            Effects.effect(Fx.bigShockwave, x, y);
+        }
+
+        float shake = Math.min(explosiveness / 4f + 3f, 9f);
+        Effects.shake(shake, shake, x, y);
+        Effects.effect(Fx.dynamicExplosion, x, y, radius / 8f);
     }
 
     /** 激光弹命中过的瓦片（同一条光束里同一格只打一次，large 的四邻检测会重复覆盖到）。 */

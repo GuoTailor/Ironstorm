@@ -48,6 +48,12 @@ public class UnitType extends com.phoenix.game.ctype.UnlockableContent{
     public float buildPower = 0.3f, minePower = 0.7f;
     public float weaponOffsetY, engineOffset = 6f, engineSize = 2f;
     public Weapon weapon;
+    /**
+     * 死亡音效（对应原版 {@code UnitType.deathSound}，mindustry/type/UnitType.java:43，默认 {@code Sounds.bang}）。
+     * <p>播放点：{@code BaseUnit.onDeath}。⚠ 与 {@code Blocks.java} 里 {@code shootSound} 的既有做法一致：
+     * 直接持有 {@code Sounds} 静态引用（音频未启用前是 MockSound 空实现，播放即静音）。
+     */
+    public com.badlogic.gdx.audio.Sound deathSound = io.anuke.mindustry.gen.Sounds.bang;
     /** 是否为 Boss 单位：独立血条、波次提示（原版按单位类型隐式区分，这里显式标记）。 */
     public boolean boss;
 
