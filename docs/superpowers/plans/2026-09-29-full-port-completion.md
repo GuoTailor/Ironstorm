@@ -58,13 +58,25 @@
 
 | 编号 | 类型 | 内容 | 状态 |
 | --- | --- | --- | --- |
-| A1 | 审计 | 实体/AI/游戏逻辑包功能对照（entities/ai/game） | ☐ |
+| A1 | 审计 | 实体/AI/游戏逻辑包功能对照（entities/ai/game） | ☑ 缺失15/偏离6/断裂4 → docs/port/audit-A1-entities-ai-game.md |
 | A2 | 审计 | 世界/内容包功能对照（world/content） | ☐ |
-| A3 | 审计 | UI/输入/渲染/核心包功能对照（ui/input/graphics/core/meta） | ☐ |
+| A3 | 审计 | UI/输入/渲染/核心包功能对照（ui/input/graphics/core/meta/net） | ☐ |
 | N1 | 数值 | 运行时 dump 三方对照（BLKSIZE/BLKDATA/UNITDATA ↔ 原版源码 ↔ 图集）修复差异 | ☐ |
 | T0 | 清理 | 254 条 TODO 全量分类（过时/缺失功能/刻意偏离/待议）→ docs/port/todo-classified.md | ☐ |
 | T1~Tn | 清理 | 按分类逐批消化 TODO（过时注释直接修；缺失功能转 F 批） | ☐ |
-| F* | 功能 | 缺失功能补齐（来源：A 审计 + T 分类；每批一个功能域，做完一批再定下一批） | ☐ |
+| F1 | 功能 | **单位物理五项**（A1 高）：卡墙 kill / 深水溺亡 drownTime / 出界 kill+warp 推回 / spawner 失效 kill / 液体地板状态+伤害+walkEffect（原版 Unit.java:99,183,196-216,236-260,288） | ☐ |
+| F2 | 功能 | **开波整链**（A1 高）：出生点清场（spawnShockwave+全额伤害）、延迟分批出生（Time.run+spawn 特效）、attack 模式核心增援（WaveSpawner.java:72-150） | ☐ |
+| F3 | 功能 | **Lightning 完整化**（A1 高）：沿途 damageLightning 子弹 + 30 格链式跳跃（maxChain 8）+ insulated 绝缘墙拦截（Lightning.java:71-115） | ☐ |
+| F4 | 功能 | **破坏表现链**（A1 中）：Block.onDestroyed 库存爆炸/液体泼洒/电力缓冲（Block.java:604-647）、breakSound、单位 deathSound、死亡携带物品殉爆（Unit.java:99-101） | ☐ |
+| F5 | 功能 | **子弹对空语义**（A1 高，小改）：collides() 改 `!(flying && !collidesAir)`、collideGroups 方向 (bullet,unit)（Bullet.java:168-170） | ☐ |
+| F6 | 功能 | **Damage 家族**（A1 中）：tileDamage 菱形蔓延、calculateDamage 距离衰减+击退、dynamicExplosion 分层时序+震屏上限（Damage.java:33-274） | ☐ |
+| F7 | 功能 | **断裂接线四件**（A1 中，小改）：launchWaveMultiplier 消费、Zone.updateWave/bestWave、护甲减免 calculateDamage、Fire.extinguish 发 fireExtinguish + Fire 接已移植的 Puddle | ☐ |
+| F8 | 功能 | **索敌语义**（A1 中）：derelict 豁免、findEnemyTile tilePred、targetClosest 用 max(weapon.range, type.range)（Units.java:84-150、BaseUnit.java:181-186） | ☐ |
+| F9 | 功能 | **状态存档与染色**（A1 中/低）：Statuses writeSave/readSave、getStatusColor | ☐ |
+| F10 | 功能 | A2 审计产出（待 A2 完成后登记） | ☐ |
+| F11 | 功能 | A3 审计产出（待 A3 完成后登记） | ☐ |
+| F12 | 功能 | T0 分类产出的"缺失功能"项（待 T0 完成后登记） | ☐ |
+| F-LOW | 功能 | 低优先级合集（A1 表尾）：EventType 缺失事件类、Schematics.overwrite、SpawnGroup 序列化、SoundLoop 工作音效、GlobalData 资源池、TileEntity 休眠优化 | ☐ |
 | R1 | 残留 | 死代码/占位实现/`// removed` 残留清扫（含 S3d-5 主菜单背景） | ☐ |
 | V1 | 终验 | 全量验证：编译绿 + autoplay 实跑 + 截图核对 + 联机冒烟 + 数值 dump 复检 | ☐ |
 
@@ -136,4 +148,5 @@ UI 类以"功能等价"判（arc→libgdx 已知缺口见 转换.md，不算缺�
 
 ## 进度日志（每批一行，主会话维护）
 
-- 2026-09-29 方案建立；基线提交；派发 A1
+- 2026-09-29 方案建立；基线提交 9bdbefc；派发 A1
+- 2026-09-29 A1 完成（缺失15/偏离6/断裂4，报告 docs/port/audit-A1-entities-ai-game.md）；登记 F1~F9/F-LOW；派发 A2
