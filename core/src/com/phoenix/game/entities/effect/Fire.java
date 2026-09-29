@@ -7,12 +7,14 @@ import com.phoenix.game.content.Bullets;
 import com.phoenix.game.content.Fx;
 import com.phoenix.game.content.StatusEffects;
 import com.phoenix.game.core.Core;
+import com.phoenix.game.core.Events;
 import com.phoenix.game.core.Time;
 import com.phoenix.game.entities.Damage;
 import com.phoenix.game.entities.Effects;
 import com.phoenix.game.entities.traits.Entity;
 import com.phoenix.game.entities.type.Bullet;
 import com.phoenix.game.entities.type.TileEntity;
+import com.phoenix.game.game.EventType.Trigger;
 import com.phoenix.game.game.Team;
 import com.phoenix.game.math.Mathf;
 import com.phoenix.game.math.geom.Geometry;
@@ -38,8 +40,6 @@ import static com.phoenix.game.Vars.tilesize;
  *   <li><b>不做联机同步</b>：原版 {@code Fire.create} 在客机直接 return（火由服务端权威生成 + SyncTrait 同步）。
  *       本工程的建筑逻辑两端都跑仿真（子弹也是两端各自 {@code Bullet.create}），所以火同样两端各自生成；
  *       建筑掉血走 {@link TileEntity#handleDamage}，它在客机是 no-op，血量仍由服务端广播，不会两端打架。</li>
- *   <li><b>没有液体水洼（Puddle）</b>：原版会读脚下水洼的可燃性让火烧得更久，本工程未移植 Puddle 系统，跳过。
- *       液体地板（水）靠 {@link Block#getFlammability} 返回 0 让火以 8 倍速烧完，效果上等于被浇灭。</li>
  *   <li><b>音效无距离衰减</b>：原版是 {@code Sounds.fire.at(this)}，本工程音效系统没有位置衰减，
  *       改成只在镜头附近才播，否则隔着半张地图的火也会响。</li>
  *   <li><b>存档</b>：原版实现 SaveTrait 把火写进存档，本工程存档只存瓦片/实体，火不落盘（读档后不恢复）。</li>
@@ -64,7 +64,7 @@ public class Fire implements com.phoenix.game.entities.traits.TypeTrait, com.pho
 
     private Tile tile;
     private Block block;
-    private float baseFlammability = -1f;
+    private float baseFlammability = -1f, puddleFlammability;
     private float lifetime;
     private float time;
     private float x, y;
@@ -164,9 +164,14 @@ public class Fire implements com.phoenix.game.entities.traits.TypeTrait, com.pho
      * @param intensity 每秒推进的时长（原版液体子弹用 100f 这种大值直接浇灭）
      */
     public static void extinguish(Tile tile, float intensity){
-        if(tile == null) return;
-        Fire fire = map.get(tile.pos());
-        if(fire != null) fire.time += intensity * Time.delta();
+        if(tile != null && map.containsKey(tile.pos())){
+            Fire fire = map.get(tile.pos());
+            fire.time += intensity * Time.delta();
+            //这次浇灭把火烧过了寿命 → 触发熄灭事件（对应原版 Fire.extinguish 末尾的 Trigger.fireExtinguish）
+            if(fire.time >= fire.lifetime){
+                Events.fire(Trigger.fireExtinguish);
+            }
+        }
     }
 
     /** 每帧更新所有火（由 {@code Logic.update} 调用）。 */
@@ -221,7 +226,8 @@ public class Fire implements com.phoenix.game.entities.traits.TypeTrait, com.pho
         TileEntity entity = tile.link().entity;
         boolean damage = entity != null;
 
-        float flammability = baseFlammability;
+        //可燃性 = 方块自身 + 脚下水洼（对应原版 baseFlammability + puddleFlammability）
+        float flammability = baseFlammability + puddleFlammability;
 
         //没有任何可燃物（空瓦片 / 水地板）：加速烧完，相当于自己熄灭
         if(!damage && flammability <= 0f){
@@ -232,7 +238,6 @@ public class Fire implements com.phoenix.game.entities.traits.TypeTrait, com.pho
         if(baseFlammability < 0f || block != tile.block()){
             baseFlammability = tile.block().getFlammability(tile);
             block = tile.block();
-            flammability = baseFlammability;
         }
 
         //烧的东西越可燃，火越难灭（寿命持续延长）
@@ -253,6 +258,15 @@ public class Fire implements com.phoenix.game.entities.traits.TypeTrait, com.pho
 
         //周期性灼烧：烧建筑 + 给附近地面单位挂燃烧状态
         if(Mathf.chance(0.1f * Time.delta())){
+            //读脚下水洼的可燃性缓存起来（对应原版 update 里 0.1 概率块开头的 Puddle 读取；
+            //水洼可燃性 /3f 后并入 flammability，火烧水洼上的可燃液体会烧得更旺、更久）
+            Puddle p = Puddle.getPuddle(tile);
+            if(p != null){
+                puddleFlammability = p.getFlammability() / 3f;
+            }else{
+                puddleFlammability = 0;
+            }
+
             if(damage){
                 entity.handleDamage(0.4f);
             }

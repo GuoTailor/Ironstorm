@@ -18,6 +18,7 @@ import com.phoenix.game.entities.Effects;
 import com.phoenix.game.entities.Units;
 import com.phoenix.game.entities.effect.ScorchDecal;
 import com.phoenix.game.entities.traits.DamageTrait;
+import com.phoenix.game.entities.traits.TeamTrait;
 import com.phoenix.game.entities.traits.HealthTrait;
 import com.phoenix.game.entities.traits.MinerTrait;
 import com.phoenix.game.entities.traits.SolidTrait;
@@ -162,7 +163,13 @@ public class BaseUnit extends SolidEntity implements TargetTrait, HealthTrait, M
     @Override
     public void damage(float amount){
         if(Vars.isClient()) return;
-        HealthTrait.super.damage(amount);
+        //照原版 Unit.damage（mindustry/entities/type/Unit.java:80-83）：实际扣血走 calculateDamage 的护甲减免
+        HealthTrait.super.damage(calculateDamage(amount));
+    }
+
+    /** 护甲减免（照原版 {@code Unit.calculateDamage}，mindustry/entities/type/Unit.java:196-198）。 */
+    public float calculateDamage(float amount){
+        return amount * Mathf.clamp(1f - status.getArmorMultiplier() / 100f);
     }
 
     @Override
@@ -761,17 +768,17 @@ public class BaseUnit extends SolidEntity implements TargetTrait, HealthTrait, M
         return false;
     }
 
+    //照原版 Unit.collides（mindustry/entities/type/Unit.java:87-95；原版 Unit 基类的能力在本项目落在 BaseUnit）：
+    //DamageTrait（子弹等）要求"是 TeamTrait 且是敌军"；其余实体（单位）只与同飞行层级的碰撞
     @Override
     public boolean collides(SolidTrait other){
         if(isDead()) return false;
 
         if(other instanceof DamageTrait){
-            //子弹：只与敌方子弹碰撞（友方子弹穿过，避免误伤）
-            if(other instanceof Bullet) return team.isEnemy(((Bullet)other).getTeam());
-            return other instanceof BaseUnit ? team.isEnemy(((BaseUnit)other).getTeam()) : true;
+            return other instanceof TeamTrait && (((TeamTrait)other).getTeam()).isEnemy(team);
+        }else{
+            return other instanceof BaseUnit && ((BaseUnit)other).isFlying() == isFlying();
         }
-
-        return other instanceof BaseUnit && ((BaseUnit)other).isFlying() == isFlying();
     }
 
     /**

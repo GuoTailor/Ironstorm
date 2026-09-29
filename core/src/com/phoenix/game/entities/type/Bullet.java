@@ -16,12 +16,13 @@ import com.phoenix.game.graphics.Pal;
 import com.phoenix.game.entities.traits.DamageTrait;
 import com.phoenix.game.entities.traits.Entity;
 import com.phoenix.game.entities.traits.SolidTrait;
+import com.phoenix.game.entities.traits.TeamTrait;
 import com.phoenix.game.entities.traits.VelocityTrait;
 import com.phoenix.game.entities.type.SolidEntity;
 import com.phoenix.game.math.Mathf;
 import com.phoenix.game.world.Tile;
 
-public class Bullet extends SolidEntity implements Pool.Poolable, VelocityTrait, DamageTrait{
+public class Bullet extends SolidEntity implements Pool.Poolable, VelocityTrait, DamageTrait, TeamTrait{
 
     /** 所有在场子弹（最小实现，替代原版 EntityGroup） */
     public static final Array<Bullet> all = new Array<>();
@@ -179,8 +180,10 @@ public class Bullet extends SolidEntity implements Pool.Poolable, VelocityTrait,
         return Math.max(damage(), type.splashDamage);
     }
 
+    //照原版 Bullet.collides（mindustry/entities/type/Bullet.java:168-170）：
+    //对空判定只作用于飞行目标（对地弹打得中地面单位），而非无条件要求 collidesAir
     public boolean collides(SolidTrait other){
-        return type.collides && (other != owner) && !supressCollision && type.collidesAir;
+        return type.collides && (other != owner && !(other instanceof DamageTrait)) && !supressCollision && !(other instanceof BaseUnit && ((BaseUnit)other).isFlying() && !type.collidesAir);
     }
 
     @Override

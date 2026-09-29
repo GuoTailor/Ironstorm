@@ -13,6 +13,23 @@ import com.phoenix.game.game.Team;
  */
 public class Logic {
 
+    //对应原版 Logic() 构造器里注册的 WaveEvent 监听器（mindustry/core/Logic.java:34-43）：
+    //每波开始给每个玩家重置剩余重生次数；区域图（战役 Zone）推进 Zone 的波次进度（更新可解锁/发射波标记）。
+    //⚠ 本项目 Logic 是纯静态类、从不实例化，所以用静态初始化块替代原版构造器。
+    static{
+        Events.on(EventType.WaveEvent.class, event -> {
+            if(Vars.playerGroup != null){
+                for(com.phoenix.game.entities.type.Player p : Vars.playerGroup.all()){
+                    p.respawns = Vars.state.rules.respawns;
+                }
+            }
+
+            if(Vars.world != null && Vars.world.isZone()){
+                Vars.world.getZone().updateWave(Vars.state.wave);
+            }
+        });
+    }
+
     /** 每帧更新一次游戏逻辑。 */
     public static void update(){
         Time.update();
@@ -100,7 +117,11 @@ public class Logic {
             }
         }
 
-        //实体碰撞：单位 vs 子弹（原版由 collideGroups 处理；单位在外层，避免处理已回收的子弹）
+        //实体碰撞：子弹 vs 单位（对应原版 collideGroups(bulletGroup, unitGroup)，原版子弹组在第一个参数）。
+        //⚠ 本项目刻意对调实参（单位在外层）：checkCollide 是 a.collision → b.collision 顺序回调，
+        //若子弹在外层，子弹 collision 里的 remove() 会先回收自身（清空 type），随后单位侧
+        //BaseUnit.collision 再调 ((DamageTrait)other).getShieldDamage() 就会拿到已回收的子弹（NPE 风险）。
+        //双向 collides 判定与两次回调都执行，与原版语义等价。
         if(Vars.collisions != null && Bullet.all.size > 0 && Units.units.size > 0){
             Vars.collisions.collideGroups(Units.units, Bullet.all);
         }
@@ -152,13 +173,12 @@ public class Logic {
         }
 
         Vars.state.wave++;
-        Vars.state.wavetime = Vars.state.rules.waveSpacing;
+        //照原版 Logic.runWave（mindustry/core/Logic.java:139）：区域图的发射波（isLaunchWave）波次间隔乘 launchWaveMultiplier
+        Vars.state.wavetime = Vars.world.isZone() && Vars.world.getZone().isLaunchWave(Vars.state.wave)
+                ? Vars.state.rules.waveSpacing * Vars.state.rules.launchWaveMultiplier
+                : Vars.state.rules.waveSpacing;
 
-        //每波重置玩家重生次数（对应原版 WaveEvent 监听器里的 p.respawns = state.rules.respawns）
-        if(Vars.player != null){
-            Vars.player.respawns = Vars.state.rules.respawns;
-        }
-
+        //玩家 respawns 的每波重置在静态块注册的 WaveEvent 监听器里做（对应原版结构），此处不再重复
         System.out.println("第 " + Vars.state.wave + " 波开始");
         Events.fire(new EventType.WaveEvent());
     }

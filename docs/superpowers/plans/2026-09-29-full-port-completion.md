@@ -61,7 +61,7 @@
 | A1 | 审计 | 实体/AI/游戏逻辑包功能对照（entities/ai/game） | ☑ 缺失15/偏离6/断裂4 → docs/port/audit-A1-entities-ai-game.md |
 | A2 | 审计 | 世界/内容包功能对照（world/content） | ☑ 缺失4/偏离4/断裂3 → docs/port/audit-A2-world-content.md |
 | A3 | 审计 | UI/输入/渲染/核心包功能对照（ui/input/graphics/core/meta/net） | ☑ 缺失8/偏离2/断裂3 → docs/port/audit-A3-ui-input-graphics.md |
-| N1 | 数值 | 运行时 dump 三方对照（BLKSIZE/BLKDATA/UNITDATA ↔ 原版源码 ↔ 图集）修复差异；**已知待修：burning.damage 0.5→0.06（8.3 倍）、wet.speedMultiplier 0.85→0.9**（A2 定位） | ☐ |
+| N1 | 数值 | 运行时 dump 三方对照（BLKSIZE/BLKDATA/UNITDATA ↔ 原版源码 ↔ 图集）修复差异；已知待修：burning.damage、wet.speedMultiplier | ☑ 检查161/不一致23/全修/复验归零 → docs/port/n1-report.md（提交 4849e59）；根因=8 个方块类构造器自设默认 health |
 | T0 | 清理 | 254 条 TODO 全量分类（过时/缺失功能/刻意偏离/待议）→ docs/port/todo-classified.md | ☑ ①过时11 ②缺失26 ③刻意偏离217 ④待议0 |
 | T1 | 清理 | **T0-① 过时 11 条**：Mechs 弹药 javadoc×7、MusicControl 接 UI 可见性、Bresenham2 注释、**Block.useContent 接解锁链**（GlobalData.isUnlocked/unlockContent 已在）、SaveVersion javadoc 按现状改写 | ☐ |
 | T1~Tn | 清理 | 按分类逐批消化 TODO（过时注释直接修；缺失功能转 F 批） | ☐ |
@@ -160,3 +160,4 @@ UI 类以"功能等价"判（arc→libgdx 已知缺口见 转换.md，不算缺�
 - 2026-09-29 A2 完成（缺失4/偏离4/断裂3，报告 docs/port/audit-A2-world-content.md；内容名全覆盖、子弹数值一致）；F1/F4/F7/N1/R1 吸收 A2 项 + F10 落地；派发 A3
 - 2026-09-29 A3 完成（缺失8/偏离2/断裂3，报告 docs/port/audit-A3-ui-input-graphics.md）；登记 F13 + F-LOW 扩充。**三片审计齐**：合计缺失 27/偏离 12/断裂 10。进入修复流水线：派 T0（后台）+ 主会话跑 N1 dump
 - 2026-09-29 N1 dump 三份就绪（docs/port/dump-*.txt）；T0 完成（①11 ②26 ③217 ④0，docs/port/todo-classified.md）；登记 F14~F18 + T1；派发 N1 修复批
+- 2026-09-29 N1 完成：检查161/不一致23/全修（根因=8 个方块类构造器自设默认 health；dagger-factory 材料+耗电；burning/wet/freezing），编译绿 + BLKDATA 复跑 diff 36 行全对（提交 4849e59）；派发 F5+F7
