@@ -6,6 +6,8 @@ import com.badlogic.gdx.utils.Array;
 import com.phoenix.game.Vars;
 import com.phoenix.game.game.Team;
 import com.phoenix.game.entities.traits.TargetTrait;
+import com.phoenix.game.entities.type.TileEntity;
+import com.phoenix.game.func.Boolf;
 import com.phoenix.game.math.Mathf;
 import com.phoenix.game.world.Tile;
 
@@ -85,6 +87,20 @@ public class Units {
         return rect.x < x + width && rect.x + rect.width > x && rect.y < y + height && rect.y + rect.height > y;
     }
 
+    /** Returns the neareset ally tile in a range.（原版 Units.java:78-80） */
+    public static TileEntity findAllyTile(Team team, float x, float y, float range, Boolf<Tile> pred){
+        if(Vars.indexer == null) return null;
+        return Vars.indexer.findTile(team, x, y, range, pred);
+    }
+
+    /** Returns the neareset enemy tile in a range.（原版 Units.java:83-87：derelict 队不索敌） */
+    public static TileEntity findEnemyTile(Team team, float x, float y, float range, Boolf<Tile> pred){
+        if(team == Team.derelict) return null;
+
+        if(Vars.indexer == null) return null;
+        return Vars.indexer.findEnemyTile(team, x, y, range, pred);
+    }
+
     /** Returns the closest target enemy. First, units are checked, then tile entities. */
     public static TargetTrait closestTarget(Team team, float x, float y, float range){
         return closestTarget(team, x, y, range, u -> true);
@@ -92,15 +108,27 @@ public class Units {
 
     /** Returns the closest target enemy. First, units are checked, then tile entities. */
     public static TargetTrait closestTarget(Team team, float x, float y, float range, Predicate<BaseUnit> unitPred){
+        return closestTarget(team, x, y, range, unitPred, t -> true);
+    }
+
+    /**
+     * 原版 {@code Units.java:100-109}：先找最近敌方单位，找不到再找敌方建筑；
+     * {@code tilePred} 透传给建筑索敌；derelict（废墟）队不索敌（原版 :101）。
+     */
+    public static TargetTrait closestTarget(Team team, float x, float y, float range, Predicate<BaseUnit> unitPred, Boolf<Tile> tilePred){
+        if(team == Team.derelict) return null;
+
         TargetTrait unit = closestEnemy(team, x, y, range, unitPred);
         if(unit != null) return unit;
 
-        //单位无可打目标时，退而打敌方建筑
-        return closestEnemyBuilding(team, x, y, range);
+        //单位无可打目标时，退而打敌方建筑（tilePred 透传）
+        return closestEnemyBuilding(team, x, y, range, tilePred);
     }
 
     /** Returns the closest enemy of this team. Filter by predicate. */
     public static BaseUnit closestEnemy(Team team, float x, float y, float range, Predicate<BaseUnit> predicate){
+        if(team == Team.derelict) return null; //原版 Units.java:113
+
         result = null;
         cdist = 0f;
 
@@ -121,11 +149,12 @@ public class Units {
 
     /** 最近的敌方建筑目标（单位都处理完后，攻击建筑的兜底）。
      * 参考 {@code Vars.world.closestTile}+建筑优先级：核心>炮塔>其它。
-     * @param building predicate 需乱码「判定该队伍的敌对」；这里统一按 team.isEnemy
+     * @param tilePred 建筑过滤谓词（对应原版 {@code Units.findEnemyTile} 的 pred 参数，透传；null 视为全部通过）
      * @return 敌方建筑瓦片（Tile 实现 TargetTrait，可直接当目标）
      */
-    public static TargetTrait closestEnemyBuilding(Team team, float x, float y, float range){
+    public static TargetTrait closestEnemyBuilding(Team team, float x, float y, float range, Boolf<Tile> tilePred){
         if(Vars.world == null) return null;
+        if(team == Team.derelict) return null; //原版 Units.findEnemyTile(:84)：derelict 队不索敌
 
         Tile best = null;
         float bestScore = Float.MAX_VALUE;
@@ -133,8 +162,11 @@ public class Units {
         for(Tile tile : Vars.world.tiles){
             if(tile == null || tile.entity == null) continue;
             if(!team.isEnemy(tile.getTeam())) continue;
+            //废墟（中立遗弃建筑）不作为索敌目标：原版索敌默认跳过 derelict
+            if(tile.getTeam() == Team.derelict) continue;
             //多格建筑只认中心
             if(tile.link() != tile) continue;
+            if(tilePred != null && !tilePred.get(tile)) continue;
 
             float dst = Mathf.dst2(x, y, tile.worldx(), tile.worldy());
             if(dst > range * range) continue;

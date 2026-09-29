@@ -367,8 +367,29 @@ public class BaseUnit extends SolidEntity implements TargetTrait, HealthTrait, M
         }
 
         if(target == null && retarget()){
-            target = Units.closestTarget(team, x, y, type.attackLength, u -> type.targetAir || !u.isFlying());
+            target = Units.closestTarget(team, x, y, closestRange(), u -> type.targetAir || !u.isFlying());
         }
+    }
+
+    /** 原版 BaseUnit.java:181-186：索敌并锁定最近敌方目标（有更近目标才替换）。 */
+    public void targetClosest(){
+        TargetTrait newTarget = Units.closestTarget(team, x, y, closestRange(), u -> type.targetAir || !u.isFlying());
+        if(newTarget != null){
+            target = newTarget;
+        }
+    }
+
+    /**
+     * {@code targetClosest} 的索敌范围口径（原版 BaseUnit.java:182）：
+     * {@code Math.max(getWeapon().bullet.range(), type.range)}。
+     * <p>⚠ 原版单位必有武器；本项目 {@code getWeapon()}/{@code bullet} 可能为 null（沿用 {@link #range()} 的既有防御），
+     * 此时退回 {@code max(attackLength, type.range)}。
+     */
+    public float closestRange(){
+        Weapon weapon = getWeapon();
+        return weapon == null || weapon.bullet == null
+            ? Math.max(type.attackLength, type.range)
+            : Math.max(weapon.bullet.range(), type.range);
     }
 
     /** Only runs when the unit has a target. */

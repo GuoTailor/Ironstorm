@@ -49,7 +49,9 @@ public class FlyingUnit extends GroundUnit{
 
         public void update(){
             if(target == null || !target.isValid() || retarget()){
-                target = Units.closestTarget(team, x, y, Math.max(type.attackLength, 700f),
+                //索敌范围用原版 targetClosest 口径（max(weapon.bullet.range, type.range)）；
+                //自创的 max(attackLength, 700f) 是移动距离口径，索敌范围偏大（F8 对齐）
+                target = Units.closestTarget(team, x, y, closestRange(),
                     u -> type.targetAir || !u.isFlying());
             }
 
