@@ -2,8 +2,10 @@ package com.phoenix.game.entities.type;
 
 import com.phoenix.game.Vars;
 import com.phoenix.game.core.Time;
+import com.phoenix.game.entities.traits.SpawnerTrait;
 import com.phoenix.game.game.Team;
 import com.phoenix.game.world.Tile;
+import io.anuke.mindustry.gen.Sounds;
 
 /**
  * 最小实现：玩家。参照 Mindustry mindustry.entities.type.Player 移植。
@@ -95,10 +97,18 @@ public class Player implements com.phoenix.game.entities.traits.TypeTrait, com.p
 
     /** 当前位置（死亡后保留最后位置，用于查询最近核心） */
     public float x, y;
-    /** 已死亡等待时间（tick） */
-    public float deadTime;
     /** 本波剩余重生次数（对应原版 {@code Player.respawns}；每波由 {@code Logic.runWave} 按 rules.respawns 重置）。 */
     public int respawns;
+
+    // ---- 重生（对应原版 Player.spawner/lastSpawner，Player.java:57）----
+
+    /**
+     * 当前出生点（对应原版 {@code Player.spawner}）：死亡后指向最近的核心实体，
+     * 由它推进重生进度、到点后在核心处重新生成玩家（见 {@code CoreBlock.CoreEntity.updateSpawning/update}）。
+     */
+    public SpawnerTrait spawner;
+    /** 上一次使用的出生点（对应原版 {@code Player.lastSpawner}）：核心被拆后优先回它那里。 */
+    public SpawnerTrait lastSpawner;
 
     public Player(){
         //重生次数按规则初始化（对应原版 Player.reset() 里的 respawns = state.rules.respawns）
@@ -260,7 +270,6 @@ public class Player implements com.phoenix.game.entities.traits.TypeTrait, com.p
             unit.health(unit.maxHealth());
         }
 
-        deadTime = 0f;
         isShooting = isBoosting = false;
         //原版 Player.reset() 里 isShooting = isBoosting = isTransferring = isTyping = false
         isTransferring = false;
@@ -417,7 +426,7 @@ public class Player implements com.phoenix.game.entities.traits.TypeTrait, com.p
         return unit != null && unit.canMine(item);
     }
 
-    /** 每帧更新：同步位置 + 死亡后在最近核心处重生（对应原版 updateRespawning）。 */
+    /** 每帧更新：同步位置 + 死亡后进入重生流程（对应原版 {@code Player.update} 的死亡分支）。 */
     public void update(){
         //头顶发言气泡淡出（对应原版 Player.update 里的 textFadeTime -= Time.delta() / (60 * 5)）
         textFadeTime -= Time.delta() / (60 * 5);
@@ -426,32 +435,113 @@ public class Player implements com.phoenix.game.entities.traits.TypeTrait, com.p
         //itemtime = lerpDelta(itemtime, Mathf.num(item.amount > 0), 0.1f)）
         itemtime = com.phoenix.game.math.Mathf.lerpDelta(itemtime, itemAmount > 0 ? 1f : 0f, 0.1f);
 
-        if(!isDead()){
-            x = unit.x;
-            y = unit.y;
-            deadTime = 0f;
+        if(isDead()){
+            //对应原版 Player.update 的死亡分支：停止加速；只要还有重生次数就进入重生流程
+            isBoosting = false;
+            com.phoenix.game.game.Rules rules = Vars.state == null ? null : Vars.state.rules;
+            if(respawns > 0 || rules == null || !rules.limitedRespawns){
+                updateRespawning();
+            }
             return;
         }
 
-        //死亡：背包物品被消耗（对应原版 Unit.onDeath 里的 item.amount = 0 —— 原版玩家死亡不掉落物品）
-        clearItem();
+        //活着：清掉出生点（对应原版 Player.update 的 `else spawner = null;`）
+        spawner = null;
+        x = unit.x;
+        y = unit.y;
+    }
 
-        //没有核心就无法复活（与原版一致）
-        Tile core = getClosestCore();
-        if(core == null) return;
-
-        deadTime += Time.delta();
-
-        //重生等待时间来自规则（对应原版 state.rules.respawnTime；sandbox/editor 为 0 → 立即复活）
-        com.phoenix.game.game.Rules rules = Vars.state == null ? null : Vars.state.rules;
-        float respawnTime = rules == null ? 60f * 4f : rules.respawnTime;
-        //限制重生次数（对应原版 update 里的 respawns > 0 || !state.rules.limitedRespawns）
-        boolean canRespawn = rules == null || respawns > 0 || !rules.limitedRespawns;
-
-        if(deadTime >= respawnTime && canRespawn && Vars.control != null){
-            respawns--;
-            Vars.control.spawnPlayerUnit(team);
+    /**
+     * 死亡时的重生驱动（对应原版 {@code Player.updateRespawning}，原版 Player.java:825-844）。
+     * <p>原版把玩家"交给"一个出生点（{@link SpawnerTrait}，即最近的核心实体），由核心每帧推进进度、
+     * 到点后调用 {@code CoreBlock.onUnitRespawn} 在核心处重新生成玩家。
+     * <p>⚠ 坐标口径：原版 {@code getClosestCore().getX()/getY()} 是方块中心（原版 TileEntity 就是
+     * {@code tile.drawx()/drawy()}）；本项目 {@code getClosestCore()} 返回的是瓦片、实体坐标是角点 →
+     * 用 {@code block.centerX/centerY}。
+     */
+    public void updateRespawning(){
+        //编辑器：直接在地图中心复活（对应原版 updateRespawning 的编辑器分支）
+        if(Vars.state != null && Vars.state.isEditor()){
+            if(Vars.control != null && Vars.world != null){
+                Vars.control.spawnPlayerUnitAt(team, selectedType,
+                    Vars.world.unitWidth() / 2f, Vars.world.unitHeight() / 2f);
+            }
+            return;
         }
+
+        if(spawner != null && spawner.isValid()){
+            //已有出生点：交给它推进（核心的 update 会走 onUnitRespawn）
+            spawner.updateSpawning(this);
+        }else if(Vars.netServer == null || !Vars.netServer.isWaitingForPlayers()){
+            if(!Vars.isClient()){
+                if(lastSpawner != null && lastSpawner.isValid()){
+                    spawner = lastSpawner;
+                }else{
+                    Tile core = getClosestCore();
+                    if(core != null && core.entity instanceof SpawnerTrait){
+                        spawner = (SpawnerTrait)core.entity;
+                    }
+                }
+            }
+        }else{
+            //服务端在等待玩家：把玩家停在最近核心处（对应原版 updateRespawning 的最后一条分支）
+            Tile core = getClosestCore();
+            if(core != null){
+                x = core.block().centerX(core);
+                y = core.block().centerY(core);
+            }
+        }
+    }
+
+    /**
+     * 开始重生（对应原版 {@code Player.beginRespawning}，原版 Player.java:846-852）：
+     * 记录出生点、把玩家位置挪到出生点，再让出生点接管。
+     * <p>⚠ 原版还会置 {@code dead = true}；本项目 {@code isDead()} 由被控单位状态推导（见 {@link #isDead()}），
+     * 死亡时它已为真 → 无需置位。末尾的 {@code spawner.updateSpawning(this)} 是原版的递归写法：
+     * 此时 {@code spawnPlayer} 已非 null → 立即返回（起"确认接管"的作用）。
+     */
+    public void beginRespawning(SpawnerTrait spawner){
+        this.spawner = spawner;
+        this.lastSpawner = spawner;
+
+        Tile st = spawner.getTile();
+        if(st != null){
+            x = st.block().centerX(st);
+            y = st.block().centerY(st);
+        }
+
+        spawner.updateSpawning(this);
+    }
+
+    /**
+     * 重生落地（对应原版 {@code Player.onRespawn}，原版 Player.java:104-118）：
+     * 在核心中心重新生成被控单位、清速度、朝上、播放音效、扣一次重生次数、清空背包。
+     * <p>⚠ 本项目 Player 不是 Unit（见类注释）：原版 {@code onRespawn} 复用同一个 Unit 对象、
+     * 只把它挪到核心并复位状态；本项目死亡时单位已被移除 → 走
+     * {@code Control.spawnPlayerUnitAt} 重新创建一个（与开局出生/机甲平台换装同源，
+     * 该入口内部已补满血，对应原版 {@code heal()}）。
+     * <p>⚠ 原版还置 {@code boostHeat = 1f; achievedFlight = true;}（飞行单位的喷气过渡）与
+     * {@code baseRotation = 90f}；本项目这些是被控单位上的字段、且没有对应的过渡状态机 → 只设 {@code rotation}。
+     * <p>⚠ 冲量 {@code applyImpulse(0, 8f)} 原版在本方法**之后**由
+     * {@code CoreBlock.onUnitRespawn} 施加（那边 Player 就是 Unit），见该方法。
+     */
+    public void onRespawn(Tile tile){
+        float cx = tile.block().centerX(tile), cy = tile.block().centerY(tile);
+
+        if(Vars.control != null){
+            Vars.control.spawnPlayerUnitAt(team, selectedType, cx, cy);
+        }
+
+        if(unit != null){
+            unit.velocity().setZero();
+            unit.rotation = 90f;
+        }
+
+        spawner = null;
+        respawns--;
+        //原版 Sounds.respawn.at(tile)：本项目音效无位置衰减 → play(1f)
+        Sounds.respawn.play(1f);
+        clearItem();
     }
 
     /** 增加经验；满级不再积累。 */

@@ -363,7 +363,7 @@ public class MapEditorDialog extends FloatingDialog{
         //  修法方向：把匿名子类改成具名子类，或在 JsonIO 里注册该类型的 serializer。
         editor.getTags().remove("width");
         editor.getTags().remove("height");
-        //B 类：原版还会 player.dead = true；本项目 Player 没有 dead 字段（只有 deadTime）→ 省略
+        //B 类：原版还会 player.dead = true；本项目 Player 没有 dead 字段（isDead() 由被控单位状态推导）→ 省略
 
         Map returned = null;
 
