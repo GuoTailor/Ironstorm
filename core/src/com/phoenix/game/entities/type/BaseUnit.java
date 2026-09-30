@@ -988,9 +988,8 @@ public class BaseUnit extends SolidEntity implements TargetTrait, HealthTrait, M
      * 受击回调（照原版 {@code BaseUnit.onHit}，mindustry/entities/type/BaseUnit.java:89-98）：
      * 被 {@code DeflectorEntity} 所属子弹命中、且本方非玩家队时，延后一帧判定若已死则 fire
      * {@code Trigger.phaseDeflectHit}（反射墙击杀玩家单位的成就/统计钩子）。
-     * <p>⚠ 本项目 {@code DeflectorWall} 有**刻意简化**：弹回子弹时不改换归属（原版 {@code resetOwner}），
-     * 故 {@code getOwner() instanceof DeflectorEntity} 当前恒为 false，本分支实际不会触发；
-     * 这里仍照原版结构保留（一旦将来补上 resetOwner 即生效）。
+     * <p>G9 起 {@code DeflectorWall} 已照原版补上 {@code resetOwner}（弹回子弹的归属改为反射墙实体），
+     * 故 {@code getOwner() instanceof DeflectorEntity} 可成立，本分支已能触发。
      */
     @Override
     public void onHit(SolidTrait entity){

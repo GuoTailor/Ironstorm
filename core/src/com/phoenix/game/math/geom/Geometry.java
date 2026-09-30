@@ -109,4 +109,53 @@ public final class Geometry {
         }
         return closest;
     }
+
+    /**
+     * 逐字照抄 arc {@code Geometry.raycastRect}（{@code Arc/arc-core/src/arc/math/geom/Geometry.java:255-258}）：
+     * @return 线段 (startx,starty)→(endx,endy) 与轴对齐矩形 {@code rect} 的首个交点；
+     *         无交点在段内时返回 null（返回值是共享的 {@code tmp1}，用完即取，不要长期持有）。
+     * <p>消费点：{@code DeflectorWall.handleBulletHit} 沿子弹速度把位置修正到墙外。
+     */
+    public static Vector2 raycastRect(float startx, float starty, float endx, float endy, Rectangle rect){
+        return raycastRect(startx, starty, endx, endy, rect.x + rect.width / 2, rect.y + rect.height / 2,
+                rect.width / 2f, rect.height / 2f);
+    }
+
+    /**
+     * 逐字照抄 arc {@code Geometry.raycastRect}（{@code Arc/arc-core/src/arc/math/geom/Geometry.java:260-292}）：
+     * 以 (x, y) 为中心、半宽/半高 (halfx, halfy) 的轴对齐矩形做线段投射。
+     */
+    public static Vector2 raycastRect(float startx, float starty, float endx, float endy, float x, float y, float halfx, float halfy){
+        float deltax = endx - startx, deltay = endy - starty;
+
+        Vector2 hit = tmp1;
+
+        float paddingX = 0f;
+        float paddingY = 0f;
+
+        float scaleX = 1.0f / deltax;
+        float scaleY = 1.0f / deltay;
+        int signX = Mathf.sign(scaleX);
+        int signY = Mathf.sign(scaleY);
+        float nearTimeX = (x - signX * (halfx + paddingX) - startx) * scaleX;
+        float nearTimeY = (y - signY * (halfy + paddingY) - starty) * scaleY;
+        float farTimeX = (x + signX * (halfx + paddingX) - startx) * scaleX;
+        float farTimeY = (y + signY * (halfy + paddingY) - starty) * scaleY;
+
+        if(nearTimeX > farTimeY || nearTimeY > farTimeX)
+            return null;
+
+        float nearTime = nearTimeX > nearTimeY ? nearTimeX : nearTimeY;
+        float farTime = farTimeX < farTimeY ? farTimeX : farTimeY;
+
+        if(nearTime >= 1 || farTime <= 0)
+            return null;
+
+        float htime = Mathf.clamp(nearTime);
+        float hdeltax = htime * deltax;
+        float hdeltay = htime * deltay;
+        hit.x = startx + hdeltax;
+        hit.y = starty + hdeltay;
+        return hit;
+    }
 }

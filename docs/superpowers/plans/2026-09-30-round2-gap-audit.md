@@ -82,3 +82,4 @@
 - 2026-09-30 G6 完成：effects/minimap/blockreplace 设置接线 + 右键拆除 + canSkipWave 门控 + 死亡相机跟随核心（提交见下）；实测 effects 开关与 minimap 显隐；⚠ 工作区存在**用户未提交的并行改动**（Player/InputHandler/SaveIO 的背包分裂修复 + ClientLauncher 的 MINEDBG 钩子），提交时用 hunk 级选择性暂存避开；派发 G7
 - 2026-09-30 G7 完成：战役发射链（Logic.launchZone + checkGameOver 发射分支 + HUD 发射按钮/确认框/白闪）（提交见下）；实测整链通过；发现并规避 `Time.run` 在 gameOver 后不推进的坑；派发 G8
 - 2026-09-30 G8 完成：寻路 cost 累加 + 实心块压单位判定 + 服务端聊天命令 + 玩家名校验 + 游戏结束删区域槽（提交见下，M8/D5 跳过留 G9）；实测 cost 与放置判定；派发 G9
+- 2026-09-30 G9 完成：SHIFT 复制图标 + 聊天滚轮 + UnitCreateEvent + DeflectorWall resetOwner + DefaultWaves 补到 24 组（提交见下）；实测归属改换与组数；M3/M5/M6 复核后跳过；**M8/D5 仍待办**；派发 G10

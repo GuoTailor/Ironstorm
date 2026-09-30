@@ -141,8 +141,10 @@ public class Bullet extends SolidEntity implements Pool.Poolable, VelocityTrait,
         return type;
     }
 
-    public void resetOwner(Entity entity){
+    /** 改换子弹归属（照原版 {@code Bullet.resetOwner(Entity, Team)}，mindustry/entities/type/Bullet.java:107-110）：owner 与 team 一起换。 */
+    public void resetOwner(Entity entity, Team team){
         this.owner = entity;
+        this.team = team;
     }
 
     public void scaleTime(float add){

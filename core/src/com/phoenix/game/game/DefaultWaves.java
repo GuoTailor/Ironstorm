@@ -1,12 +1,16 @@
 package com.phoenix.game.game;
 
 import com.badlogic.gdx.utils.Array;
+import com.phoenix.game.content.Items;
+import com.phoenix.game.content.StatusEffects;
 import com.phoenix.game.content.UnitTypes;
+import com.phoenix.game.type.ItemStack;
 
 /**
- * 最小实现：默认波次编成。参照 Mindustry mindustry.game.DefaultWaves 移植。
- * 原版有 20 组（含飞行单位），这里只挑已移植的地面单位，波次推进逐步加码。
- * <p>F7b：原本自建的 grenadier/tank 两组已删除（无贴图 + 与 eruptor/titan 重复）。
+ * 默认波次编成。参照 Mindustry mindustry.game.DefaultWaves 移植。
+ * <p>G9-D8：已照原版 {@code game/DefaultWaves.java:12-187} 逐组补齐全部 24 组
+ * （原先只挑已移植的地面单位写了 10 组；现确认 {@code UnitTypes.revenant/lich} 均已存在，
+ * {@code SpawnGroup} 也支持 {@code items}/{@code effect}，故不再需要最小实现）。
  */
 public class DefaultWaves{
     private static Array<SpawnGroup> spawns;
@@ -15,13 +19,11 @@ public class DefaultWaves{
         if(spawns == null && UnitTypes.dagger != null){
             spawns = new Array<>();
 
-            //开局主力：dagger，数量每 2 波 +1
             spawns.add(new SpawnGroup(UnitTypes.dagger){{
                 end = 10;
                 unitScaling = 2f;
             }});
 
-            //第 4 波起：crawler（快速小单位）
             spawns.add(new SpawnGroup(UnitTypes.crawler){{
                 begin = 4;
                 end = 13;
@@ -29,73 +31,167 @@ public class DefaultWaves{
                 unitScaling = 1.5f;
             }});
 
-            //第 8 波起：titan
-            spawns.add(new SpawnGroup(UnitTypes.titan){{
-                begin = 8;
-                unitScaling = 3f;
-                max = 6;
-            }});
-
-            //第 12 波起：eruptor，每隔一波
-            spawns.add(new SpawnGroup(UnitTypes.eruptor){{
-                begin = 12;
-                unitAmount = 2;
-                unitScaling = 3f;
-                spacing = 2;
-                max = 8;
-            }});
-
-            //第 20 波起：fortress（重装），每隔两波
-            spawns.add(new SpawnGroup(UnitTypes.fortress){{
-                begin = 20;
-                unitAmount = 2;
-                unitScaling = 4f;
-                spacing = 3;
-                max = 6;
-            }});
-
-            //第 5 波起：flare（飞行），每波增长，激活 WaveSpawner.flySpawns 分支
-            spawns.add(new SpawnGroup(UnitTypes.flare){{
-                begin = 5;
-                unitAmount = 3;
-                unitScaling = 2f;
-                max = 15;
-            }});
-
-            //第 10 波起：wraith（飞行快攻）
             spawns.add(new SpawnGroup(UnitTypes.wraith){{
-                begin = 10;
-                unitAmount = 2;
-                unitScaling = 2f;
-                max = 12;
-            }});
-
-            //第 14 波起：ghoul（飞行重轰炸），每隔两波
-            spawns.add(new SpawnGroup(UnitTypes.ghoul){{
-                begin = 14;
-                unitAmount = 2;
-                unitScaling = 3f;
-                spacing = 2;
-                max = 8;
-            }});
-
-            //F7b：删除自建的 grenadier/tank 两组（无贴图 + 与原版的 eruptor/titan 定位重复，
-            //  DefaultWaves 里上面那两组本来就在刷；原版波次编成里也没有这两个单位）。
-
-            //Boss：chaos-array，第 40 波起每 30 波单独出 1 个（远程 4 连发散射）
-            spawns.add(new SpawnGroup(UnitTypes.chaosArray){{
-                begin = 40;
-                unitAmount = 1;
+                begin = 12;
+                end = 16;
                 unitScaling = 1f;
+            }});
+
+            spawns.add(new SpawnGroup(UnitTypes.dagger){{
+                begin = 11;
+                unitScaling = 1.7f;
+                spacing = 2;
+                max = 4;
+            }});
+
+            spawns.add(new SpawnGroup(UnitTypes.titan){{
+                begin = 7;
+                spacing = 3;
+                unitScaling = 2;
+
+                end = 30;
+            }});
+
+            spawns.add(new SpawnGroup(UnitTypes.dagger){{
+                begin = 8;
+                unitScaling = 1;
+                unitAmount = 4;
+                spacing = 2;
+            }});
+
+            spawns.add(new SpawnGroup(UnitTypes.titan){{
+                begin = 28;
+                spacing = 3;
+                unitScaling = 1;
+                end = 40;
+            }});
+
+            spawns.add(new SpawnGroup(UnitTypes.titan){{
+                begin = 45;
+                spacing = 3;
+                unitScaling = 2;
+                effect = StatusEffects.overdrive;
+            }});
+
+            spawns.add(new SpawnGroup(UnitTypes.titan){{
+                begin = 120;
+                spacing = 2;
+                unitScaling = 3;
+                unitAmount = 5;
+                effect = StatusEffects.overdrive;
+            }});
+
+            spawns.add(new SpawnGroup(UnitTypes.wraith){{
+                begin = 16;
+                unitScaling = 1;
+                spacing = 2;
+            }});
+
+            spawns.add(new SpawnGroup(UnitTypes.dagger){{
+                begin = 82;
+                spacing = 3;
+                unitAmount = 4;
+                unitScaling = 3;
+                effect = StatusEffects.overdrive;
+            }});
+
+            spawns.add(new SpawnGroup(UnitTypes.dagger){{
+                begin = 41;
+                spacing = 5;
+                unitAmount = 1;
+                unitScaling = 3;
+                effect = StatusEffects.shielded;
+            }});
+
+            spawns.add(new SpawnGroup(UnitTypes.fortress){{
+                begin = 40;
+                spacing = 5;
+                unitAmount = 2;
+                unitScaling = 2;
+                max = 20;
+            }});
+
+            spawns.add(new SpawnGroup(UnitTypes.dagger){{
+                begin = 35;
+                spacing = 3;
+                unitAmount = 4;
+                effect = StatusEffects.overdrive;
+                items = new ItemStack(Items.blastCompound, 60);
+                end = 60;
+            }});
+
+            spawns.add(new SpawnGroup(UnitTypes.dagger){{
+                begin = 42;
+                spacing = 3;
+                unitAmount = 4;
+                effect = StatusEffects.overdrive;
+                items = new ItemStack(Items.pyratite, 100);
+                end = 130;
+            }});
+
+            spawns.add(new SpawnGroup(UnitTypes.ghoul){{
+                begin = 40;
+                unitAmount = 2;
+                spacing = 2;
+                unitScaling = 2;
+            }});
+
+            spawns.add(new SpawnGroup(UnitTypes.wraith){{
+                begin = 50;
+                unitAmount = 4;
+                unitScaling = 3;
+                spacing = 5;
+                effect = StatusEffects.overdrive;
+            }});
+
+            spawns.add(new SpawnGroup(UnitTypes.revenant){{
+                begin = 50;
+                unitAmount = 2;
+                unitScaling = 3;
+                spacing = 5;
+                max = 16;
+            }});
+
+            spawns.add(new SpawnGroup(UnitTypes.ghoul){{
+                begin = 53;
+                unitAmount = 2;
+                unitScaling = 3;
+                spacing = 4;
+            }});
+
+            spawns.add(new SpawnGroup(UnitTypes.eruptor){{
+                begin = 31;
+                unitAmount = 4;
+                unitScaling = 1;
+                spacing = 3;
+            }});
+
+            spawns.add(new SpawnGroup(UnitTypes.chaosArray){{
+                begin = 41;
+                unitAmount = 1;
+                unitScaling = 1;
                 spacing = 30;
             }});
 
-            //终极 Boss：eradicator，第 70 波起每 50 波出 1 个（厚血 9000）
             spawns.add(new SpawnGroup(UnitTypes.eradicator){{
-                begin = 70;
+                begin = 81;
                 unitAmount = 1;
-                unitScaling = 1f;
-                spacing = 50;
+                unitScaling = 1;
+                spacing = 40;
+            }});
+
+            spawns.add(new SpawnGroup(UnitTypes.lich){{
+                begin = 131;
+                unitAmount = 1;
+                unitScaling = 1;
+                spacing = 40;
+            }});
+
+            spawns.add(new SpawnGroup(UnitTypes.ghoul){{
+                begin = 90;
+                unitAmount = 2;
+                unitScaling = 3;
+                spacing = 4;
             }});
         }
 

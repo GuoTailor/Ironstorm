@@ -20,6 +20,7 @@ import com.phoenix.game.Vars;
 import com.phoenix.game.content.Blocks;
 import com.phoenix.game.core.Core;
 import com.phoenix.game.core.Events;
+import com.phoenix.game.core.Fonts;
 import com.phoenix.game.core.Scl;
 import com.phoenix.game.core.Time;
 import com.phoenix.game.game.Team;
@@ -27,6 +28,7 @@ import com.phoenix.game.graphics.Pal;
 import com.phoenix.game.input.Binding;
 import com.phoenix.game.input.InputHandler;
 import com.phoenix.game.input.KeyBinds;
+import com.phoenix.game.input.KeyCode;
 import com.phoenix.game.math.Mathf;
 import com.phoenix.game.type.Category;
 import com.phoenix.game.ui.Cicon;
@@ -419,6 +421,15 @@ public class PlacementFragment extends Fragment{
             setIcon(button, block);
             button.addListener(new ClickListener(){
                 @Override public void clicked(com.badlogic.gdx.scenes.scene2d.InputEvent event, float x, float y){
+                    //原版 PlacementFragment.java:211-213：SHIFT+点击方块按钮 → 把该方块的字体图标 unicode
+                    //复制到剪贴板并提示 $copied（同款彩蛋 F18 已给 DatabaseDialog 补过）。
+                    //API 等价：Core.input.keyDown(KeyCode.SHIFT_LEFT) → Gdx.input.isKeyPressed（KeyCode 与 Input.Keys 同值），
+                    //          Core.app.setClipboardText(...) → Gdx.app.getClipboard().setContents(...)。
+                    if(Gdx.input.isKeyPressed(KeyCode.SHIFT_LEFT) && Fonts.getUnicode(block.name) != 0){
+                        Gdx.app.getClipboard().setContents((char)Fonts.getUnicode(block.name) + "");
+                        if(Vars.ui != null) Vars.ui.showInfoFade("$copied");
+                        return;
+                    }
                     InputHandler input = input();
                     if(input != null){
                         input.buildBlock = input.buildBlock == block ? null : block;

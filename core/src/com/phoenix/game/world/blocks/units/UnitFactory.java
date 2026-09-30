@@ -7,11 +7,13 @@ import com.phoenix.game.content.UnitTypes;
 import com.phoenix.game.core.Core;
 import com.phoenix.game.core.Draw;
 import com.phoenix.game.core.Drawf;
+import com.phoenix.game.core.Events;
 import com.phoenix.game.core.Lines;
 import com.phoenix.game.core.Time;
 import com.phoenix.game.entities.Units;
 import com.phoenix.game.entities.type.BaseUnit;
 import com.phoenix.game.entities.type.TileEntity;
+import com.phoenix.game.game.EventType;
 import com.phoenix.game.graphics.Pal;
 import com.phoenix.game.graphics.Shaders;
 import com.phoenix.game.math.Mathf;
@@ -304,6 +306,11 @@ public class UnitFactory extends Block{
             unit.setSpawner(tile);
             unit.set(sx + Mathf.range(3f), sy + Mathf.range(3f));
             unit.health(unit.maxHealth());
+
+            //对应原版 UnitFactory.java:66：Events.fire(new UnitCreateEvent(unit))。
+            //原版 126.2 无消费者，这里对齐派发点；位置等价于原版（原版在 unit.add() 之后 fire，
+            //本项目 UnitType.create() 内部已 Units.add()）。
+            Events.fire(new EventType.UnitCreateEvent(unit));
         }
 
         @Override
