@@ -171,10 +171,8 @@ public class Drawf{
      * 双层描边方框：3f 深灰 + 1f 本色（对应原版 {@code Drawf.square}）。
      * <p>{@code radius + 1f}（外扩 1）与 45° 都照抄原版；45° 叠加本项目 {@link Lines#square} 的角点约定后
      * 画出的是顶点朝上/下/左/右的菱形，朝向与原版一致。
-     * <p>⚠ 尺寸差异：arc 的 {@code Lines.square(x,y,rad,rot)} 把 rad 当**外接圆半径**，
-     * 本项目把它当**半边长**（与 arc 的 3 参版本语义对齐），所以同一个 rad 这里画出的菱形大 √2 倍。
-     * 要完全复刻原版大小需要传 {@code (radius + 1f) / 1.4142135f}——为保持与项目其它 {@code Lines.square}
-     * 调用点同一套口径，这里按任务要求原样传 {@code radius + 1f}。
+     * <p>本项目 {@link Lines#square(float, float, float, float)} 4 参已对齐 arc 的**外接圆半径**语义，
+     * 故原样传 {@code radius + 1f} 即与原版 {@code Lines.square(x, y, radius + 1f, 45)} 一致。
      */
     public static void square(float x, float y, float radius, Color color){
         Lines.stroke(3f, Pal.gray);

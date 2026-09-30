@@ -115,18 +115,27 @@ public class Lines{
         }
     }
 
-    /** 空心正方形，radius 为半边长。 */
+    /**
+     * 空心正方形（**轴对齐**），radius 为**半边长**（对应 arc 的 3 参重载
+     * {@code square(x,y,rad)} → {@code rect(x-rad, y-rad, rad*2, rad*2)}）。
+     * <p>⚠ <b>不能委托给 4 参重载</b>：arc 的 4 参把 rad 当**外接圆半径**，两者语义不同
+     * （4 参在 rotation=0 时半边长 = rad/√2，而本重载半边长 = rad）。
+     */
     public static void square(float x, float y, float radius){
-        square(x, y, radius, 0f);
+        rect(x - radius, y - radius, radius * 2f, radius * 2f);
     }
 
-    /** 空心正方形，可绕中心旋转。 */
+    /**
+     * 空心正方形，可绕中心旋转；radius 为**外接圆半径**（对应 arc 的 4 参重载
+     * {@code square(x,y,rad,rot)} → {@code poly(x,y,4,rad,rot-45)}：
+     * 顶点在角度 {@code rot-45 + i*90} 处、距中心 {@code rad}）。
+     */
     public static void square(float x, float y, float radius, float rotation){
         float[] cx = new float[4], cy = new float[4];
         for(int i = 0; i < 4; i++){
             float a = i * 90f + 45f + rotation;
-            cx[i] = x + Angles.trnsx(a, radius * 1.4142135f);
-            cy[i] = y + Angles.trnsy(a, radius * 1.4142135f);
+            cx[i] = x + Angles.trnsx(a, radius);
+            cy[i] = y + Angles.trnsy(a, radius);
         }
         for(int i = 0; i < 4; i++){
             int j = (i + 1) % 4;

@@ -76,7 +76,11 @@ public class Fx{
         Lines.circle(e.x, e.y, e.finpow() * 70f);
     });
 
-    /** RTS 攻击命令确认（对应 v8 Fx.attackCommand）：旋转收缩的红色四方框。 */
+    /**
+     * RTS 攻击命令确认（对应 v8 Fx.attackCommand）：旋转收缩的红色四方框。
+     * <p>用的是 {@link Lines#square(float, float, float, float)} 4 参（外接圆半径语义，已对齐 arc），
+     * 故数值照抄原版即可。
+     */
     public static final Effects.Effect attackCommand = new Effects.Effect(28f, 28f, e -> {
         Draw.color(Pal.remove);
         Lines.stroke(e.fout() * 2f);
