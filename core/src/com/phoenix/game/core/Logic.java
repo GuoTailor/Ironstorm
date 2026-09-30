@@ -33,6 +33,11 @@ public class Logic {
 
     /** 每帧更新一次游戏逻辑。 */
     public static void update(){
+        //对应原版 Logic.java:211 —— update() **最开头**每帧派发 Trigger.update（mod/成就/脚本挂接点）。
+        //⚠ 刻意说明：本项目 Logic.update() 由 ClientLauncher 在 `state.isPlaying()` 时调用（原版 Logic 是
+        //  ApplicationListener 模块、每帧无条件 update）→ 本事件只在游玩中派发，菜单/暂停态不派发。
+        Events.fire(EventType.Trigger.update);
+
         Time.update();
         Effects.update();
 

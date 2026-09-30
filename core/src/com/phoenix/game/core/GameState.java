@@ -1,6 +1,7 @@
 package com.phoenix.game.core;
 import com.phoenix.game.entities.Units;
 import com.phoenix.game.entities.type.BaseUnit;
+import com.phoenix.game.game.EventType.StateChangeEvent;
 import com.phoenix.game.game.Rules;
 import com.phoenix.game.game.Stats;
 import com.phoenix.game.game.Teams;
@@ -76,8 +77,16 @@ public class GameState{
         return state;
     }
 
-    public void set(State state){
-        this.state = state;
+    /**
+     * 切换游戏状态（对应原版 {@code GameState.set(State astate)}，原版 GameState.java:32-35）。
+     * <p>原版顺序是**先 fire 再赋值**：{@code Events.fire(new StateChangeEvent(state, astate)); state = astate;}
+     * —— 监听器里读 {@code getState()} 拿到的是**旧**状态（本项目 Events.fire 同步，行为与原版一致）。
+     * <p>消费方（原版）：{@code Control} 构造器里的 StateChangeEvent 监听器（切状态时停掉所有音效 + updateRPC）。
+     * 本项目该监听器尚未移植（音频未启用），此处只保证事件形状与派发点与原版一致。
+     */
+    public void set(State astate){
+        Events.fire(new StateChangeEvent(this.state, astate));
+        this.state = astate;
     }
 
     public enum State{

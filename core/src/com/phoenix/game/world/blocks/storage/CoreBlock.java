@@ -4,11 +4,14 @@ import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.phoenix.game.Vars;
 import com.phoenix.game.core.Core;
 import com.phoenix.game.core.Draw;
+import com.phoenix.game.core.Events;
 import com.phoenix.game.core.Lines;
 import com.phoenix.game.core.Time;
 import com.phoenix.game.entities.type.TileEntity;
+import com.phoenix.game.game.EventType;
 import com.phoenix.game.graphics.Pal;
 import com.phoenix.game.math.Mathf;
+import com.phoenix.game.type.Item;
 import com.phoenix.game.world.Block;
 import com.phoenix.game.world.Tile;
 import com.phoenix.game.world.meta.BlockFlag;
@@ -137,6 +140,24 @@ public class CoreBlock extends Block{
     @Override
     public boolean canBreak(com.phoenix.game.world.Tile tile){
         return false;
+    }
+
+    /**
+     * 接收物品（照抄原版 {@code CoreBlock.handleItem}，原版 CoreBlock.java:194-202）：
+     * 只在"服务端或单机"时真正入库；教程模式下额外派发 {@code CoreItemDeliverEvent}
+     * —— 教程 {@code conveyor} 步骤的 {@code event("coreitem")} 就靠它完成（此前该步骤永不完成）。
+     * <p>⚠ 网络判据：原版写 {@code net.server() || !net.active()}；本项目没有 {@code net.active()}，
+     * 等价写法为 {@code Vars.isServer() || !Vars.isClient()}（{@code isServer()}=本机开服、
+     * {@code isClient()}=已连远程且非主机；单机两者皆 false → 入库。纯客机由服务端同步，不入库）。
+     */
+    @Override
+    public void handleItem(Item item, Tile tile, Tile source){
+        if(Vars.isServer() || !Vars.isClient()){
+            super.handleItem(item, tile, source);
+            if(Vars.state != null && Vars.state.rules != null && Vars.state.rules.tutorial){
+                Events.fire(new EventType.CoreItemDeliverEvent());
+            }
+        }
     }
 
     /** 核心实体：库存指向本队共享模块，使全队核心共用同一份物品。 */

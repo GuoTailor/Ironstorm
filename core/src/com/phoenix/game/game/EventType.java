@@ -1,7 +1,10 @@
 package com.phoenix.game.game;
 
 
-import com.badlogic.gdx.ai.fsm.State;
+//⚠ 照原版 EventType.java:4 `import mindustry.core.GameState.State;` —— 这里必须是**游戏状态枚举**
+//GameState.State，不是 libgdx 的 ai.fsm.State。此前误写成 ai.fsm.State，导致 StateChangeEvent
+//的构造器签名与实际要传的 GameState.State 不兼容（G3-3 接线时暴露）。
+import com.phoenix.game.core.GameState.State;
 
 import com.phoenix.game.ai.UnitCommand;
 import com.phoenix.game.ctype.UnlockableContent;

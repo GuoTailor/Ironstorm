@@ -182,6 +182,18 @@ public class Vars {
     public static GameState state = new GameState();
     /** 游戏控制（开始战役/加载地图）。 */
     public static Control control = new Control();
+    /**
+     * 音乐控制器（对应原版 {@code Control.music}；原版是 Control 的实例字段，本项目放这里便于统一驱动）。
+     * <p>由 {@link #control} 的构造器 new（照原版 Control.java:54 的时机），
+     * 每帧由 {@code ClientLauncher.render()} 调 {@link com.phoenix.game.game.MusicControl#update()}。
+     */
+    public static com.phoenix.game.game.MusicControl music;
+    /**
+     * 循环音效聚合器（对应原版 {@code Vars.loops}，原版在 Vars.init 里 new）。
+     * <p>原版消费方是 {@code TileEntity.update}（idleSound）与 {@code Player.update}（推进器/建造音），
+     * 本项目这两处尚未接线（音频系统未启用）→ 先立字段 + 每帧 update（无音源时对空 map 遍历，无副作用）。
+     */
+    public static com.phoenix.game.game.LoopControl loops;
     /** 本地玩家（进入战役时创建，对应原版 Vars.player）。 */
     public static com.phoenix.game.entities.type.Player player;
     /** 世界渲染器（相机缩放等状态保存在这里）。 */
@@ -277,6 +289,9 @@ public class Vars {
         }
 
         collisions = new EntityCollisions();
+        //循环音效聚合器（对应原版 Vars.java:226 `loops = new LoopControl();`，原版紧跟在 content 之后；
+        //本项目 content 是字段初始化器，故放在 init() 的实例化段落开头）。
+        loops = new com.phoenix.game.game.LoopControl();
         pathfinder = new com.phoenix.game.ai.Pathfinder();
         controlPath = new com.phoenix.game.ai.ControlPathfinder();
         //RTS 命令系统内容（对应原版 ContentLoader.load 里的 UnitCommand.loadAll / UnitStance.loadAll）

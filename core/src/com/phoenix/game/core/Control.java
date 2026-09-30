@@ -4,6 +4,7 @@ import com.phoenix.game.game.Teams;
 import com.phoenix.game.game.Team;
 import com.phoenix.game.game.DefaultWaves;
 import com.phoenix.game.game.EventType;
+import com.phoenix.game.game.MusicControl;
 import com.phoenix.game.game.Tutorial;
 
 import com.badlogic.gdx.Gdx;
@@ -57,6 +58,11 @@ public class Control{
 
     public Control(){
         tutorial = new Tutorial();
+
+        //音乐控制（对应原版 Control.java:54 `music = new MusicControl();`，时机照抄：构造器里 new）。
+        //⚠ 刻意偏离：原版 `music` 是 Control 的实例字段，本项目放 {@code Vars.music}（与 Vars.hud/ui 同风格，
+        //  便于 ClientLauncher 每帧统一驱动 Vars.music.update()）。实例化时机与原版一致。
+        Vars.music = new MusicControl();
 
         //高分记录（对应原版 Control 构造器里的两个监听器）：
         //  ResetEvent → 清标记；WaveEvent → 当前波次超过本地记录就记新纪录
@@ -689,6 +695,16 @@ public class Control{
         }
 
         Vars.state.set(GameState.State.playing);
+
+        //开局事件（对应原版 Logic.play() 里 `state.set(State.playing)` 之后的 `Events.fire(new PlayEvent())`，
+        //原版 Logic.java:103-105）。
+        //⚠ 落点说明（刻意偏离 + 原因）：原版 PlayEvent 只在 logic.play()（playMap/playZone/playTutorial）里 fire，
+        //  读档路径（LoadDialog.runLoadSave 直接 state.set(playing)）**不** fire。本项目 play()/playMap()/playZone()
+        //  与 load() 共用 enterWorld()，故用 clearUnits 区分：true = 新局（play/playMap/playZone）→ fire；
+        //  false = 读档 → 不 fire。这样与原版"仅新局派发 PlayEvent"的语义一致。
+        if(clearUnits){
+            Events.fire(new EventType.PlayEvent());
+        }
 
         //玩家：原版在地核处出生并接管一个单位（本项目简化为控制一个单位；默认 dart-ship = 原版出生机甲 Mechs.starter）
         Vars.player = new Player();

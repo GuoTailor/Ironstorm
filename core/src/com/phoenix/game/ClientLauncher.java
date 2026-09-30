@@ -201,6 +201,14 @@ public class ClientLauncher extends ApplicationAdapter {
             if(Vars.ui.listfrag != null){
                 Vars.ui.listfrag.build(stage.getRoot());
             }
+
+            //客户端首次加载完成（对应原版 ClientLauncher.java:133 `Events.fire(new ClientLoadEvent())`）。
+            //⚠ 落点说明：本项目 create() 是**同步**一次性完成的（没有原版 assets.update() 的异步 loading 循环），
+            //  `finished = true` 早在本方法开头就置位，其后的整段就是原版"模块 init + 内容加载 + 资源就绪"的等价物，
+            //  所以把派发点放在这段**末尾**（UI/内容/图集/字体全部就绪之后），与"原版在所有 module.init() 之后 fire"对齐。
+            //  create() 只跑一次 → 不会每帧重复 fire。
+            //消费方：MusicControl.reload()（选曲表）、Tutorial 的 TutorialStage.load()（教程文案预加载）。
+            com.phoenix.game.core.Events.fire(new com.phoenix.game.game.EventType.ClientLoadEvent());
         }
 
         //输入路由：Stage（菜单 + HUD 按钮）优先，其次游戏输入处理器（相机/放置）
@@ -539,6 +547,14 @@ public class ClientLauncher extends ApplicationAdapter {
         //⚠ 不能挂在 `isConnected()` 里面：单机 / 断线后仍要显示系统消息（被踢、连接断开）与淡出动画，
         //  否则这些消息永远看不见（S4b 批修正）。
         if(chatfrag != null) chatfrag.update();
+
+        //音乐 / 循环音效每帧驱动（对应原版 Control.update 里的 `music.update(); loops.update();`，
+        //原版 Control.java:418-419 —— 位于 `if(!state.is(State.menu))` 判定**之前**，即菜单态也要跑）。
+        //⚠ 刻意放在这里而不是世界分支内：MusicControl.update() 内部靠 `state.isMenu()` 选播菜单曲，
+        //  放进世界分支会让菜单音乐分支成为死代码（本项目音频未启用，实际只推进状态机、MockMusic 空转）。
+        //⚠ Vars.music 由 Control 构造器 new、Vars.loops 由 Vars.init() new，均早于 render() → 不会 NPE。
+        if(Vars.music != null) Vars.music.update();
+        if(Vars.loops != null) Vars.loops.update();
 
         //战役模式：输入 -> 逻辑 -> 渲染（暂停时只渲染不更新，与 Mindustry 一致）
         if(!Vars.state.isMenu()){
@@ -2858,6 +2874,15 @@ public class ClientLauncher extends ApplicationAdapter {
         renderer.blocks.dispose();
         //bloom 后处理（no-op 实现无资源，仅为生命周期对齐——见 graphics/Bloom 类注释）
         renderer.disposeBloom();
+
+        //资源释放事件（对应原版 Renderer.dispose() 末尾的 `Events.fire(new DisposeEvent())`，原版 Renderer.java:159）。
+        //⚠ 落点说明：本项目 Renderer 没有 dispose()（只有 disposeBloom()），其资源释放由本方法开头那几行承担；
+        //  原版该事件是在 ApplicationCore 的模块 dispose 循环里、**batch/atlas 释放之前**触发的
+        //  → 这里同样放在 renderer 资源释放之后、batch/atlas 释放之前，保持"监听器仍可访问 Core.batch/atlas"的原版不变式。
+        //  （原版的 DisposeEvent 监听者是 MenuFragment→MenuRenderer.dispose() 与 Schematics→预览 FBO 释放，
+        //    本项目这两处已在下面直接调用，此处 fire 属"提供 API / 保真原版形状"。）
+        com.phoenix.game.core.Events.fire(new com.phoenix.game.game.EventType.DisposeEvent());
+
         //蓝图预览图是运行时 new 的 FrameBuffer，也要显式释放
         if(Vars.schematics != null) Vars.schematics.disposePreviews();
         //主菜单背景的三张 FBO（MenuRenderer.floor/wall/shadows；对应原版 MenuFragment.dispose）
