@@ -1,10 +1,18 @@
 package com.phoenix.game.entities.type.base;
 
+import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.graphics.Color;
+import com.badlogic.gdx.graphics.GL20;
+import com.phoenix.game.Vars;
 import com.phoenix.game.ai.Pathfinder.PathTarget;
+import com.phoenix.game.core.Draw;
+import com.phoenix.game.core.Fill;
 import com.phoenix.game.core.Time;
 import com.phoenix.game.core.Tmp;
 import com.phoenix.game.entities.Units;
 import com.phoenix.game.entities.units.UnitState;
+import com.phoenix.game.graphics.Pal;
+import com.phoenix.game.math.Angles;
 import com.phoenix.game.math.Mathf;
 
 /**
@@ -16,11 +24,13 @@ import com.phoenix.game.math.Mathf;
  * 收敛到本类（原先散落在 {@code BaseDrone}/{@code MinerDrone}/{@code HoverUnit} 的重复副本已删）。
  * <p><b>刻意未移植（B 类，已核实）</b>：原版 {@code FlyingUnit} 还有 {@code updateRotation()}（在
  * {@code update()} 里把 rotation 设为 velocity.angle()）、{@code drawWeapons()}（在 {@code draw()} 里画武器）、
- * {@code attack(float)}、{@code onCommand(...)}。本项目**没有**这些 update/draw/命令钩子：
+ * {@code attack(float)}、{@code onCommand(...)}。本项目**没有**这些命令钩子：
  * 瞄准由 {@code GroundUnit.behavior()} 的 {@code rotate(angleTo(target))} 完成，武器由
  * {@code GroundUnit.draw()} 内联绘制，命令走 {@code CommandAI}。若照原版把 {@code updateRotation()}
  * 接进 {@code update()}，会覆盖 flare/wraith/ghoul/飞船等**所有**飞行单位的 rotation（连带影响面大、
- * 且本环境无法实机回归）→ 故本批只补不影响既有行为的移动辅助，那几个钩子保持现状。
+ * 且本环境无法实机回归）→ 故只补不影响既有行为的移动辅助，{@code updateRotation()} 保持现状。
+ * <p><b>G5 已补</b>：{@link #drawEngine()}（原版 {@code drawUnder()}）与 {@link #wobble()}（原版 {@code update()} 末尾），
+ * 分别在覆写的 {@link #draw()}（先画引擎、再 {@code super.draw()}）与 {@link #update()}（{@code super.update()} 后 wobble）里调用。
  */
 public class FlyingUnit extends GroundUnit{
 
@@ -79,6 +89,70 @@ public class FlyingUnit extends GroundUnit{
         if(current == rally) return "rally";
         if(current == retreat) return "retreat";
         return "none";
+    }
+
+    /**
+     * 引擎尾焰（对应原版 {@code FlyingUnit.drawEngine}，原版在 {@code drawUnder()} 里调用 → 画在机体之下）。
+     * <p>两层实心圆：外圈 {@link Pal#engine} 色 + 内圈白色，半径带 {@code absin} 脉动。
+     * <p>⚠ 本项目 {@code Fill} 走 GL 混合，而批次可能正处在加色混合等非标准状态
+     * → 显式打开标准 alpha 混合（同 {@code Renderer.drawShields} 的说明）。
+     */
+    protected void drawEngine(){
+        Gdx.gl.glEnable(GL20.GL_BLEND);
+        Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
+
+        Draw.color(Pal.engine);
+        Fill.circle(x + Angles.trnsx(rotation + 180f, type.engineOffset),
+            y + Angles.trnsy(rotation + 180f, type.engineOffset),
+            type.engineSize + Mathf.absin(Time.time(), 2f, type.engineSize / 4f));
+
+        Draw.color(Color.WHITE);
+        Fill.circle(x + Angles.trnsx(rotation + 180f, type.engineOffset - 1f),
+            y + Angles.trnsy(rotation + 180f, type.engineOffset - 1f),
+            (type.engineSize + Mathf.absin(Time.time(), 2f, type.engineSize / 4f)) / 2f);
+        Draw.color();
+    }
+
+    /**
+     * 绘制飞行单位：先画引擎尾焰（机体之下），再走 {@link GroundUnit#draw()}。
+     * <p>对应原版 {@code FlyingUnit} 的 {@code drawUnder()} → {@code draw()} 调用顺序。
+     * <p>⚠ 本项目 {@code FlyingUnit extends GroundUnit}（共用绘制点）→ 只在 {@code isFlying()} 时画引擎，
+     * 避免影响地面单位。
+     */
+    @Override
+    public void draw(){
+        if(isFlying()){
+            drawEngine();
+        }
+        super.draw();
+    }
+
+    /**
+     * 每帧在 {@link GroundUnit#update()} 之后叠加微幅漂移
+     * （对应原版 {@code FlyingUnit.update} 末尾的 {@code wobble()}）。
+     * <p>刻意偏离：原版 update 还会调 {@code updateRotation()}（把 rotation 设为 velocity.angle()），
+     * 本项目未移植（见类注释），故这里只补 wobble。
+     */
+    @Override
+    public void update(){
+        super.update();
+        wobble();
+    }
+
+    /**
+     * 悬停微幅漂移（照原版 {@code FlyingUnit.wobble}）：x/y 各叠一个 sin/cos 微幅位移，
+     * 让飞行单位看起来在轻微抖动。
+     */
+    protected void wobble(){
+        if(Vars.isClient()) return;
+
+        x += Mathf.sin(Time.time() + id * 999, 25f, 0.05f) * Time.delta();
+        y += Mathf.cos(Time.time() + id * 999, 25f, 0.05f) * Time.delta();
+
+        if(velocity.len() <= 0.05f){
+            //原版此处有一段被注释掉的旋转抖动（rotation += ...），一并保留为注释
+            //rotation += Mathf.sin(Time.time() + id * 99, 10f, 2f * type.speed) * Time.delta();
+        }
     }
 
     /**

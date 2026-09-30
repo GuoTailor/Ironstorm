@@ -1,5 +1,8 @@
 package com.phoenix.game.world.blocks.units;
 
+import com.badlogic.gdx.graphics.g2d.TextureRegion;
+import com.phoenix.game.core.Core;
+import com.phoenix.game.core.Draw;
 import com.phoenix.game.core.Drawf;
 import com.phoenix.game.entities.Units;
 import com.phoenix.game.entities.type.BaseUnit;
@@ -10,6 +13,8 @@ import com.phoenix.game.math.Mathf;
 import com.phoenix.game.world.Block;
 import com.phoenix.game.world.Tile;
 import com.phoenix.game.world.meta.BlockFlag;
+import com.phoenix.game.world.meta.BlockStat;
+import com.phoenix.game.world.meta.StatUnit;
 
 import java.util.EnumSet;
 
@@ -30,6 +35,9 @@ public class RepairPoint extends Block{
     /** 每帧回血量。 */
     public float repairSpeed = 0.3f;
 
+    /** 底座贴图（对应原版 {@code RepairPoint.baseRegion = name + "-base"}）：画在 {@link #draw}，炮塔在 {@link #drawLayer} 旋转绘制。 */
+    public TextureRegion baseRegion;
+
     public RepairPoint(String name){
         super(name);
         update = true;
@@ -39,6 +47,48 @@ public class RepairPoint extends Block{
         hasPower = true;
         flags = EnumSet.of(BlockFlag.repair);
         entityType = RepairPointEntity::new;
+    }
+
+    @Override
+    public void load(){
+        super.load();
+        baseRegion = Core.atlas == null ? null : Core.atlas.findRegion(name + "-base");
+    }
+
+    /** 统计项：维修半径（对应原版 {@code RepairPoint.setStats} 的 {@code stats.add(BlockStat.range, ...)}）。 */
+    @Override
+    public void setStats(){
+        super.setStats();
+        stats.add(BlockStat.range, repairRadius / tilesize, StatUnit.blocks);
+    }
+
+    /**
+     * 图标分层：底座 + 炮塔（对应原版 {@code RepairPoint.generateIcons} 的 {@code {name + "-base", name}}）。
+     * <p>必须覆写：本类的 {@link #draw} 画的是底座、炮塔挪到了 {@link #drawLayer}，走父类默认实现只会拿到炮塔贴图。
+     */
+    @Override
+    protected TextureRegion[] generateIcons(){
+        if(Core.atlas == null || baseRegion == null) return super.generateIcons();
+        return new TextureRegion[]{baseRegion, region};
+    }
+
+    /** 画底座（对应原版 {@code RepairPoint.draw}）。⚠ 坐标口径：原版 {@code tile.drawx()} 即中心 → 这里用 {@code centerX/centerY}。 */
+    @Override
+    public void draw(Tile tile){
+        if(baseRegion == null) return;
+        Draw.rect(baseRegion, centerX(tile), centerY(tile));
+    }
+
+    /**
+     * 画炮塔，按 {@code entity.rotation} 旋转（对应原版 {@code RepairPoint.drawLayer}）。
+     * <p>⚠ 原版把这一段放在 {@code Layer.turret}、把底座放在默认层；本项目 {@code Block} 没有 layer 字段，
+     * 方块绘制路径统一是 {@code draw(Tile)} → {@code drawLayer(Tile)}（见 {@code Renderer.drawTiles}），
+     * 顺序天然满足"底座在下、炮塔在上"。
+     */
+    @Override
+    public void drawLayer(Tile tile){
+        if(region == null || !(tile.entity instanceof RepairPointEntity)) return;
+        Draw.rect(region, centerX(tile), centerY(tile), ((RepairPointEntity)tile.entity).rotation - 90f);
     }
 
     /** 只有锁定了目标才耗电（对应原版 {@code consumes.powerCond}）。 */

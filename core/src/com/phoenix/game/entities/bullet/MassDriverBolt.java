@@ -24,6 +24,9 @@ public class MassDriverBolt extends BulletType{
         super(5.3f, 50f);
         collidesTiles = false;
         lifetime = 200f;
+        //照原版 MassDriverBolt 构造器：消失时冒烟、命中时大火花
+        despawnEffect = Fx.smeltsmoke;
+        hitEffect = Fx.hitBulletBig;
         drag = 0.005f;
     }
 

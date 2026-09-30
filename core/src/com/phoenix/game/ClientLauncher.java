@@ -2874,9 +2874,11 @@ public class ClientLauncher extends ApplicationAdapter {
         renderer.blocks.dispose();
         //bloom 后处理（no-op 实现无资源，仅为生命周期对齐——见 graphics/Bloom 类注释）
         renderer.disposeBloom();
+        //护盾绘制用的 FrameBuffer（对应原版 Renderer.dispose 里的 `shieldBuffer.dispose()`）
+        renderer.dispose();
 
         //资源释放事件（对应原版 Renderer.dispose() 末尾的 `Events.fire(new DisposeEvent())`，原版 Renderer.java:159）。
-        //⚠ 落点说明：本项目 Renderer 没有 dispose()（只有 disposeBloom()），其资源释放由本方法开头那几行承担；
+        //⚠ 落点说明：本项目 Renderer 的资源释放由本方法开头那几行 + renderer.dispose() 承担；
         //  原版该事件是在 ApplicationCore 的模块 dispose 循环里、**batch/atlas 释放之前**触发的
         //  → 这里同样放在 renderer 资源释放之后、batch/atlas 释放之前，保持"监听器仍可访问 Core.batch/atlas"的原版不变式。
         //  （原版的 DisposeEvent 监听者是 MenuFragment→MenuRenderer.dispose() 与 Schematics→预览 FBO 释放，

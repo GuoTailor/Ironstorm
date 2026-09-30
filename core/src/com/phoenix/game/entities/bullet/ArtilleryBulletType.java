@@ -43,9 +43,9 @@ public class ArtilleryBulletType extends BasicBulletType{
         float baseScale = 0.7f;
         float scale = baseScale + b.fslope() * (1f - baseScale);
 
-        float w = width * (1f - shrinkX * b.fin()) * scale;
-        float h = height * (1f - shrinkY * b.fin()) * scale;
+        //照原版 ArtilleryBulletType.draw：宽 = bulletWidth*scale（不随飞行收缩），高 = bulletHeight*((1-shrink)+shrink*fout)*scale
+        float h = height * ((1f - shrinkY) + shrinkY * b.fout()) * scale;
 
-        drawRegions(b.x, b.y, w, h, b.rot() - 90f);
+        drawRegions(b.x, b.y, width * scale, h, b.rot() - 90f);
     }
 }

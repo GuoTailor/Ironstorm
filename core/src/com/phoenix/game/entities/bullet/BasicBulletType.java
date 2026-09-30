@@ -13,9 +13,10 @@ import io.anuke.mindustry.gen.Sounds;
  * 最小实现：基础子弹。参照 Mindustry mindustry.entities.bullet.BasicBulletType 移植。
  */
 public class BasicBulletType extends BulletType{
-    public float width = 5f, height = 8f;
-    /** 飞行过程中向内收缩的比例 */
-    public float shrinkX = 0.2f, shrinkY = 0.5f;
+    /** 子弹贴图尺寸（对应原版 {@code bulletWidth/bulletHeight}，本项目字段名沿用 width/height）。 */
+    public float width = 5f, height = 7f;
+    /** 飞行末段保留的高度比例（对应原版 {@code bulletShrink}）：高度按 {@code (1-shrinkY)+shrinkY*fout()} 收缩，宽度恒定。 */
+    public float shrinkY = 0.5f;
     public Color backColor = Pal.bulletYellowBack, frontColor = Pal.bulletYellow;
     /** 贴图前缀（对应原版 {@code bulletSprite}）：找 {@code "<name>-back"} 与 {@code "<name>"}，如 bullet / shell / missile。 */
     public String bulletSprite = "bullet";
@@ -51,11 +52,15 @@ public class BasicBulletType extends BulletType{
         }
     }
 
-    /** 供子类复用的贴图绘制（缩放后的宽高与旋转由子类算好传入）。 */
+    /**
+     * 供子类复用的贴图绘制（宽高与旋转由子类算好传入）。
+     * <p>照原版 {@code BasicBulletType.draw}：back/front **同尺寸**叠画（back 在底、front 在上），
+     * 不再给 back 额外放大。
+     */
     protected void drawRegions(float x, float y, float w, float h, float rotation){
         if(backRegion != null){
             Draw.color(backColor);
-            Draw.rect(backRegion, x, y, w * 1.1f, h * 1.3f, rotation);
+            Draw.rect(backRegion, x, y, w, h, rotation);
         }
 
         if(frontRegion != null){
@@ -70,9 +75,9 @@ public class BasicBulletType extends BulletType{
     public void draw(Bullet b){
         load();
 
-        float w = width * (1f - shrinkX * b.fin());
-        float h = height * (1f - shrinkY * b.fin());
+        //照原版：宽恒定，高按 fout() 从 height 收缩到 height*(1-shrinkY)
+        float h = height * ((1f - shrinkY) + shrinkY * b.fout());
 
-        drawRegions(b.x, b.y, w, h, b.rot() - 90f);
+        drawRegions(b.x, b.y, width, h, b.rot() - 90f);
     }
 }

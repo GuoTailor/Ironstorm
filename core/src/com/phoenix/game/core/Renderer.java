@@ -494,6 +494,20 @@ public class Renderer {
     }
 
     /**
+     * 释放渲染器自持的 GPU 资源（对应原版 {@code Renderer.dispose}，原版 Renderer.java:151-160）。
+     * <p>本项目只搬了 {@code shieldBuffer} 的释放：它是本类自己 new 的 FrameBuffer（不走 AssetManager），
+     * 不释放会泄漏 FBO。其余（minimap/pixelator/blocks/bloom）由 {@code ClientLauncher.dispose} 直接调用。
+     * <p>⚠ 窗口尺寸变化时 {@code drawShields} 会 dispose 重建 shieldBuffer（libgdx 1.14.2 没有 resize），
+     * 所以这里可能为 null，需判空。
+     */
+    public void dispose(){
+        if(shieldBuffer != null){
+            shieldBuffer.dispose();
+            shieldBuffer = null;
+        }
+    }
+
+    /**
      * 世界内玩家名（对应原版 {@code playerGroup.draw(p -> !p.isDead(), Player::drawName)}）。
      * <p>独立成方法是为了让 {@code Pixelator} 能在"像素化贴回屏幕之后"再画一遍 —— 原版
      * {@code Pixelator.drawPixelate} 就是这么做的，玩家名因此不参与像素化（文字保持清晰）。
@@ -542,8 +556,8 @@ public class Renderer {
         float vx = input.targetX, vy = input.targetY;
 
         //物品图标 + accent 圆环
-        if(player.item != null){
-            TextureRegion icon = player.item.icon(Cicon.medium);
+        if(player.carriedItem() != null){
+            TextureRegion icon = player.carriedItem().icon(Cicon.medium);
             if(icon != null) Draw.rect(icon, vx, vy, 8f, 8f);
         }
         Draw.color(Pal.accent);
@@ -552,9 +566,9 @@ public class Renderer {
 
         //目标方块能收下时：双层描边高亮（外层灰 3px、内层 place 色 1px，带呼吸脉动）
         Tile tile = Vars.world.tileWorld(vx, vy);
-        if(tile != null && player.item != null
+        if(tile != null && player.carriedItem() != null
             && tile.interactable(player.getTeam())
-            && tile.block().acceptStack(player.item, player.itemAmount, tile, player.unit()) > 0){
+            && tile.block().acceptStack(player.carriedItem(), player.carriedAmount(), tile, player.unit()) > 0){
             float cx = tile.block().centerX(tile), cy = tile.block().centerY(tile);
             Lines.stroke(3f, Pal.gray);
             Lines.square(cx, cy, tile.block().size * tilesize / 2f + 3f + Mathf.absin(Time.time(), 5f, 1f));

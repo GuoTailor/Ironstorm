@@ -328,8 +328,9 @@ public class Bullets implements com.phoenix.game.ctype.ContentList{
     // ⚠ 新增 44 个弹药会让**其后注册的 Mechs/UnitTypes/Blocks 全体 id 后移**（内容 id 是跨类型全局计数器）
     //    → 网络包按 id 引用内容，**两端必须同版本**（见 转换.md F1 批第 58 条）。
     // ⚠ 本项目子弹类字段名与原版不同（见 转换.md F1 批第 56 条），本批统一换算：
-    //    `bulletWidth` → `width`、`bulletHeight` → `height`、`bulletShrink` → `shrinkY`（原版只缩高度，
-    //    本项目另有 shrinkX 会额外把宽度缩 20%，属既有系统性视觉偏离，未逐个改）。
+    //    `bulletWidth` → `width`、`bulletHeight` → `height`、`bulletShrink` → `shrinkY`。
+    //    （G5-4 已对齐原版公式：宽恒定、高 = height*((1-shrinkY)+shrinkY*fout())；原先多出来的
+    //     `shrinkX`（额外缩宽 20%）与 back 放大 1.1/1.3 已删除，故这些赋值现在是 1:1 照抄原版。）
     // ⚠ 另一条系统性差异：`BasicBulletType` 的默认 hitEffect/despawnEffect 本项目是 `Fx.hit`
     //    （原版继承 BulletType 的 `Fx.hitBulletSmall`）→ 原版靠默认值的地方本项目会多一层命中特效。
     // ⚠ `ArtilleryBulletType`/`BombBulletType` 在本项目**刻意保持碰撞开启**（原版设

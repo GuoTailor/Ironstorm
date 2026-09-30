@@ -167,7 +167,8 @@ public class MendProjector extends Block{
 
         @Override
         public void update(){
-            heat = Mathf.lerpDelta(heat, cons.valid() ? 1f : 0f, 0.08f);
+            //照原版：作弊 AI 的敌方投影器即使没通电也按"有效"升温（tile.isEnemyCheat()）
+            heat = Mathf.lerpDelta(heat, cons.valid() || tile.isEnemyCheat() ? 1f : 0f, 0.08f);
             charge += heat * delta();
 
             //相织物升温 + 定时消耗一次（对应原版 update 的前两段；注意先判 optionalValid 再 trigger）
@@ -203,6 +204,8 @@ public class MendProjector extends Block{
         if(Vars.world == null) return;
 
         float cx = centerX(tile), cy = centerY(tile);
+        //供电率：照原版治疗量要乘 entity.efficiency()（与 OverdriveProjector 的写法一致）
+        float efficiency = tile.entity == null ? 1f : tile.entity.efficiency();
         //治疗波（本项目扩展：每个治疗周期放一次的波纹）
         Effects.effect(Fx.healWave, cx, cy);
         int tileRange = (int)(range / tilesize + 1);
@@ -222,7 +225,8 @@ public class MendProjector extends Block{
                 //去重：ltile 把同一多格建筑的卫星格都解析回同一个锚点瓦片，不去重会重复治疗
                 if(healed.contains(other.pos())) continue;
 
-                other.entity.healBy(other.entity.maxHealth() * percent);
+                //照原版：治疗量 × 供电率（efficiency）
+                other.entity.healBy(other.entity.maxHealth() * percent * efficiency);
                 //命中特效（对应原版 Fx.healBlockFull）：颜色随相织物从 baseColor 渐变到 phaseColor，
                 //rotation 传 block.size（特效内部 × tilesize，画出整块建筑的方形闪光）
                 Effects.effect(Fx.healBlockFull, Tmp.c1.set(baseColor).lerp(phaseColor, phaseHeat),

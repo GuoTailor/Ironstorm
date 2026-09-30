@@ -17,6 +17,7 @@ import com.phoenix.game.entities.units.UnitState;
 import com.phoenix.game.math.Angles;
 import com.phoenix.game.math.Mathf;
 import com.phoenix.game.world.meta.BlockFlag;
+import com.phoenix.game.world.Floor;
 import com.phoenix.game.world.Tile;
 
 /**
@@ -134,6 +135,12 @@ public class GroundUnit extends BaseUnit {
     public void draw() {
         float ft = Mathf.sin(walkTime * type.speed * 5f, 6f, 2f + type.hitsize / 15f);
 
+        //脚下是液体时，腿部按液体色淡染一半（对应原版 GroundUnit.draw 的 floor.isLiquid 分支）
+        Floor floor = getFloorOn();
+        if(floor.isLiquid){
+            Draw.color(Color.WHITE, floor.color, 0.5f);
+        }
+
         if(type.legRegion != null){
             for(int i : Mathf.signs){
                 Draw.rect(type.legRegion,
@@ -144,7 +151,13 @@ public class GroundUnit extends BaseUnit {
                         baseRotation - 90);
             }
         }
-        Draw.color(Color.WHITE);
+
+        //本体着色：液体上按液体色淡染，且染色深度随溺水进度加深（对应原版 GroundUnit.draw）
+        if(floor.isLiquid){
+            Draw.color(Color.WHITE, floor.color, drownTime * 0.4f);
+        }else{
+            Draw.color(Color.WHITE);
+        }
 
         if(type.baseRegion != null){
             Draw.rect(type.baseRegion, x, y, baseRotation - 90);

@@ -152,8 +152,17 @@ public class Weapon {
             shooter.velocity().add(Tmp.v1);
         }
 
+        //炮口前移 3 单位（照原版 shootDirect 里的 Tmp.v1.trns(rotation, 3f)）
+        float fx = x + Angles.trnsx(rotation, 3f), fy = y + Angles.trnsy(rotation, 3f);
+
         Effects.shake(shake, shake, x, y);
         Effects.effect(ejectEffect, x, y, rotation * -Mathf.sign(left));
+        //开火特效（照原版 Weapon.java:121-122）。
+        //⚠ 本项目 bullet 允许为 null（无弹武器）→ 加守卫，原版 bullet 是 @NonNull 无需判空
+        if(bullet != null){
+            Effects.effect(bullet.shootEffect, fx, fy, rotation, shooter);
+            Effects.effect(bullet.smokeEffect, fx, fy, rotation, shooter);
+        }
 
         //reset timer for remote players
         shooter.getTimer().get(shooter.getShootTimer(left), reload);
