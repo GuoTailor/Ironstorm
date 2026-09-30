@@ -5,6 +5,7 @@ import com.phoenix.game.math.Mathf;
 import com.phoenix.game.entities.type.TileEntity;
 import com.phoenix.game.type.ItemStack;
 import com.phoenix.game.world.Block;
+import com.phoenix.game.world.Tile;
 import com.phoenix.game.world.meta.BlockStat;
 import com.phoenix.game.world.meta.StatUnit;
 
@@ -58,6 +59,19 @@ public class GenericCrafter extends Block{
         if(outputLiquid != null){
             stats.add(BlockStat.output, outputLiquid.liquid, outputLiquid.amount, false);
         }
+    }
+
+    /**
+     * @return 输出未满才消耗输入（对应原版 {@code GenericCrafter.shouldConsume}）。
+     * <p>没有这层门槛时，{@code items.add} 不受 {@code itemCapacity} 限制 → 输出会无限堆积、
+     * 输入被持续消耗（满仓也不停产）；补上后 {@code ConsumeModule} 在输出满时不再扣料/耗电。
+     */
+    @Override
+    public boolean shouldConsume(Tile tile){
+        if(outputItem != null && tile.entity.items.get(outputItem.item) >= itemCapacity){
+            return false;
+        }
+        return outputLiquid == null || !(tile.entity.liquids.get(outputLiquid.liquid) >= liquidCapacity - 0.001f);
     }
 
     public class CraftEntity extends TileEntity{

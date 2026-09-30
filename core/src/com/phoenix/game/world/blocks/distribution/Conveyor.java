@@ -3,13 +3,17 @@ package com.phoenix.game.world.blocks.distribution;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.math.GridPoint2;
+import com.badlogic.gdx.utils.Array;
+import com.phoenix.game.content.Blocks;
 import com.phoenix.game.core.Core;
 import com.phoenix.game.core.Time;
+import com.phoenix.game.entities.type.BaseUnit;
 import com.phoenix.game.entities.type.TileEntity;
 import com.phoenix.game.math.Mathf;
 import com.phoenix.game.math.geom.Geometry;
 import com.phoenix.game.type.Item;
 import com.phoenix.game.world.Block;
+import com.phoenix.game.world.BuildRequest;
 import com.phoenix.game.world.Tile;
 import com.phoenix.game.world.meta.BlockStat;
 import com.phoenix.game.world.meta.StatUnit;
@@ -306,6 +310,69 @@ public class Conveyor extends Block{
     }
 
     /**
+     * @return 本带当前还能接收该物品的数量（对应原版 {@code Conveyor.acceptStack}）。
+     * <p>由尾部空隙 {@code minitem} 决定：一个物品占 {@code itemSpace}，所以能塞进
+     * {@code floor(minitem / itemSpace)} 个。供单位/玩家整叠投递时先问一句能收多少。
+     */
+    @Override
+    public int acceptStack(Item item, int amount, Tile tile, BaseUnit source){
+        if(!(tile.entity instanceof ConveyorEntity)) return 0;
+        ConveyorEntity entity = (ConveyorEntity)tile.entity;
+        return Math.min((int)(entity.minitem / itemSpace), amount);
+    }
+
+    /**
+     * 接收一叠物品并直接摆到带子上（对应原版 {@code Conveyor.handleStack}）。
+     * <p>与基类默认实现（只 {@code items.add}、不进数组）不同：这里把整叠物品按
+     * {@code i * itemSpace} 的间距写进 {@code ids/xs/ys} 并行数组，物品才会真的显示在带上。
+     * <p>刻意偏离：原版末尾的 {@code entity.noSleep()} 本项目无（同 {@code handleItem}）。
+     */
+    @Override
+    public void handleStack(Item item, int amount, Tile tile, BaseUnit source){
+        if(!(tile.entity instanceof ConveyorEntity)) return;
+        ConveyorEntity e = (ConveyorEntity)tile.entity;
+        amount = Math.min(amount, itemCapacity - e.len);
+
+        for(int i = amount - 1; i >= 0; i--){
+            e.add(0);
+            e.xs[0] = 0f;
+            e.ys[0] = i * itemSpace;
+            e.ids[0] = item;
+            e.items.add(item, 1);
+        }
+    }
+
+    /**
+     * 拖拽连线时的替换方块（对应原版 {@code Conveyor.getReplacement}）：
+     * 当本格前后都有同向的传送带/交叉器请求、且本格已有一条**垂直朝向**的传送带时，
+     * 自动把请求换成交叉器（{@code junction}）——否则直行带子会在十字路口堵住。
+     * <p>消费点：{@code InputHandler.updateLine}（受设置项 {@code blockreplace} 门控）。
+     * <p>坐标口径：本项目 {@code Geometry.d4[rotation]} 即前进方向（0=上/1=右/2=下/3=左），
+     * 与原版 {@code Geometry.d4(rotation)} 语义等价；反向用 {@code mod(rotation - 2, 4)}。
+     */
+    @Override
+    public Block getReplacement(BuildRequest req, Array<BuildRequest> requests){
+        GridPoint2 fwd = Geometry.d4[Mathf.mod(req.rotation, 4)];
+        GridPoint2 back = Geometry.d4[Mathf.mod(req.rotation - 2, 4)];
+
+        return containsAt(requests, req, fwd) && containsAt(requests, req, back)
+            && req.tile() != null
+            && req.tile().block() instanceof Conveyor
+            && Mathf.mod(req.tile().rotation() - req.rotation, 2) == 1 ? Blocks.junction : this;
+    }
+
+    /** @return 请求列表里是否存在"与本请求同向、且位于本格 + offset 处"的传送带/交叉器请求。 */
+    private boolean containsAt(Array<BuildRequest> requests, BuildRequest req, GridPoint2 offset){
+        for(BuildRequest o : requests){
+            if(o.x == req.x + offset.x && o.y == req.y + offset.y && o.rotation == req.rotation
+                && (req.block instanceof Conveyor || req.block instanceof Junction)){
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * 绘制带上的物品（叠在带贴图之上），含侧向输入的横向偏移。
      * @param tile 本带所在瓦片
      */
@@ -423,10 +490,15 @@ public class Conveyor extends Block{
                 xs[i] = Mathf.lerpDelta(xs[i], 0f, speed * 2f);
 
                 if(ys[i] >= 1f && offloadDir(tile, ids[i])){
+                    //先把物品取到局部变量：下面会清空 ids 数组，不能再读 ids[i]
+                    Item offloaded = ids[i];
                     //直行衔接到下游带时，把横向偏移传过去，物品位置不会在接缝处跳变
                     if(aligned && nextc != null && nextc.lastInserted >= 0 && nextc.lastInserted < capacity){
                         nextc.xs[nextc.lastInserted] = xs[i];
                     }
+                    //卸载时同步扣库存（对应原版 Conveyor.java:201 `e.items.remove(e.ids[i], e.len - i)`）：
+                    // 漏掉这步会让 items 随搬运量单调虚高，拆掉跑过 N 个物品的带子会掉 N 个幽灵物品（复制漏洞）
+                    items.remove(offloaded, len - i);
                     //丢弃该物品及其后方元素（正常只有带首会到 1）
                     for(int j = i; j < len; j++){
                         ids[j] = null;

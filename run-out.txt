@@ -1,0 +1,4 @@
+[小地图] 已采样 166 个方块颜色
+战役模式：已加载地图 120x120
+DBG G1 filled items=3 len=3
+DBG G1 after beltsItems=0 sinkCopper=3

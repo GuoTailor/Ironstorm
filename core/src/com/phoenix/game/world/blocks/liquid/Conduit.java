@@ -1,13 +1,18 @@
 package com.phoenix.game.world.blocks.liquid;
 
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
+import com.badlogic.gdx.math.GridPoint2;
+import com.badlogic.gdx.utils.Array;
+import com.phoenix.game.content.Blocks;
 import com.phoenix.game.core.Core;
 import com.phoenix.game.core.Draw;
 import com.phoenix.game.core.Interval;
 import com.phoenix.game.entities.type.TileEntity;
 import com.phoenix.game.math.Mathf;
+import com.phoenix.game.math.geom.Geometry;
 import com.phoenix.game.type.Liquid;
 import com.phoenix.game.world.Block;
+import com.phoenix.game.world.BuildRequest;
 import com.phoenix.game.world.Tile;
 import com.phoenix.game.world.blocks.Autotiler;
 import com.phoenix.game.world.blocks.LiquidBlock;
@@ -24,8 +29,8 @@ import com.phoenix.game.world.blocks.LiquidBlock;
  *         （见 {@code Drill}/{@code GenericCrafter}）。</li>
  *     <li>原版贴图基准朝向为"右"（{@code rotation * 90}）；本项目 rotation 0 = +y，
  *         所以角度写成 {@code (1 - rotation) * 90}（同 {@code LiquidBlock}）。</li>
- *     <li>原版 {@code drawRequestRegion} / {@code getReplacement}（建造预览与"自动换成junction"）
- *         本项目没有对应钩子，未移植。</li>
+ *     <li>原版 {@code drawRequestRegion}（建造预览）本项目没有对应钩子，未移植；
+ *         {@code getReplacement}（拖拽连线时拐角自动换成 liquid-junction）已按原版补上。</li>
  *     <li>原版 {@code timers++} 的计时器槽位本项目没有（{@code Block.timers} 未移植），
  *         改为每个实体自带一个 {@link Interval}。</li>
  * </ul>
@@ -79,6 +84,36 @@ public class Conduit extends LiquidBlock implements Autotiler{
     @Override
     public void transformCase(int num, int[] bits){
         bits[0] = num == 0 ? 3 : num == 1 ? 6 : num == 2 ? 2 : num == 3 ? 4 : num == 4 ? 5 : num == 5 ? 1 : 0;
+    }
+
+    /**
+     * 拖拽连线时的替换方块（对应原版 {@code Conduit.getReplacement}）：
+     * 本格前后都有同向的导管/液交叉器请求、且本格已有一条**垂直朝向**的导管时，
+     * 自动把请求换成液交叉器（{@code liquidJunction}）。
+     * <p>消费点：{@code InputHandler.updateLine}（受设置项 {@code blockreplace} 门控）。
+     * <p>坐标口径：本项目 {@code Geometry.d4[rotation]} 即前进方向（0=上/1=右/2=下/3=左），
+     * 与原版 {@code Geometry.d4(rotation)} 语义等价；反向用 {@code mod(rotation - 2, 4)}。
+     */
+    @Override
+    public Block getReplacement(BuildRequest req, Array<BuildRequest> requests){
+        GridPoint2 fwd = Geometry.d4[Mathf.mod(req.rotation, 4)];
+        GridPoint2 back = Geometry.d4[Mathf.mod(req.rotation - 2, 4)];
+
+        return containsAt(requests, req, fwd) && containsAt(requests, req, back)
+            && req.tile() != null
+            && req.tile().block() instanceof Conduit
+            && Mathf.mod(req.tile().rotation() - req.rotation, 2) == 1 ? Blocks.liquidJunction : this;
+    }
+
+    /** @return 请求列表里是否存在"与本请求同向、且位于本格 + offset 处"的导管/液交叉器请求。 */
+    private boolean containsAt(Array<BuildRequest> requests, BuildRequest req, GridPoint2 offset){
+        for(BuildRequest o : requests){
+            if(o.x == req.x + offset.x && o.y == req.y + offset.y && o.rotation == req.rotation
+                && (req.block instanceof Conduit || req.block instanceof LiquidJunction)){
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override

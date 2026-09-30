@@ -297,9 +297,8 @@ public class Turret extends Block{
         /**
          * 装填速度倍率（对应原版 {@code Turret.baseReloadSpeed(Tile)}）：默认 1。
          * <p>参照原版 mindustry.world.blocks.defense.turrets.Turret 移植；耗电炮塔覆写它返回供电率。
-         * <p>注意：原版在 {@code Turret.update} 里把 {@code reload} 的推进乘上它；本项目现有的
-         * {@code updateShooting()} 没有乘（PowerTurret 自己用"没电直接 return"顶替），
-         * 为不改动既有行为，这里只补方法、暂不接进推进公式（留给主会话决定）。
+         * <p>原版在 {@code Turret.updateShooting} 里把 {@code reload} 的推进乘上它，这里同样乘进
+         * {@link #updateShooting()}（{@code ItemTurret.updateShooting} 已自行乘过，故不受影响）。
          */
         protected float baseReloadSpeed(){
             return 1f;
@@ -310,7 +309,7 @@ public class Turret extends Block{
                 shoot();
                 reload = 0f;
             }else{
-                reload += Time.delta() * (bullet == null ? 1f : bullet.reloadMultiplier);
+                reload += Time.delta() * (bullet == null ? 1f : bullet.reloadMultiplier) * baseReloadSpeed();
             }
         }
 

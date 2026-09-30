@@ -1007,6 +1007,17 @@ public class Block extends com.phoenix.game.ctype.UnlockableContent {
     }
 
     /**
+     * 玩家拖拽连线时该请求的替换方块（对应原版 {@code Block.getReplacement}）。
+     * <p>默认返回自身（不替换）；由具体方块覆写（如 {@code Conveyor}/{@code Conduit} 在拐角处
+     * 自动换成交叉器）。消费点见 {@code InputHandler.updateLine}（受设置项 {@code blockreplace} 门控）。
+     * @param req 当前建造请求
+     * @param requests 本帧拖拽产生的全部请求（用于判断前后是否都有同向的同类方块）
+     */
+    public Block getReplacement(BuildRequest req, Array<BuildRequest> requests){
+        return this;
+    }
+
+    /**
      * 单位站上本方块时的每帧回调（对应原版 {@code Block.unitOn}，mindustry/world/Block.java:361）。
      * 由 {@code BaseUnit.updateVelocity()} 的地面分支调用（对应原版 Unit.java:226 的调用点），
      * 飞行分支不调用。默认空实现，由具体方块覆写（如 {@code Conveyor} 沿带推动单位）。

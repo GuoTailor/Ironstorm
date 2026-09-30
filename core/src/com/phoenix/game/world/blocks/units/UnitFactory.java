@@ -108,6 +108,16 @@ public class UnitFactory extends Block{
         return false;
     }
 
+    /**
+     * @return 在场单位未达上限才消耗资源（对应原版 {@code UnitFactory.shouldConsume} 的 {@code spawned < maxSpawn}）。
+     * <p>本项目不维护 {@code spawned} 计数（会改存档实体格式），改用等价的 {@link UnitFactoryEntity#aliveCount()}
+     * 全量统计；满员时 {@code ConsumeModule} 不再扣料/占用电网需求。
+     */
+    @Override
+    public boolean shouldConsume(Tile tile){
+        return !(tile.entity instanceof UnitFactoryEntity) || ((UnitFactoryEntity)tile.entity).aliveCount() < maxSpawn;
+    }
+
     /** 绘制建造剪影 + accent 扫描线 + 工厂上半部分 + 生产进度条。 */
     @Override
     public void drawLayer(Tile tile){

@@ -415,6 +415,15 @@ public class Drill extends Block{
         return false;
     }
 
+    /**
+     * @return 库存没满才消耗资源（对应原版 {@code Drill.shouldConsume}）。
+     * <p>满仓时 {@code ConsumeModule} 不再扣料/占用电网需求，钻头随之停机（不再空耗电）。
+     */
+    @Override
+    public boolean shouldConsume(Tile tile){
+        return tile.entity.items.total() < itemCapacity;
+    }
+
     @Override
     public boolean canPlaceOn(Tile tile){
         //与原版一致：覆盖面里至少一格可采才能放置
