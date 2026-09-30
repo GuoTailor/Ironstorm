@@ -24,14 +24,20 @@ public class Fill{
         Drawf.renderer().circle(x, y, radius, Math.max(segments, 3));
     }
 
-    /** 实心正方形，size 为边长。 */
-    public static void square(float x, float y, float size){
-        square(x, y, size, 0f);
+    /**
+     * 实心正方形（照 arc 语义：第三参是**半径**，内部 {@code rect(x, y, radius*2, radius*2)}）。
+     * <p>⚠ <b>G10 修正</b>：此前本项目把它实现成"第三参 = 边长"（{@code rect(x,y,size,size)}），
+     * 而 arc 是"半径" → 凡从 arc 原样搬来的调用点（{@code content/Fx.java} 的 17 处、
+     * {@code Lightning} 等）实际只画出**一半尺寸**。现已对齐 arc（见 {@code arc/graphics/g2d/Fill.java:109-115}）。
+     * <p>⚠ 本项目自写的调用点若按"边长"传参，需自行换算（当前仅 {@code Fx.unitDebris} 一处，已改）。
+     */
+    public static void square(float x, float y, float radius){
+        square(x, y, radius, 0f);
     }
 
-    /** 实心正方形，可绕中心旋转。 */
-    public static void square(float x, float y, float size, float rotation){
-        rect(x, y, size, size, rotation);
+    /** 实心正方形（半径语义），可绕中心旋转。 */
+    public static void square(float x, float y, float radius, float rotation){
+        rect(x, y, radius * 2f, radius * 2f, rotation);
     }
 
     /** 实心矩形，可绕中心旋转。 */

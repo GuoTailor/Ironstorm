@@ -1295,7 +1295,8 @@ public class Fx{
         for(int i = 0; i < 6; i++){
             float ang = e.rotation + i * 60f + (e.rand(i) - 0.5f) * 60f;
             float dist = 4f + 16f * e.fin();
-            float size = 4f * (1f - e.fin()) + 1f;
+            //⚠ G10：Fill.square 现为 arc 的**半径**语义（本项目此前误当边长）→ 本处自写的尺寸减半保持原观感
+            float size = (4f * (1f - e.fin()) + 1f) / 2f;
             Fill.square(e.x + Angles.trnsx(ang, dist), e.y + Angles.trnsy(ang, dist) - e.fin() * e.fin() * 5f,
                 size, ang + e.fin() * 180f);
         }

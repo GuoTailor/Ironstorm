@@ -56,9 +56,8 @@ public class Battery extends PowerDistributor{
 
         Gdx.gl.glEnable(GL20.GL_BLEND);
         Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
-        //⚠ 语义换算：原版 arc 的 Fill.square(x,y,radius) 第三参是**半径**（原版写 tilesize*size/2f - 1），
-        //   本项目 Fill.square(x,y,size) 第三参是**边长** → 等价写法是 2*(tilesize*size/2f - 1) = tilesize*size - 2
-        Fill.square(centerX(tile), centerY(tile), tilesize * size - 2f);
+        //G10 起本项目 Fill.square 已对齐 arc 的**半径**语义 → 直接照原版写 tilesize*size/2f - 1
+        Fill.square(centerX(tile), centerY(tile), tilesize * size / 2f - 1f);
         Draw.color();
 
         TextureRegion top = reg(topRegion);
