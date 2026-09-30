@@ -39,6 +39,9 @@ public abstract class TileEntity extends SolidEntity implements com.phoenix.game
     public PowerGraph graph;
     /** 消耗状态模块（对应原版 {@code TileEntity.cons}）：每帧刷新，方块逻辑判 {@code cons.valid()}。 */
     public ConsumeModule cons;
+    /** 通用计时器组（对应原版 {@code TileEntity.timer}，TileEntity.java:34/78）：
+     *  容量 = 所属方块的 {@link Block#timers}，下标由 {@code timerXxx = timers++} 在 Block 上分配。 */
+    public com.phoenix.game.core.Interval timer;
 
     /**
      * 邻接表：外围一圈"有实体且可互通（同队）"的瓦片，物流/电力都靠它找目标
@@ -69,6 +72,9 @@ public abstract class TileEntity extends SolidEntity implements com.phoenix.game
         }
         //消耗状态模块：所有实体都有（没有消耗器的方块它的 valid 恒为 true）
         this.cons = new ConsumeModule(this);
+        //计时器组（对应原版 TileEntity.java:78 `timer = new Interval(block.timers)`）；
+        //容量 0 时 Interval 会以 1 建表（本项目 Interval 构造已 clamp），未用计时器的方块不受影响
+        this.timer = new com.phoenix.game.core.Interval(Math.max(1, block.timers));
         set(tile.worldx(), tile.worldy());
         return this;
     }

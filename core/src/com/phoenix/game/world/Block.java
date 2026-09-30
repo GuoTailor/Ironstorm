@@ -75,6 +75,13 @@ public class Block extends com.phoenix.game.ctype.UnlockableContent {
     public float baseExplosiveness = 0f;
     /** 破坏音效（对应原版 {@code Block.breakSound}，Block.java:120）。 */
     public Sound breakSound = Sounds.boom;
+    /** 本方块使用的计时器数量（对应原版 {@code Block.timers}，Block.java:74-75）；
+     *  {@link TileEntity#timer} 按它建 {@code Interval}，各 timer 下标由 {@code timerXxx = timers++} 分配。 */
+    public int timers = 0;
+    /** 物品输出计时器下标（对应原版 {@code Block.timerDump}，Block.java:158）。 */
+    protected final int timerDump = timers++;
+    /** 物品输出的尝试间隔（帧），5 = 12 次/秒（对应原版 {@code Block.dumpTime}，Block.java:160）。 */
+    protected final int dumpTime = 5;
     /** 方块标记，用于 AI 索引 */
     public EnumSet<BlockFlag> flags = EnumSet.noneOf(BlockFlag.class);
     /** 显示颜色 */

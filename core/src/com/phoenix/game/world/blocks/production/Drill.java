@@ -297,33 +297,43 @@ public class Drill extends Block{
                 dominantItems = returnCount;
             }
 
+            //★ 物品输出放在最前、与满仓无关（对应原版 Drill.update 开头的
+            //  `if(entity.timer.get(timerDump, dumpTime)) tryDump(tile, entity.dominantItem);`）：
+            //  满仓停机后，一旦相邻出现接受者（铺上传送带），下一 dump 周期就能送出、
+            //  库存下降、生产条件重新满足 → 自动复产。
+            //  ⚠ 不能像旧实现那样把 tryDump 放在"满仓 return"之后——那样满仓的钻头
+            //    永远不会尝试输出，铺了传送带也不会恢复。
+            if(timer.get(timerDump, dumpTime)){
+                tryDump(tile, dominantItem);
+            }
+
             float speed = speedf();
 
-            //启动进度：供电满足时上涨到 speed，否则回落到 0（对应原版 warmup）
-            warmup = Mathf.lerpDelta(warmup, speed, warmupSpeed);
+            if(items.total() < itemCapacity && dominantItems > 0 && speed > 0.001f){
+                //启动进度：供电满足时上涨到 speed（对应原版生产分支的 warmup）
+                warmup = Mathf.lerpDelta(warmup, speed, warmupSpeed);
 
-            if(speed <= 0.001f || items.total() >= itemCapacity){
+                //倍率折算：基础速度 × 液体加成（对应原版 optionalValid → liquidBoostIntensity）
+                float boost = liquidBoostIntensity > 1f && liquids != null && !liquids.isEmpty() ? liquidBoostIntensity : 1f;
+                float rate = speed * boost * warmup;
+
+                //硬度越高的矿物越慢：满 1 个所需帧数 = drillTime + 硬度 × multiplier（对应原版）
+                float required = drillTime + hardnessDrillMultiplier * dominantItem.hardness;
+                lastDrillSpeed = rate * dominantItems / required * 60f;
+                progress += Time.delta() * rate * dominantItems;
+
+                if(progress >= required){
+                    progress = 0f;
+                    //先尝试直接交给相邻建筑，无处可去才留在自身库存
+                    offloadNear(tile, dominantItem);
+                    //战役"生产即解锁"（对应原版 offloadNear 之后紧跟的 useContent(tile, item)）
+                    useContent(tile, dominantItem);
+                }
+            }else{
+                //满仓 / 无矿格 / 停电：停机并让 warmup 回落（对应原版 else 分支）
                 lastDrillSpeed = 0f;
-                return;
+                warmup = Mathf.lerpDelta(warmup, 0f, warmupSpeed);
             }
-
-            //倍率折算：基础速度 × 液体加成（对应原版 optionalValid → liquidBoostIntensity）
-            float boost = liquidBoostIntensity > 1f && liquids != null && !liquids.isEmpty() ? liquidBoostIntensity : 1f;
-            float rate = speed * boost * warmup;
-
-            //硬度越高的矿物越慢：满 1 个所需帧数 = drillTime + 硬度 × multiplier（对应原版）
-            float required = drillTime + hardnessDrillMultiplier * dominantItem.hardness;
-            lastDrillSpeed = rate * dominantItems / required * 60f;
-            progress += Time.delta() * rate * dominantItems;
-
-            if(progress >= required){
-                progress = 0f;
-                //先尝试直接交给相邻建筑，无处可去才留在自身库存
-                offloadNear(tile, dominantItem);
-            }
-
-            //把积压的库存持续往外送
-            tryDump(tile);
         }
 
         /** @return 供电满足率（0~1）；无电力模块时视为满供。 */
