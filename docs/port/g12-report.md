@@ -101,3 +101,16 @@ DBG respawn f=640 dead=false respawns=4 spawner=false core{spawn=false prog=0.00
 - `shouldActiveSound` 无消费者（本项目无工作音效系统）—— 与 `LaserTurret`/`LiquidTurret` 同属 B 类降级。
 - `MechPad` 的换装进度动画（原版 `drawLayer → RespawnBlock.drawRespawn`）仍未接线：`RespawnBlock` 已移植、
   `Shaders.build` 已存在，属独立小项，未纳入本批。
+
+## ⚠ 提交树状态说明（与 G12 无关的既有问题）
+
+用 `git worktree` 对提交 `3e1d36b` 做独立编译**失败**，但**根因不在 G12**：
+
+- 已提交的 `core/Renderer.java:573-585` 引用了 `player.carriedItem()` / `player.carriedAmount()`；
+- 这两个方法只存在于**用户未提交的** `Player.java`（"背包分裂"重构）；
+- 该状态在 G12 之前就已存在（`git grep -n "carriedItem\|carriedAmount" e89a10f -- core/src/` 同样命中 `Renderer.java`）。
+
+也就是说**仓库提交树 HEAD 一直处于"半提交重构"状态、无法单独编译**；能编译的是**工作区**（含用户 WIP）。
+本批提交用 hunk 级选择性暂存避开用户 WIP（`Player.java` 的 `itemtime` 行与我的改动相邻，已把该行还原为 HEAD 版本再入索引），
+所以提交树里 `Player.java` 仍是 HEAD 的 `itemAmount` 版本 —— 与既有的 `Renderer.java` 引用不匹配属**同一既有问题**，
+待用户提交其 WIP（或单独提交 `Player.java`）后即恢复。**工作区（可运行状态）编译绿、重生链实测通过。**
