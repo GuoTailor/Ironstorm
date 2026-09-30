@@ -193,6 +193,9 @@ public class ChatFragment extends Fragment {
                 addSystem("  /ping          显示延迟");
                 addSystem("  /disconnect    断开连接");
                 addSystem("  /reconnect     重连");
+                addSystem("服务端命令（需联机）：");
+                addSystem("  /t <消息>      仅发给同队玩家");
+                addSystem("  /sync          重新同步世界");
                 break;
             }
             case "ping": {
@@ -217,10 +220,15 @@ public class ChatFragment extends Fragment {
                 break;
             }
             default: {
-                //非内置命令：交给插件注册的客户端命令
-                if(!dispatchPluginCommand(cmd, parts)){
-                    addSystem("未知命令: /" + cmd + "（/help 查看）");
+                //非内置命令：先交给插件注册的客户端命令
+                if(dispatchPluginCommand(cmd, parts)) break;
+                //再交给服务端命令（对应原版：客户端把所有 "/" 开头的消息发给服务端，
+                //由 NetServer 的命令分发处理 /t、/sync 等；本项目 NetServer.handleCommand）
+                if(Vars.netClient != null && Vars.netClient.isConnected()){
+                    Vars.netClient.sendChat("/" + line.trim());
+                    break;
                 }
+                addSystem("未知命令: /" + cmd + "（/help 查看）");
             }
         }
     }

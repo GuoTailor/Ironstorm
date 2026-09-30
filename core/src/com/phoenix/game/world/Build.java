@@ -2,6 +2,7 @@ package com.phoenix.game.world;
 
 import com.phoenix.game.Vars;
 import com.phoenix.game.content.Blocks;
+import com.phoenix.game.entities.Units;
 import com.phoenix.game.game.Team;
 import com.phoenix.game.math.Mathf;
 import com.phoenix.game.type.ItemStack;
@@ -89,6 +90,20 @@ public class Build{
         com.phoenix.game.game.Rules rules = Vars.state == null ? null : Vars.state.rules;
         if(rules != null && rules.bannedBlocks.contains(block)
             && !(rules.waves && team == rules.waveTeam)) return false;
+
+        //实心方块不能压在单位身上（对应原版 Build.validPlace:77-79 的 Units.anyEntities 早退）。
+        //⚠ 偏离说明：原版按 (x*tilesize + type.offset() - type.size*tilesize/2f) 直接算矩形；本项目入参是
+        //  Tile，且 worldx() 是**角点**口径 → 改用 Block.centerX/centerY（方块几何中心）再减去半边长。
+        //⚠ 必须用**待放置方块 block 的 size**，不能用 tile.block().size：否则 2×2/3×3 核心压住单位时
+        //  只按现有方块（通常是 air，1×1）判定，放行后会把单位卡进墙里。
+        //⚠ 只对"实心或可以实心"的方块生效（block.solid || block.solidifes），与放置占位/在建方块无关：
+        //  validPlace 的 block 恒为真实目标方块（beginPlace 铺 BuildBlock 占位不走这里）。
+        if((block.solid || block.solidifes) && Units.anyEntities(
+            block.centerX(tile) - block.size * Vars.tilesize / 2f,
+            block.centerY(tile) - block.size * Vars.tilesize / 2f,
+            block.size * Vars.tilesize, block.size * Vars.tilesize)){
+            return false;
+        }
 
         //敌方核心禁建半径（对应原版 state.teams.eachEnemyCore(team, core -> Mathf.dst(...) < radius + size*tilesize/2f)）。
         //本项目用 closestEnemyCore（语义等价：**最近**的敌方核心不在圈内 ⇒ 所有敌方核心都不在圈内）。

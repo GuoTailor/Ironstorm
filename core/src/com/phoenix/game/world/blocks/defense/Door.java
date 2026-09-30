@@ -28,9 +28,8 @@ import static com.phoenix.game.Vars.tilesize;
  *   <li>本项目保留此前自加的"友方单位靠近自动开、离开自动关"（类注释原声明为简化点），与手动开关
  *       共用 {@code open} 字段：手动开门后单位离开不再自动关；手动关门后单位走近会再次自动开。</li>
  * </ul>
- * <p>缺省：原版构造器里的 {@code solidifes = true}（方块可见性变化时刷新缓存，arc Block 字段），
- * 本项目 Block 无该字段；原版 {@code getCursor()} 手型光标，本项目 Block 无该回调。均为缺资源/缺回调，
- * 不另行造接口。
+ * <p>缺省：原版构造器里的 {@code solidifes = true}（"可以实心"，见 {@link com.phoenix.game.world.Block#solidifes}），
+ * 本项目已补该字段并在构造器置 true；原版 {@code getCursor()} 手型光标，本项目 Block 无该回调，不另行造接口。
  */
 public class Door extends Wall{
     /** 开门贴图（区域名 = 名称-open）。 */
@@ -45,6 +44,8 @@ public class Door extends Wall{
         super(name);
         //实心与否交给 isSolidFor 动态判断
         solid = false;
+        //可以实心（对应原版 Door 构造器的 `solidifes = true;`）：Build.validPlace 据此参与"压住单位"判定
+        solidifes = true;
         update = true;
         entityType = DoorEntity::new;
     }

@@ -52,6 +52,7 @@ public class NetServer {
 
     public void init(){
         setupHandlers();
+        registerCommands();
     }
 
     /** 在指定端口开启服务器。 */
@@ -321,6 +322,207 @@ public class NetServer {
         net.handleServer(Packets.AdminRequest.class, (con, p) -> onAdminRequest(con, p));
     }
 
+    // ---- 服务端聊天命令（对应原版 NetServer.registerCommands + NetClient.sendChatMessage 的命令分支）----
+
+    /** 服务端命令描述（仅用于 /help 列表；对应原版 arc CommandHandler 的命令表）。 */
+    private static class ServerCommand{
+        final String name, params, description;
+
+        ServerCommand(String name, String params, String description){
+            this.name = name;
+            this.params = params;
+            this.description = description;
+        }
+
+        /** @return 命令使用说明（含参数），对应原版 {@code Command.text}。 */
+        String text(){
+            return (params == null || params.isEmpty()) ? name : name + " " + params;
+        }
+    }
+
+    /** 已注册的服务端命令（/help 列表按注册顺序展示）。 */
+    private final com.badlogic.gdx.utils.Array<ServerCommand> commandList = new com.badlogic.gdx.utils.Array<>();
+
+    /**
+     * 注册服务端聊天命令（对应原版 {@code NetServer.registerCommands}，原版 core/NetServer.java:272-457）。
+     * <p>⚠ 刻意偏离：原版用 arc 的 {@code CommandHandler}（带 ResponseType：noCommand / unknownCommand /
+     * fewArguments / manyArguments，回调签名 {@code (args, Player)}）。本项目虽已有 {@code mod.CommandHandler}，
+     * 但它的回调只有 {@code (args, Consumer<String> responder)}，**不带发送者** → 无法实现 /t（要发给全队）
+     * 与 /sync（要把世界重发给发起者）→ 这里只登记命令描述，实际分发在 {@link #handleCommand}。
+     * <p>{@code /vote} 与 {@code /votekick} 依赖未移植的投票系统（原版 VoteSession + Timer +
+     * Config.enableVotekick）→ <b>保留为未实现</b>，不注册、不硬造。
+     */
+    private void registerCommands(){
+        commandList.add(new ServerCommand("help", "[page]", "Lists all commands."));
+        commandList.add(new ServerCommand("t", "<message...>", "Send a message only to your teammates."));
+        commandList.add(new ServerCommand("sync", "", "Re-synchronize world state."));
+    }
+
+    /**
+     * 处理一条以 "/" 开头的服务端聊天命令（对应原版 {@code NetClient.sendChatMessage:167-206} 的命令分支 +
+     * {@code NetServer.registerCommands}）。只覆盖已移植的 /help、/t、/sync；其余一律回"未知命令"。
+     * @param rp 发起者
+     * @param message 原始消息（含前导 "/"）
+     */
+    private void handleCommand(RemotePlayer rp, String message){
+        if(rp == null) return;
+        String line = message.startsWith("/") ? message.substring(1) : message;
+        String[] parts = line.trim().split("\\s+");
+        if(parts.length == 0 || parts[0].isEmpty()){
+            sendMessage(rp, "[scarlet]Unknown command. Check [lightgray]/help[scarlet].");
+            return;
+        }
+
+        String cmd = parts[0].toLowerCase();
+        String[] args = java.util.Arrays.copyOfRange(parts, 1, parts.length);
+        Player player = rp.player;
+
+        if(cmd.equals("help")){
+            //分页列出命令（对应原版 help 命令，commandsPerPage = 6）
+            if(args.length > 0 && !isInt(args[0])){
+                sendMessage(rp, "[scarlet]'page' must be a number.");
+                return;
+            }
+            int commandsPerPage = 6;
+            int page = args.length > 0 ? Integer.parseInt(args[0]) : 1;
+            int pages = (int)Math.ceil((float)commandList.size / commandsPerPage);
+            page--;
+            if(page >= pages || page < 0){
+                sendMessage(rp, "[scarlet]'page' must be a number between[orange] 1[] and[orange] " + pages + "[scarlet].");
+                return;
+            }
+            StringBuilder result = new StringBuilder();
+            result.append(Strings.format("[orange]-- Commands Page[lightgray] {0}[gray]/[lightgray]{1}[orange] --\n\n", page + 1, pages));
+            for(int i = commandsPerPage * page; i < Math.min(commandsPerPage * (page + 1), commandList.size); i++){
+                ServerCommand command = commandList.get(i);
+                result.append("[orange] /").append(command.text()).append("[lightgray] - ").append(command.description).append("\n");
+            }
+            sendMessage(rp, result.toString());
+        }else if(cmd.equals("t")){
+            //队伍频道（对应原版 "t" 命令）：只发给同队玩家。
+            //⚠ 偏离：原版显示名上色（"[#" + team.color + "]<T>" + colorizeName(...)）；本项目聊天包只带纯名字
+            //  字符串 → 保留 "<T>" 前缀，去掉颜色标记（客户端不一定认得任意 hex 色标）。
+            if(args.length == 0){
+                sendMessage(rp, "[scarlet]Usage:[lightgray] /t <message...>");
+                return;
+            }
+            String text = joinArgs(args);
+            String display = "<T>" + player.name;
+            for(int i = 0; i < players.size; i++){
+                RemotePlayer other = players.get(i);
+                if(other.player.getTeam() == player.getTeam()){
+                    sendMessage(other, display, text);
+                }
+            }
+        }else if(cmd.equals("sync")){
+            //重发世界（对应原版 "sync" 命令）。
+            //⚠ 偏离：原版有 5 秒冷却（player.getInfo().lastSyncTime）；本项目 Administration.PlayerInfo 无该字段 → 略去。
+            if(player.isLocal){
+                sendMessage(rp, "[scarlet]Re-synchronizing as the host is pointless.");
+            }else{
+                sendWorldData(rp.con);
+                sendMessage(rp, "[lightgray]World data re-sent.");
+            }
+        }else{
+            sendMessage(rp, "[scarlet]Unknown command. Check [lightgray]/help[scarlet].");
+        }
+    }
+
+    /** 给单个玩家发一条系统消息（对应原版 {@code Player.sendMessage} → 单播）。 */
+    private void sendMessage(RemotePlayer rp, String message){
+        sendMessage(rp, "[服务器]", message);
+    }
+
+    /** 给单个玩家发一条聊天包（{@code name} 为显示名，用于队伍频道等自定义前缀）。 */
+    private void sendMessage(RemotePlayer rp, String name, String message){
+        if(rp == null) return;
+        Packets.ChatMessage cm = new Packets.ChatMessage();
+        cm.name = name;
+        cm.message = message;
+        rp.con.send(cm, Net.SendMode.tcp);
+        System.out.println("[" + name + "] " + message);
+    }
+
+    /** @return 字符串能否解析为 int（对应原版 {@code Strings.canParseInt}）。 */
+    private static boolean isInt(String s){
+        try{
+            Integer.parseInt(s);
+            return true;
+        }catch(NumberFormatException e){
+            return false;
+        }
+    }
+
+    /** 用空格把参数数组拼回一条消息（对应原版 {@code "<message...>"} 单参数捕获）。 */
+    private static String joinArgs(String[] args){
+        StringBuilder sb = new StringBuilder();
+        for(int i = 0; i < args.length; i++){
+            if(i > 0) sb.append(' ');
+            sb.append(args[i]);
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 玩家名清洗（对应原版 {@code NetServer.fixName}，原版 core/NetServer.java:792-814）：
+     * 去首尾空白 → 把形如 {@code [xxx]} 的非法颜色标记剥掉 → 按字节数截断到 {@link Vars#maxNameLength}。
+     */
+    String fixName(String name){
+        name = name.trim();
+        if(name.equals("[") || name.equals("]")){
+            return "";
+        }
+
+        for(int i = 0; i < name.length(); i++){
+            if(name.charAt(i) == '[' && i != name.length() - 1 && name.charAt(i + 1) != '[' && (i == 0 || name.charAt(i - 1) != '[')){
+                String prev = name.substring(0, i);
+                String next = name.substring(i);
+                String result = checkColor(next);
+
+                name = prev + result;
+            }
+        }
+
+        StringBuilder result = new StringBuilder();
+        int curChar = 0;
+        while(curChar < name.length() && result.toString().getBytes().length < Vars.maxNameLength){
+            result.append(name.charAt(curChar++));
+        }
+        return result.toString();
+    }
+
+    /**
+     * 校验并剥掉一个颜色标记（对应原版 {@code NetServer.checkColor}，原版 core/NetServer.java:816-840）：
+     * 若 {@code [xxx]} 里的 xxx 是已知颜色名（且不透明度 &le; 0.8）或合法 hex 色 → 返回去掉该标记后的串；
+     * 否则原样返回（让非法标记当字面量显示）。
+     * <p>⚠ 等价简化：原版分别查 {@code Colors.get(大写)} 与 {@code Colors.get(小写)} 两次，本项目
+     * {@code graphics.Colors.get} 的 key() 内部已 toLowerCase（大小写不敏感）→ 查一次即可，行为一致。
+     */
+    String checkColor(String str){
+        for(int i = 1; i < str.length(); i++){
+            if(str.charAt(i) == ']'){
+                String color = str.substring(1, i);
+
+                com.badlogic.gdx.graphics.Color result = com.phoenix.game.graphics.Colors.get(color);
+                if(result != null){
+                    if(result.a <= 0.8f){
+                        return str.substring(i + 1);
+                    }
+                }else{
+                    try{
+                        com.badlogic.gdx.graphics.Color parsed = com.badlogic.gdx.graphics.Color.valueOf(color);
+                        if(parsed.a <= 0.8f){
+                            return str.substring(i + 1);
+                        }
+                    }catch(Exception e){
+                        return str;
+                    }
+                }
+            }
+        }
+        return str;
+    }
+
     /**
      * 处理客户端的管理员操作请求（对应原版 {@code NetServer.onAdminRequest}）。
      * <p>鉴权照原版：① 发起者必须是管理员；② 目标存在；③ 不能操作管理员（除非发起者是房主）；
@@ -441,6 +643,13 @@ public class NetServer {
         //更新档案
         admins.updatePlayerJoined(p.uuid, p.name, con.address);
 
+        //玩家名清洗 + 空名拒绝（对应原版 NetServer.java:190-195 的 fixName + nameEmpty 校验）
+        p.name = fixName(p.name);
+        if(p.name.trim().isEmpty()){
+            kick(con, "name empty");
+            return;
+        }
+
         //远程 Player（持单位引用，单位在 respawnPlayer 里生成）
         Player player = new Player();
         player.name = p.name;
@@ -536,8 +745,22 @@ public class NetServer {
 
     private void onChat(NetConnection con, String message){
         RemotePlayer rp = findByConnection(con);
-        String name = rp != null ? rp.player.name : con.address;
-        broadcastChat(name, message);
+        if(rp == null) return;
+
+        //长度校验（对应原版 NetClient.sendChatMessage:161-163 的 maxTextLength 检查：超限直接丢弃、不广播）。
+        //⚠ 偏离：原版抛 ValidateException（服务端只记一条 debug 日志）；本项目没有该异常链路 → 记日志后丢弃。
+        if(message.length() > Vars.maxTextLength){
+            System.out.println("[服务器] 丢弃超长聊天（" + rp.player.name + "，" + message.length() + " 字符）");
+            return;
+        }
+
+        //命令优先分发（对应原版 sendChatMessage 里 netServer.clientCommands.handleMessage(message, player)）
+        if(message.startsWith("/")){
+            handleCommand(rp, message);
+            return;
+        }
+
+        broadcastChat(rp.player.name, message);
     }
 
     /** 广播聊天消息（加[服务器]前缀的是系统消息）。 */

@@ -40,6 +40,8 @@ public class BuildBlock extends Block{
         this.size = size;
         update = true;
         health = 20;
+        //可以实心（对应原版 BuildBlock 构造器的 `solidifes = true;`）：Build.validPlace 据此参与"压住单位"判定
+        solidifes = true;
         //必须可拆：否则点它无法取消一个在建/待拆的方块
         destructible = true;
         entityType = BuildEntity::new;

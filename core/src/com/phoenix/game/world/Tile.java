@@ -8,6 +8,7 @@ import com.phoenix.game.game.Team;
 import com.phoenix.game.world.blocks.BlockPart;
 import com.phoenix.game.entities.type.TileEntity;
 import com.phoenix.game.entities.traits.TargetTrait;
+import com.phoenix.game.math.Mathf;
 import com.phoenix.game.math.Position;
 import com.phoenix.game.math.geom.Geometry;
 
@@ -264,8 +265,63 @@ public class Tile implements Position, TargetTrait {
         }
     }
 
+    /**
+     * 重算本格的寻路代价（对应原版 {@code Tile.updateOcclusion}，原版 Tile.java:394-440）。
+     * <p>由 {@link #changed()} 在方块/地板变化后调用；{@code ai/Pathfinder} 直接读 {@link #cost}
+     * （Pathfinder.java:53/283），因此这里是"寻路避水/避焦油/绕实心块"的唯一来源。
+     * <p>与原版的等价换算：
+     * <ul>
+     *   <li>{@code Geometry.d8} 本项目已存在（{@code math/geom/Geometry.d8}，八方向）→ 直接用；</li>
+     *   <li>{@code world.tile(...)} → {@code Vars.world.tile(...)}（可空，已判）；</li>
+     *   <li>{@code link().synthetic()} → 本项目 {@code Tile} 没有 {@code synthetic()}，
+     *       但 {@code link().block().synthetic()} 语义等价（{@code link()} 解析到中心瓦片，
+     *       {@code block()} 再取中心方块；原版 {@code Tile.synthetic()} 就是 {@code block.update || block.destructible}）；</li>
+     *   <li>{@code link().solid()} / {@code link().block.health} 同理用 {@code link()} 解析后的中心瓦片。</li>
+     * </ul>
+     * <p>⚠ 刻意偏离：原版假定 {@code world} 非空，本项目 {@code changed()} 可能在世界尚未就绪时被调用
+     * → 加 {@code Vars.world == null} 短路（保持 {@code cost = 1}），避免 NPE。
+     */
     public void updateOcclusion(){
         cost = 1;
+        if(Vars.world == null) return;
+
+        boolean occluded = false;
+
+        //八邻域：邻格是液体 +4；邻格实心 → 标记被遮挡并提前结束
+        for(int i = 0; i < 8; i++){
+            GridPoint2 point = Geometry.d8[i];
+            Tile tile = Vars.world.tile(x + point.x, y + point.y);
+            if(tile != null && tile.floor.isLiquid){
+                cost += 4;
+            }
+            if(tile != null && tile.solid()){
+                occluded = true;
+                break;
+            }
+        }
+
+        if(occluded){
+            cost += 2;
+        }
+
+        //人造实心块：按血量加代价（血越厚越绕），上限 +20
+        Tile center = link();
+        if(center.block().synthetic() && center.solid()){
+            cost += Mathf.clamp(center.block().health / 10f, 0, 20);
+        }
+
+        //本格是液体 / 会淹没：大幅加代价
+        if(floor.isLiquid){
+            cost += 10;
+        }
+        if(floor.drownTime > 0){
+            cost += 70;
+        }
+
+        //byte 溢出保护（对应原版 if(cost < 0) cost = Byte.MAX_VALUE）
+        if(cost < 0){
+            cost = Byte.MAX_VALUE;
+        }
     }
 
     public boolean passable(){

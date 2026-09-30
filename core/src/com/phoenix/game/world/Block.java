@@ -50,6 +50,14 @@ public class Block extends com.phoenix.game.ctype.UnlockableContent {
     /** 多格大小 */
     public int size = 1;
     public boolean solid;
+    /**
+     * 是否"可以实心"（对应原版 {@code Block.solidifes}，Block.java:53）。
+     * <p>原版注释即"whether this block CAN be solid"：{@code solid} 是当前是否实心（可随状态变化），
+     * {@code solidifes} 是"这类方块本质上是实心的"。消费点：{@code Build.validPlace} 的
+     * {@code (type.solid || type.solidifes) && Units.anyEntities(...)} 早退（实心方块不能压住单位）。
+     * <p>原版在 {@code BuildBlock}（建造占位）与 {@code Door}（门）构造器里置 true。
+     */
+    public boolean solidifes;
     /** 是否可破坏 */
     public boolean breakable;
     /** 是否有血量 */

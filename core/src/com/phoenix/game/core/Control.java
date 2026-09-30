@@ -5,6 +5,7 @@ import com.phoenix.game.game.Team;
 import com.phoenix.game.game.DefaultWaves;
 import com.phoenix.game.game.EventType;
 import com.phoenix.game.game.MusicControl;
+import com.phoenix.game.game.Saves;
 import com.phoenix.game.game.Tutorial;
 
 import com.badlogic.gdx.Gdx;
@@ -227,6 +228,23 @@ public class Control{
                 Effects.effect(com.phoenix.game.content.Fx.launch, cx, cy);
                 Effects.shake(5f, 5f, cx, cy);
             });
+        });
+
+        //游戏结束时删除区域存档槽（对应原版 Control.java:103-114 的 GameOverEvent 监听器）。
+        //⚠ 原版该监听器还负责 state.stats.wavesLasted / 震屏 / Call.onGameOver / 弹结算框；本项目这几步
+        //  已内联在 Logic.checkGameOver / Logic.launchZone 里（见那两处注释）→ 这里**只补"删区域槽"**，避免重复。
+        //⚠ Vars.isClient() 等价原版 net.client()；教程局（rules.tutorial）保留，不算区域进度（照原版）。
+        //⚠ 本项目 Events.fire 是**同步**的（可能从 Logic.update 中途触发）→ 删文件前判空即可（原版经 Core.app.post）。
+        Events.on(EventType.GameOverEvent.class, e -> {
+            if(Vars.state == null || Vars.state.rules == null) return;
+            //只在区域局 + 非客机 + 非教程时删（对应原版 if(state.rules.zone != null && !net.client()) 内层的 !tutorial）
+            if(Vars.state.rules.zone == null || Vars.isClient() || Vars.state.rules.tutorial) return;
+            if(Vars.saves == null) return;
+            //原版 saves.getZoneSlot().delete()；本项目 SaveSlot 没有 delete() → 走 Saves.delete(slot)（等价）
+            Saves.SaveSlot slot = Vars.saves.getZoneSlot();
+            if(slot != null){
+                Vars.saves.delete(slot);
+            }
         });
     }
 
