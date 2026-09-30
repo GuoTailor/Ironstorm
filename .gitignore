@@ -120,3 +120,16 @@ __pycache__/
 /ios/xcode/native/
 /ios/IOSLauncher.app
 /ios/IOSLauncher.app.dSYM
+
+# 调试/验证临时产物（PHOENIX_* 钩子脚本的输出）
+run-out.txt
+run-err.txt
+host-out.txt
+host-err.txt
+client-out.txt
+client-err.txt
+dump-*-new.txt
+shot*.png
+atlas-*.txt
+f*-test.msav
+f*-preview.png
