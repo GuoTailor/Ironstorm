@@ -371,6 +371,9 @@ public class Control{
         //存档元数据：地图名与游玩时长（新局从零开始计时）
         Vars.state.mapName = "campaign";
         Vars.state.playtime = 0f;
+        //⚠ G4-7：Rules.waves 默认已是 false（照原版），而本方法不套 Gamemode、也不是区域图
+        //   （原版该路径的 waves 由 Gamemode.survival / 地图 rules 提供）→ 这里显式打开波次。
+        Vars.state.rules.waves = true;
         Vars.state.rules.spawns = new DefaultWaves().get();
         Vars.state.wavetime = Vars.state.rules.waveSpacing * 2f;
 
@@ -457,6 +460,11 @@ public class Control{
         //3) 区域规则就地覆盖默认（对应原版 zone.rules.get(state.rules)），并标记当前区域
         zone.rules.get(Vars.state.rules);
         Vars.state.rules.zone = zone;
+        //⚠ G4-7：原版区域用 MapGenerator 加载内置地图，地图 rules 自带 waves=true
+        //   （MapGenerator.generate → SaveIO.load(map.file)）；本项目区域已换成程序生成器、没有地图 rules
+        //   兜底，而 Rules.waves 默认已是 false（照原版）→ 在此等价补上（所有战役区域都是 survival 型）。
+        //   放在 zone.rules.get 之后：desertWastes 自己也会置 waves=true，二者一致、无覆盖冲突。
+        Vars.state.rules.waves = true;
 
         //4) 波次与存档元数据
         Vars.state.wave = 1;

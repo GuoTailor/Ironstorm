@@ -4,6 +4,7 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Preferences;
 import com.badlogic.gdx.utils.ObjectMap;
 import com.badlogic.gdx.utils.ObjectSet;
+import com.phoenix.game.Vars;
 import com.phoenix.game.content.Items;
 import com.phoenix.game.core.Events;
 import com.phoenix.game.ctype.ContentType;
@@ -46,6 +47,18 @@ public class GlobalData{
 
         modified = true;
         items[item.id] = (int)Math.min((long)items[item.id] + amount, Integer.MAX_VALUE);
+
+        //原版 GlobalData.java:92-96：同时累计"已送达物品"统计（结算框 / 区域评级读它），并做溢出钳制。
+        //⚠ 本项目 items 是 int[]（原版是 ObjectIntMap），溢出已在上面用 long 钳死；itemsDelivered 是
+        //   ObjectIntMap<Item> → 照原版 getAndIncrement + 负数钳制。
+        //⚠ 本项目 Vars.state / state.stats 可能为 null（菜单态/初始化早期也会走 addItem，如 load() 的启动资金）
+        //   → 加 null 守卫（原版这两个对象恒非空，不需要）。
+        if(Vars.state != null && Vars.state.stats != null){
+            Vars.state.stats.itemsDelivered.getAndIncrement(item, 0, amount);
+            if(Vars.state.stats.itemsDelivered.get(item, 0) < 0){
+                Vars.state.stats.itemsDelivered.put(item, Integer.MAX_VALUE);
+            }
+        }
     }
 
     public boolean has(Item item, int amount){

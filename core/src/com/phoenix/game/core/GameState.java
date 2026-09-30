@@ -1,4 +1,5 @@
 package com.phoenix.game.core;
+import com.phoenix.game.Vars;
 import com.phoenix.game.entities.Units;
 import com.phoenix.game.entities.type.BaseUnit;
 import com.phoenix.game.game.EventType.StateChangeEvent;
@@ -65,8 +66,16 @@ public class GameState{
         return state == State.playing;
     }
 
+    /**
+     * 当前是否处于"暂停"（对应原版 {@code GameState.isPaused()}，原版 GameState.java:41-43）：
+     * {@code (is(State.paused) && !net.active()) || (gameOver && !net.active())}。
+     * <p>本项目没有 {@code net.active()} → 等价物是"网络已激活" = {@code Vars.isClient() || Vars.isServer()}。
+     * <p>⚠ 补上 gameOver 分支后，{@code Logic.update()} 里的 {@code !isPaused()} 守卫才能在
+     * "已判胜负、但 state 仍是 playing"期间冻结仿真（原版即如此；本项目 state 在 gameOver 时仍是 playing）。
+     */
     public boolean isPaused(){
-        return state == State.paused;
+        boolean netActive = Vars.isClient() || Vars.isServer();
+        return (state == State.paused && !netActive) || (gameOver && !netActive);
     }
 
     public boolean isMenu(){

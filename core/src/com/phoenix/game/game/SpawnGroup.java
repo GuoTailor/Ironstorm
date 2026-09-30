@@ -62,6 +62,11 @@ public class SpawnGroup{
             unit.applyEffect(effect, 999999f);
         }
 
+        //照原版 SpawnGroup.java:67-69：带物品的编成在生成单位时把物品塞进背包
+        if(items != null){
+            unit.addItem(items.item, items.amount);
+        }
+
         return unit;
     }
 }

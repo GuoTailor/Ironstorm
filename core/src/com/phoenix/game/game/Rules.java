@@ -6,15 +6,29 @@ package com.phoenix.game.game;
  * 的字段只做"声明 + 存档占位"，消费点见各字段注释。
  */
 public class Rules{
-    /** 是否开启波次 */
-    public boolean waves = true;
+    /**
+     * 是否开启波次（对应原版 {@code rules.waves}，原版默认 <b>false</b>）。
+     * <p>原版默认关，由 {@code Gamemode.survival} / {@code zone.rules} / 地图 rules 置 true。
+     * <p>⚠ 本项目 {@code Control.play()} / {@code Control.playZone()} 不套 Gamemode，且区域已换成
+     * 程序生成器、没有"内置地图 rules 自带 waves=true"的兜底 → 这两条路径各自显式补
+     * {@code rules.waves = true}（见对应方法），以保证战役仍有波次。
+     */
+    public boolean waves = false;
     /** 波次是否自动计时（false 时只能手动开波） */
     public boolean waveTimer = true;
-    /** 每波间隔（tick，默认 60 秒） */
-    public float waveSpacing = 60f * 60f;
+    /** 每波间隔（tick，默认 120 秒，对应原版 {@code 60 * 60 * 2}） */
+    public float waveSpacing = 60f * 60f * 2f;
     /** 是否要等场上敌人清空后才继续计时 */
     public boolean waitForWaveToEnd = false;
-    /** 开局赠予玩家的材料（对应原版 rules.loadout，在 Control.play 里按已加载的物品赋值） */
+    /**
+     * 开局赠予玩家的材料（对应原版 {@code rules.loadout}）。
+     * <p><b>刻意偏离 + 原因</b>：原版默认 {@code Array.with(ItemStack.with(Items.copper, 100))}，本项目保留空数组。
+     * 原因是本项目的 {@code Items.xxx} 是在 {@code Items.load()} 里才赋值的（原版是字段内联 new），而
+     * {@code Vars.state = new GameState()}（→ {@code new Rules()}）发生在 Vars 类静态初始化时、早于
+     * {@code Vars.content.load()} → 写成原版内联默认会捕获到 {@code Items.copper == null}。
+     * <p>等价补偿：{@code Control.playMap()} 在 loadout 为空时补 {@code copper×100}（与原版默认等价）；
+     * {@code Control.play()} 显式赋自己的开局材料；区域局用 {@code zone.getStartingItems()}（不读本字段）。
+     */
     public com.phoenix.game.type.ItemStack[] loadout = {};
     /** 拆除返还比例 */
     public float deconstructRefundMultiplier = 0.5f;
@@ -22,8 +36,8 @@ public class Rules{
     public com.badlogic.gdx.utils.Array<com.phoenix.game.game.SpawnGroup> spawns = new com.badlogic.gdx.utils.Array<>();
     /** 敌方波次阵营 */
     public Team waveTeam = Team.crux;
-    /** 出生点半径 */
-    public float dropZoneRadius = 200f;
+    /** 出生点半径（对应原版 {@code rules.dropZoneRadius}，原版默认 300f） */
+    public float dropZoneRadius = 300f;
     /** 单位生命倍率 */
     public float unitHealthMultiplier = 1f;
     /** 单位伤害倍率 */

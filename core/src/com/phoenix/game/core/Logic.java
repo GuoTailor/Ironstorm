@@ -38,108 +38,119 @@ public class Logic {
         //  ApplicationListener 模块、每帧无条件 update）→ 本事件只在游玩中派发，菜单/暂停态不派发。
         Events.fire(EventType.Trigger.update);
 
-        Time.update();
-        Effects.update();
-
-        //实体组的延迟 add/remove 队列（对应原版 Logic.update 里各 group.update() 开头的 updateEvents）。
-        //⚠ 本项目仿真仍以 Units.units / Bullet.all / Puddle.all 等静态数组为准，所以这里**只 flush 队列**、
-        //   不调用 group.update()（否则实体会被重复 update 一遍）。
-        if(Vars.entities != null){
-            for(int i = 0; i < Vars.entities.all().size; i++){
-                Vars.entities.all().get(i).updateEvents();
-            }
-        }
-
-        //特效实体组（对应原版 Logic.update 里的 effectGroup.update()，排在 unitGroup 之前）：
-        //⚠ 这是唯一**必须**调 group.update() 的组 —— ItemTransfer 这类特效实体不在任何静态数组里，
-        //   只能靠组每帧 update（生命周期结束时 remove() → removed() 里执行"物品真正入库"的回调）。
-        //   其余组仍只 flush 队列（上面那段），仿真以 Units.units / Bullet.all 等静态数组为准。
-        if(Vars.effectGroup != null){
-            Vars.effectGroup.update();
-        }
-
-        //游玩时长（存档元数据用）：只在真正游玩时累加，回菜单后停止
-        if(!Vars.state.isMenu()){
-            Vars.state.playtime += Time.delta();
-        }
-
-        //全局库存有改动就落盘（对应原版 GlobalData.checkSave）
-        if(Vars.data != null){
-            Vars.data.checkSave();
-        }
-
-        //规则级逻辑只在服务端跑（对应原版 Logic.update 里的 net.client() 守卫）：
-        //波次生成 / 敌兵统计 / 胜负判定 / 自动存档。
+        //敌兵统计：原版在暂停守卫**之外**（原版 Logic.java:215，每帧都数）→ HUD 敌人数不因暂停/gameOver 僵住。
         if(!Vars.isClient()){
-            //自动存档计时
-            if(Vars.saves != null){
-                Vars.saves.update();
+            countEnemies();
+        }
+
+        //⚠ G4-5：原版 Logic.update 用 `if(!state.isPaused())` 包住整段仿真（原版 Logic.java:218-260）——
+        //   Time / 波次计时 / 特效 / 实体 / 碰撞全在守卫内，且 gameOver 也算暂停（见 GameState.isPaused）→
+        //   胜负判定后冻结仿真。本项目 state 在 gameOver 时仍是 playing（ClientLauncher 只按 isPlaying() 调
+        //   update）→ 必须靠这里冻结，否则结算框弹出后世界仍在跑。
+        if(!Vars.state.isPaused()){
+            Time.update();
+            Effects.update();
+
+            //实体组的延迟 add/remove 队列（对应原版 Logic.update 里各 group.update() 开头的 updateEvents）。
+            //⚠ 本项目仿真仍以 Units.units / Bullet.all / Puddle.all 等静态数组为准，所以这里**只 flush 队列**、
+            //   不调用 group.update()（否则实体会被重复 update 一遍）。
+            if(Vars.entities != null){
+                for(int i = 0; i < Vars.entities.all().size; i++){
+                    Vars.entities.all().get(i).updateEvents();
+                }
             }
 
-            countEnemies();
-            updateWaves();
-        }
+            //特效实体组（对应原版 Logic.update 里的 effectGroup.update()，排在 unitGroup 之前）：
+            //⚠ 这是唯一**必须**调 group.update() 的组 —— ItemTransfer 这类特效实体不在任何静态数组里，
+            //   只能靠组每帧 update（生命周期结束时 remove() → removed() 里执行"物品真正入库"的回调）。
+            //   其余组仍只 flush 队列（上面那段），仿真以 Units.units / Bullet.all 等静态数组为准。
+            if(Vars.effectGroup != null){
+                Vars.effectGroup.update();
+            }
 
-        if(Vars.world != null){
-            Vars.world.updateTiles();
-        }
+            //游玩时长（存档元数据用）：只在真正游玩时累加，回菜单后停止
+            if(!Vars.state.isMenu()){
+                Vars.state.playtime += Time.delta();
+            }
 
-        //燃烧（对应原版 Logic.update 里 tileGroup 之后的 fireGroup.update）
-        com.phoenix.game.entities.effect.Fire.updateAll();
+            //全局库存有改动就落盘（对应原版 GlobalData.checkSave）
+            if(Vars.data != null){
+                Vars.data.checkSave();
+            }
 
-        //液体水洼（对应原版 Logic.update 里 puddleGroup.update）
-        com.phoenix.game.entities.effect.Puddle.updateAll();
-        //地面残骸贴花（对应原版 Logic.update 里 groundEffectGroup.update 的 BelowLiquidTrait 那部分）
-        com.phoenix.game.entities.effect.Decal.updateAll();
+            //规则级逻辑只在服务端跑（对应原版 Logic.update 里的 net.client() 守卫）：
+            //波次生成 / 自动存档。
+            if(!Vars.isClient()){
+                //自动存档计时
+                if(Vars.saves != null){
+                    Vars.saves.update();
+                }
 
-        //玩家：同步位置 + 重生计时（原版玩家本身是单位，随单位一起更新）
-        if(Vars.player != null){
-            Vars.player.update();
-        }
+                updateWaves();
+            }
 
-        //远端玩家头顶发言气泡的计时衰减：原版每个 Player 都是实体、随 playerGroup 一起 update()，
-        //本项目只 update 本地玩家（上面那行），远端玩家不跑 Player.update() → 气泡会一直挂着。
-        //这里只补 textFadeTime 的衰减（远端玩家的重生逻辑仍由服务端权威，绝不能在这里调 Player.update()）。
-        if(Vars.playerGroup != null){
-            com.badlogic.gdx.utils.Array<com.phoenix.game.entities.type.Player> players = Vars.playerGroup.all();
-            for(int i = 0; i < players.size; i++){
-                com.phoenix.game.entities.type.Player p = players.get(i);
-                if(p != null && p != Vars.player && p.textFadeTime > 0f){
-                    p.textFadeTime -= Time.delta() / (60 * 5);
+            if(Vars.world != null){
+                Vars.world.updateTiles();
+            }
+
+            //燃烧（对应原版 Logic.update 里 tileGroup 之后的 fireGroup.update）
+            com.phoenix.game.entities.effect.Fire.updateAll();
+
+            //液体水洼（对应原版 Logic.update 里 puddleGroup.update）
+            com.phoenix.game.entities.effect.Puddle.updateAll();
+            //地面残骸贴花（对应原版 Logic.update 里 groundEffectGroup.update 的 BelowLiquidTrait 那部分）
+            com.phoenix.game.entities.effect.Decal.updateAll();
+
+            //玩家：同步位置 + 重生计时（原版玩家本身是单位，随单位一起更新）
+            if(Vars.player != null){
+                Vars.player.update();
+            }
+
+            //远端玩家头顶发言气泡的计时衰减：原版每个 Player 都是实体、随 playerGroup 一起 update()，
+            //本项目只 update 本地玩家（上面那行），远端玩家不跑 Player.update() → 气泡会一直挂着。
+            //这里只补 textFadeTime 的衰减（远端玩家的重生逻辑仍由服务端权威，绝不能在这里调 Player.update()）。
+            if(Vars.playerGroup != null){
+                com.badlogic.gdx.utils.Array<com.phoenix.game.entities.type.Player> players = Vars.playerGroup.all();
+                for(int i = 0; i < players.size; i++){
+                    com.phoenix.game.entities.type.Player p = players.get(i);
+                    if(p != null && p != Vars.player && p.textFadeTime > 0f){
+                        p.textFadeTime -= Time.delta() / (60 * 5);
+                    }
+                }
+            }
+
+            //单位：倒序遍历，允许更新过程中移除自身
+            for(int i = Units.units.size - 1; i >= 0; i--){
+                Units.units.get(i).update();
+            }
+
+            //子弹
+            for(int i = Bullet.all.size - 1; i >= 0; i--){
+                Bullet bullet = Bullet.all.get(i);
+                if(!bullet.isDead()){
+                    bullet.update();
+                }
+            }
+
+            //实体碰撞：子弹 vs 单位（对应原版 collideGroups(bulletGroup, unitGroup)，原版子弹组在第一个参数）。
+            //⚠ 本项目刻意对调实参（单位在外层）：checkCollide 是 a.collision → b.collision 顺序回调，
+            //若子弹在外层，子弹 collision 里的 remove() 会先回收自身（清空 type），随后单位侧
+            //BaseUnit.collision 再调 ((DamageTrait)other).getShieldDamage() 就会拿到已回收的子弹（NPE 风险）。
+            //双向 collides 判定与两次回调都执行，与原版语义等价。
+            if(Vars.collisions != null && Bullet.all.size > 0 && Units.units.size > 0){
+                Vars.collisions.collideGroups(Units.units, Bullet.all);
+            }
+
+            //清理死亡单位
+            for(int i = Units.units.size - 1; i >= 0; i--){
+                if(Units.units.get(i).isDead()){
+                    Units.units.removeIndex(i);
                 }
             }
         }
 
-        //单位：倒序遍历，允许更新过程中移除自身
-        for(int i = Units.units.size - 1; i >= 0; i--){
-            Units.units.get(i).update();
-        }
-
-        //子弹
-        for(int i = Bullet.all.size - 1; i >= 0; i--){
-            Bullet bullet = Bullet.all.get(i);
-            if(!bullet.isDead()){
-                bullet.update();
-            }
-        }
-
-        //实体碰撞：子弹 vs 单位（对应原版 collideGroups(bulletGroup, unitGroup)，原版子弹组在第一个参数）。
-        //⚠ 本项目刻意对调实参（单位在外层）：checkCollide 是 a.collision → b.collision 顺序回调，
-        //若子弹在外层，子弹 collision 里的 remove() 会先回收自身（清空 type），随后单位侧
-        //BaseUnit.collision 再调 ((DamageTrait)other).getShieldDamage() 就会拿到已回收的子弹（NPE 风险）。
-        //双向 collides 判定与两次回调都执行，与原版语义等价。
-        if(Vars.collisions != null && Bullet.all.size > 0 && Units.units.size > 0){
-            Vars.collisions.collideGroups(Units.units, Bullet.all);
-        }
-
-        //清理死亡单位
-        for(int i = Units.units.size - 1; i >= 0; i--){
-            if(Units.units.get(i).isDead()){
-                Units.units.removeIndex(i);
-            }
-        }
-
-        //规则可关闭胜负判定（对应原版 !net.client() && ... && state.rules.canGameOver）
+        //规则可关闭胜负判定（对应原版 !net.client() && ... && state.rules.canGameOver）。
+        //原版 checkGameOver 在暂停守卫**之外**（原版 Logic.java:262-264）→ 保持同样位置。
         if(!Vars.isClient() && Vars.state.rules.canGameOver){
             checkGameOver();
         }

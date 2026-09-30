@@ -43,14 +43,14 @@ public class SaveMeta{
      */
     public static class RulesMeta{
         // ---- 原有 11 项 ----
-        public boolean waves = true;
+        public boolean waves = false;
         public boolean waveTimer = true;
         public boolean waitForWaveToEnd = false;
         public boolean enemyCheat = false;
         public boolean sandbox = false;
-        public float waveSpacing = 60f * 60f;
+        public float waveSpacing = 60f * 60f * 2f;
         public float deconstructRefundMultiplier = 0.5f;
-        public float dropZoneRadius = 200f;
+        public float dropZoneRadius = 300f;
         public float unitHealthMultiplier = 1f;
         public float unitDamageMultiplier = 1f;
         /** 敌方波次阵营 id。⚠ {@code -1} = 未记录（保持 {@code Rules} 自身默认），

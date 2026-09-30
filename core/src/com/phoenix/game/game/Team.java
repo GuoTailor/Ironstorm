@@ -2,10 +2,12 @@ package com.phoenix.game.game;
 import com.phoenix.game.Vars;
 import com.phoenix.game.core.Core;
 import com.phoenix.game.graphics.Pal;
+import com.phoenix.game.math.Mathf;
 import com.phoenix.game.world.Tile;
 import com.phoenix.game.world.meta.I18n;
 
 import com.badlogic.gdx.graphics.Color;
+import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.utils.Array;
 
 /**
@@ -31,10 +33,18 @@ public class Team implements Comparable<Team>{
     blue = new Team(5, "blue", Color.ROYAL.cpy());
 
     static{
+        //照原版 Team.java:32-39：占位队伍（team#6..team#255）用随机 HSV 上色；seed=8 保证每次启动颜色一致。
+        Mathf.random.setSeed(8);
         //create the whole 256 placeholder teams
         for(int i = 6; i < all.length; i++){
-            new Team(i, "team#" + i, Color.WHITE.cpy());
+            //⚠ 换算：arc 的 Color.HSVtoRGB 是 4 参静态方法（h 0..360, s/v 0..100, a）；libgdx 没有静态版本，
+            //   只有实例方法 Color.fromHsv(h, s, v)（h/s/v 全为 0..1）→ 用 new Color().fromHsv(...)。
+            //   原式 360f*Mathf.random()/360、100f*Mathf.random(0.6f,1f)/100、100f*Mathf.random(0.8f,1f)/100
+            //   → 化简为 0..1 的三个随机值（取值顺序 h→s→v 与原版一致）。
+            new Team(i, "team#" + i, new Color().fromHsv(Mathf.random(), Mathf.random(0.6f, 1f), Mathf.random(0.8f, 1f)));
         }
+        //恢复随机种子（原版用 arc 的 new Rand().nextLong()）；本项目没有 Rand → 用共享 RandomXS128 取一个随机 long。
+        Mathf.random.setSeed(MathUtils.random.nextLong());
     }
 
     public static Team get(int id){
