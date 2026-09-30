@@ -174,8 +174,8 @@ public class SettingsMenuDialog extends FloatingDialog{
         }
 
         game.checkPref("savecreate", true);
-        //消费方不存在：原版 InputHandler 的"放置时替换已有方块"逻辑未移植（属未实现功能，非接线缺失）；
-        //     本项目 Build.canPlace 只处理"同方块换朝向"（replaceSame，与该设置无关）
+        //已接线：InputHandler.updateLine 末尾用它门控 block.getReplacement（拖拽连线时拐角自动换成交叉器，
+        //     对应原版 InputHandler.java:547）→ InputHandler.java:698 附近读它
         game.checkPref("blockreplace", true);
         game.checkPref("conveyorpathfinding", true);
         //F18 已接线 原版：Schematics.create 保存蓝图时用它决定是否把核心写进蓝图（Schematics.java 的
@@ -255,13 +255,15 @@ public class SettingsMenuDialog extends FloatingDialog{
         //TODO 原版 else if(!ios){ landscape + platform.beginForceLandscape()/endForceLandscape() }：
         //     本项目没有 platform 的横屏接口 → 跳过（desktop 走的是上面的 if(!mobile) 分支，不受影响）
 
-        //消费方不存在：原版 Renderer 的 effectProvider 未移植（用它决定是否生成特效实体）
+        //已接线：原版 Renderer 的 effectProvider 用它决定是否生成特效实体（Renderer.java:58）；
+        //     本项目没有 effectProvider，等价守卫放在特效生成入口 Effects.effect(...) → Effects.java:139 读它
         graphics.checkPref("effects", true);
         //已接线：Renderer.drawDestroyed() 画"被摧毁方块的重建幽灵轮廓"前判它 → Renderer.java:520 读它
         graphics.checkPref("destroyedblocks", true);
         //已接线：Player.draw 用它显隐玩家头顶聊天文字 → Player.java:186 读它
         graphics.checkPref("playerchat", true);
-        //消费方不存在：原版 HudFragment 用它控制右上角小地图显隐，本项目 HUD 直接 add(new Minimap())（恒显示）
+        //已接线：HudFragment 用它 + !rules.tutorial 控制右上角小地图显隐（照原版 HudFragment.java:257）
+        //     → HudFragment.java:196 附近读它
         graphics.checkPref("minimap", !Vars.mobile);
         //已接线：HudFragment 用它显隐光标世界坐标（并判 !rules.tutorial）→ HudFragment.java:378 读它
         graphics.checkPref("position", false);

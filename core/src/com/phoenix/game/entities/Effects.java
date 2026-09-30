@@ -135,6 +135,14 @@ public class Effects{
     public static void effect(Effect effect, Color color, float x, float y, float rotation, Object data){
         if(effect == null || effect.lifetime <= 0f) return;
 
+        //"特效"设置开关（对应原版 Renderer 构造器里的 effectProvider：`if(Core.settings.getBool("effects"))`
+        // 才生成特效实体，Renderer.java:58）。本项目没有 effectProvider，特效实体由本方法直接生成
+        // （EffectState 入 active 列表、由 Effects.render 绘制）→ 等价地把守卫放在这里。
+        // ⚠ 刻意只守"特效生成"：Effects.shake（屏幕震动）是另一条链路，原版同样不受该开关影响 → 不在这里拦。
+        // ⚠ 显式传默认值 true（原版写 getBool("effects")，其默认值在设置表构造时登记）：本项目设置表的默认值
+        //   要到 UI 初始化才登记，若在此之前就有特效生成，单参 getBool 会拿到 false 而静默关掉特效。
+        if(!Core.settings.getBool("effects", true)) return;
+
         if(active.size >= maxEffects){
             active.removeIndex(0);
         }

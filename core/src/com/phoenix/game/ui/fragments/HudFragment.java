@@ -31,6 +31,16 @@ public class HudFragment extends Fragment{
     private WidgetGroup group;
     private Label statusLabel;
     private Label waveLabel;
+    /**
+     * "下一波"按钮（对应原版 {@code HudFragment.addPlayButton} 的播放按钮）：
+     * 显隐每帧按 {@link #canSkipWave()} 刷新（照原版 {@code .visible(this::canSkipWave)}）。
+     */
+    private Button waveButton;
+    /**
+     * 右上角小地图所在表（显隐每帧刷新；对应原版 HudFragment.java:257 的
+     * {@code t.visible(() -> Core.settings.getBool("minimap") && !state.rules.tutorial)}）。
+     */
+    private Table minimapTable;
     /** 自动存档开关。 */
     private com.badlogic.gdx.scenes.scene2d.ui.CheckBox autosaveCheck;
     /** 教程引导文字面板（对应原版 HudFragment 的 "tutorial text" 块）；非教程局隐藏。 */
@@ -102,12 +112,14 @@ public class HudFragment extends Fragment{
         waveLabel = new Label("", Styles.outlineLabel);
         waveTable.add(waveLabel).padRight(Scl.scl(10f));
 
-        Button waveButton = button("下一波");
+        waveButton = button("下一波");
         waveButton.addListener(new ClickListener(){
             @Override
             public void clicked(com.badlogic.gdx.scenes.scene2d.InputEvent event, float x, float y){
-                //计时归零，下一帧 Logic 就会开波
-                if(Vars.state != null && Vars.state.isPlaying() && Vars.state.rules.waves){
+                //对应原版 addPlayButton 的点击分支：客户端管理员走 Call.onAdminRequest(AdminAction.wave)
+                //（由服务端置 wavetime = 0），否则直接 state.wavetime = 0f。
+                //本项目客户端路径不可用（见 canSkipWave 注释）→ 只有 canSkipWave() 成立才允许。
+                if(canSkipWave()){
                     Vars.state.wavetime = 0f;
                 }
             }
@@ -190,7 +202,7 @@ public class HudFragment extends Fragment{
         top.add(fpsTable).left().padTop(Scl.scl(4f));
 
         //右上角小地图（对应原版 HudFragment 里的 parent.fill(t -> { t.add(new Minimap()); ... })）
-        Table minimapTable = new Table();
+        minimapTable = new Table();
         minimapTable.setFillParent(true);
         minimapTable.top().right();
         minimapTable.add(new com.phoenix.game.ui.Minimap());
@@ -353,6 +365,10 @@ public class HudFragment extends Fragment{
             if(waveLabel != null){
                 waveLabel.setText(waveStatus());
             }
+            //"下一波"按钮显隐（对应原版 addPlayButton 的 `.visible(this::canSkipWave)`）
+            if(waveButton != null){
+                waveButton.setVisible(canSkipWave());
+            }
             //BOSS 血条显隐（对应原版 `.visible(() -> state.rules.waves && state.boss() != null)`）
             if(bossTable != null){
                 bossTable.setVisible(Vars.state != null && Vars.state.rules != null
@@ -406,6 +422,18 @@ public class HudFragment extends Fragment{
             }
         }));
 
+        //小地图显隐每帧刷新（对应原版 HudFragment.java:257 的
+        //`t.visible(() -> Core.settings.getBool("minimap") && !state.rules.tutorial)`）。
+        //设置项键就是 "minimap"（SettingsMenuDialog.java 注册 `graphics.checkPref("minimap", !Vars.mobile)`）。
+        //⚠ 原版把坐标显示与 Minimap 放在同一张表 t 上、t 整体隐藏 → 关小地图时坐标也一并隐藏，此处照抄。
+        group.addActor(new MenuFragment.Act(() -> {
+            if(minimapTable == null) return;
+            //显式传默认值 !Vars.mobile（与 SettingsMenuDialog 登记的默认值一致）：避免设置表构造前
+            //单参 getBool 拿到 false 而把桌面端小地图默认关掉
+            minimapTable.setVisible(com.phoenix.game.core.Core.settings.getBool("minimap", !Vars.mobile)
+                && Vars.state != null && Vars.state.rules != null && !Vars.state.rules.tutorial);
+        }));
+
         //空投区警告每帧刷新（对应原版 update：整表 alpha lerp 到 playerNear，label 颜色白↔猩红脉动）。
         //⚠ Mathf.num 本项目不存在 → 用三元表达式取 1f/0f。
         group.addActor(new MenuFragment.Act(() -> {
@@ -437,6 +465,26 @@ public class HudFragment extends Fragment{
             coreLabel.getColor().set(Color.ORANGE).lerp(Color.SCARLET,
                 com.phoenix.game.math.Mathf.absin(com.phoenix.game.core.Time.time(), 2f, 1f));
         }));
+    }
+
+    /**
+     * 是否允许"跳到下一波"（对应原版 {@code HudFragment.canSkipWave}，HudFragment.java:673-675）：
+     * {@code state.rules.waves && ((net.server() || player.isAdmin) || !net.active()) && state.enemies == 0
+     * && !spawner.isSpawning() && !state.rules.tutorial}。
+     * <p>等价映射：{@code net.active()} → {@code Vars.isClient() || Vars.isServer()}；{@code net.server()} → {@code Vars.isServer()}。
+     * <p>⚠ <b>刻意偏离</b>：原版客户端管理员走 {@code Call.onAdminRequest(player, AdminAction.wave)}，
+     * 由服务端把 {@code state.wavetime} 置 0。本项目 {@code Packets.AdminAction.wave} 虽在枚举里，
+     * 但服务端 {@code NetServer.onAdminRequest} 没有 wave 分支、且其鉴权会拒绝"目标 == 自己"的请求
+     * → 客户端路径会静默失效，故这里直接<b>禁用客户端</b>（{@code Vars.isClient()} 时恒 false），
+     * 单机与服务端（房主）照常可用。要恢复客户端跳波需补 NetServer 的 wave 分支 + 自身目标放行。
+     */
+    private boolean canSkipWave(){
+        boolean netActive = Vars.isClient() || Vars.isServer();
+        return Vars.state != null && Vars.state.rules != null && Vars.state.rules.waves
+            && (Vars.isServer() || !netActive)
+            && Vars.state.enemies == 0
+            && Vars.spawner != null && !Vars.spawner.isSpawning()
+            && !Vars.state.rules.tutorial;
     }
 
     /** @return 当前输入处理器 */

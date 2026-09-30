@@ -27,6 +27,13 @@ public class DesktopInput extends InputHandler{
     /** 拖动拆除的上一格（未开始拖动时为 Integer.MIN_VALUE）。 */
     private int lastBreakX = Integer.MIN_VALUE, lastBreakY = Integer.MIN_VALUE;
 
+    /**
+     * 本次"拆除模式"是否由右键发起（对应原版 {@code mode == breaking} 的瞬态语义）。
+     * <p>原版右键按下进入拆除、松开退出；本项目 {@code breaking} 同时被 PlacementFragment 的
+     * "拆除"按钮用作**持久**模式 → 用本标记区分，松开时只退出右键发起的这次。
+     */
+    private boolean rightBreaking;
+
     @Override
     public void update(){
         if(Vars.state.isMenu()) return;
@@ -278,8 +285,11 @@ public class DesktopInput extends InputHandler{
             }
         }
 
-        //拆除模式：按住左键拖动可沿路径连续拆除（快速拖动也不会漏格）
-        if(breaking && Vars.world != null && !Vars.state.isPaused() && isButtonPressed(Binding.select)){
+        //拆除模式：按住左键（或右键发起的这次）拖动可沿路径连续拆除（快速拖动也不会漏格）。
+        //对应原版 DesktopInput 在 mode == breaking 期间随光标变化持续更新拆除范围。
+        boolean breakHeld = isButtonPressed(Binding.select)
+            || (rightBreaking && isButtonPressed(Binding.break_block));
+        if(breaking && Vars.world != null && !Vars.state.isPaused() && breakHeld){
             int tx = Vars.world.toTile(targetX), ty = Vars.world.toTile(targetY);
 
             if(lastBreakX == Integer.MIN_VALUE){
@@ -329,10 +339,27 @@ public class DesktopInput extends InputHandler{
             return false;
         }
 
-        //右键取消建造/拆除（对应原版 Binding.deselect；libgdx 的 Buttons 常量先换算成
-        //本项目负数鼠标键码再与绑定比对，见 InputHandler.mouseCode）
-        if(mouseCode(button) == KeyBinds.key(Binding.deselect)){
-            clearBuild();
+        //右键（Binding.deselect 与 Binding.break_block 都绑右键，对应原版 DesktopInput.java:384/390）：
+        //  1) 处于建造/拆除态 → 取消（原版 deselect 分支：block = null; mode = none）
+        //  2) 否则 → 进入拆除模式并记起点格（原版 break_block 分支：mode = breaking; selectX/Y = 光标格）
+        //⚠ 偏离：原版 mode=breaking 是"按下进入、松开退出"的瞬态；本项目 breaking 还被 PlacementFragment
+        //  的"拆除"按钮当作持久模式 → 用 rightBreaking 标记本次由右键发起，松开时只退出这一次。
+        //⚠ 原版 deselect 的 keyTap 还会 `player.setMineTile(null)`（无条件），这里在非建造分支一并照抄。
+        if(mouseCode(button) == KeyBinds.key(Binding.break_block)){
+            if(isPlacing()){
+                clearBuild();
+            }else if(!sceneHasMouse() && Vars.world != null && Vars.player != null
+                && !Vars.player.isDead() && !Vars.state.isPaused()){
+                Vars.player.setMineTile(null);
+                breaking = true;
+                rightBreaking = true;
+                int tx = Vars.world.toTile(mouseWorldX(screenX)), ty = Vars.world.toTile(mouseWorldY(screenY));
+                lastBreakX = tx;
+                lastBreakY = ty;
+                //单击即拆一格：原版在松开时才 removeSelection(selectX, selectY, cursorX, cursorY)，
+                //本项目按路径逐格拆，这里先拆起点格；拖动则由 update() 的路径循环继续
+                breakWorld(tx, ty);
+            }
             return false;
         }
 
@@ -416,6 +443,24 @@ public class DesktopInput extends InputHandler{
 
     @Override
     public boolean touchUp(int screenX, int screenY, int pointer, int button){
+        //右键松开（对应原版 keyRelease(break_block)：mode == breaking → removeSelection(selectX, selectY, cursorX, cursorY)）：
+        //拆到当前光标格，然后退出"右键发起"的这次拆除模式
+        if(mouseCode(button) == KeyBinds.key(Binding.break_block) && rightBreaking){
+            if(Vars.world != null && !Vars.state.isPaused()){
+                int tx = Vars.world.toTile(mouseWorldX(screenX)), ty = Vars.world.toTile(mouseWorldY(screenY));
+                if(tx != lastBreakX || ty != lastBreakY){
+                    int count = buildPath(lastBreakX, lastBreakY, tx, ty);
+                    for(int i = 0; i < count; i++){
+                        breakWorld(pathX[i], pathY[i]);
+                    }
+                }
+            }
+            rightBreaking = false;
+            breaking = false;
+            lastBreakX = lastBreakY = Integer.MIN_VALUE;
+            return false;
+        }
+
         if(mouseCode(button) == KeyBinds.key(Binding.select)){
             //命令模式松开左键：结算框选/点选（对应原版 keyRelease(select) && commandRect → selectUnitsRect）
             if(commandMode && commandRect){

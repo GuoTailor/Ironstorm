@@ -426,15 +426,20 @@ public abstract class InputHandler extends InputAdapter{
                 Tile t = Vars.world.tile(req.x, req.y);
                 if(t == null) continue;
 
-                drawGhost(t, block, req.rotation, Build.validPlace(t, block, req.rotation, team) && Build.canAfford(team, block), white);
+                //逐格用 req.block（blockreplace 后可能是交叉器等替换方块），对应原版 drawRequest(lineRequests.get(i))
+                Block reqBlock = req.block != null ? req.block : block;
+                drawGhost(t, reqBlock, req.rotation, Build.validPlace(t, reqBlock, req.rotation, team) && Build.canAfford(team, reqBlock), white);
             }
 
             LineRequest last = lines[lineSize - 1];
             Tile lastTile = Vars.world.tile(last.x, last.y);
-            if(block.rotate && lastTile != null){
+            //对应原版 `if(i == lineRequests.size - 1 && req.block.rotate) drawArrow(block, ...)`：
+            //朝向箭头只在最后一格的方块可旋转时画（被替换成交叉器则不画）
+            Block lastBlock = last.block != null ? last.block : block;
+            if(lastBlock.rotate && lastTile != null){
                 drawArrow(last.x, last.y, last.rotation,
-                        Build.validPlace(lastTile, block, last.rotation, team) && Build.canAfford(team, block),
-                        block, white);
+                        Build.validPlace(lastTile, lastBlock, last.rotation, team) && Build.canAfford(team, lastBlock),
+                        lastBlock, white);
             }
 
             Core.batch.setColor(1f, 1f, 1f, 1f);
@@ -616,6 +621,13 @@ public abstract class InputHandler extends InputAdapter{
     /** 当前连线格数。 */
     public int lineSize;
 
+    /** blockreplace 应用段复用的请求列表（对应原版 lineRequests 的列表语义；避免每帧分配）。 */
+    private final com.badlogic.gdx.utils.Array<com.phoenix.game.world.BuildRequest> replaceRequests =
+        new com.badlogic.gdx.utils.Array<>();
+    /** {@link #replaceRequests} 里复用的 BuildRequest 对象（下标与 {@link #lines} 对齐）。 */
+    private final com.phoenix.game.world.BuildRequest[] replaceReqPool =
+        new com.phoenix.game.world.BuildRequest[maxPathLength];
+
     public InputHandler(){
         for(int i = 0; i < lines.length; i++){
             lines[i] = new LineRequest();
@@ -625,6 +637,12 @@ public abstract class InputHandler extends InputAdapter{
     /** 连线中的一格（对应原版 BuildRequest 里的最小字段）。 */
     public static class LineRequest{
         public int x, y, rotation;
+        /**
+         * 本格最终要放置的方块。生成时等于 {@link #buildBlock}；若设置项 {@code blockreplace} 打开，
+         * {@link #updateLine(int,int,int,int)} 末尾会用 {@code block.getReplacement} 覆写它
+         * （传送带/导管在十字路口自动换成交叉器，对应原版 InputHandler.java:547-554 的 {@code req.block = replace}）。
+         */
+        public Block block;
     }
 
     /** @return 本局玩家的队伍（未进入游戏时为 sharded）。 */
@@ -690,9 +708,38 @@ public abstract class InputHandler extends InputAdapter{
             req.y = pathY[i];
             //朝向指向路径的下一格，最后一格用"起点 → 终点"的方向
             req.rotation = i < count - 1 ? relativeTo(pathX[i], pathY[i], pathX[i + 1], pathY[i + 1]) : baseRotation;
+            req.block = block;
             lineSize++;
 
             lineBounds.setSize(size).setCenter(cx, cy);
+        }
+
+        //原版 InputHandler.updateLine 末尾（InputHandler.java:547-554）：设置项 blockreplace 打开时，
+        //逐格询问 block.getReplacement 是否要换别的方块（传送带/导管在十字路口自动换成交叉器）。
+        //⚠ 本项目连线结果用 LineRequest[] 而非 BuildRequest 列表 → 这里构造一份等价的 BuildRequest 列表
+        //  （getReplacement 只读 x/y/rotation/block/tile()），把结果写回 LineRequest.block。
+        if(Core.settings.getBool("blockreplace", true)){
+            replaceRequests.clear();
+            for(int i = 0; i < lineSize; i++){
+                com.phoenix.game.world.BuildRequest req = replaceReqPool[i];
+                if(req == null){
+                    req = replaceReqPool[i] = new com.phoenix.game.world.BuildRequest(0, 0, 0, block);
+                }
+                req.x = lines[i].x;
+                req.y = lines[i].y;
+                req.rotation = lines[i].rotation;
+                req.block = block;
+                req.breaking = false;
+                replaceRequests.add(req);
+            }
+
+            for(int i = 0; i < lineSize; i++){
+                com.phoenix.game.world.BuildRequest req = replaceRequests.get(i);
+                Block replace = req.block.getReplacement(req, replaceRequests);
+                if(replace.unlockedCur()){
+                    lines[i].block = replace;
+                }
+            }
         }
     }
 
@@ -741,7 +788,7 @@ public abstract class InputHandler extends InputAdapter{
             if(Vars.netClient != null && Vars.netClient.isConnected()){
                 for(int i = 0; i < lineSize; i++){
                     LineRequest req = lines[i];
-                    Vars.netClient.sendBuild(req.x, req.y, buildBlock, req.rotation);
+                    Vars.netClient.sendBuild(req.x, req.y, req.block != null ? req.block : buildBlock, req.rotation);
                 }
                 clearLine();
                 return;
@@ -751,13 +798,14 @@ public abstract class InputHandler extends InputAdapter{
                 for(int i = 0; i < lineSize; i++){
                     LineRequest req = lines[i];
                     Vars.player.addBuildRequest(
-                        new com.phoenix.game.world.BuildRequest(req.x, req.y, req.rotation, buildBlock));
+                        new com.phoenix.game.world.BuildRequest(req.x, req.y, req.rotation,
+                            req.block != null ? req.block : buildBlock));
                 }
             }else{
                 Team team = playerTeam();
                 for(int i = 0; i < lineSize; i++){
                     LineRequest req = lines[i];
-                    Build.placeBlock(Vars.world.tile(req.x, req.y), buildBlock, team, req.rotation);
+                    Build.placeBlock(Vars.world.tile(req.x, req.y), req.block != null ? req.block : buildBlock, team, req.rotation);
                 }
             }
         }

@@ -147,12 +147,26 @@ public class Renderer {
             landTime = 0f;
         }
 
-        //相机跟随玩家（对应原版 Renderer.draw 里的 camera.position.lerpDelta(position, 0.08f)）。
-        //原版这里有一道 `control.input instanceof DesktopInput` 的判断：移动端不自动跟随，
+        //相机跟随（对应原版 Renderer.update 的相机分支，Renderer.java:122-135）：
+        //  存活 → 跟随玩家；死亡 → 跟随最近核心（观战视角）。
+        //原版存活分支有一道 `control.input instanceof DesktopInput` 的判断：移动端不自动跟随，
         //镜头完全由玩家拖动，否则每帧的跟随 lerp 会把刚拖出去的镜头又拉回玩家身上。
-        if(Vars.player != null && !Vars.player.isDead() && !Vars.state.isPaused() && Core.camera != null
-            && Vars.control != null && Vars.control.input instanceof com.phoenix.game.input.DesktopInput){
-            Core.camera.position.lerp(Tmp.v31.set(Vars.player.getX(), Vars.player.getY(), 0f), 0.08f);
+        if(Vars.player != null && Core.camera != null){
+            if(Vars.player.isDead()){
+                //原版：`TileEntity core = player.getClosestCore(); if(core != null) camera.position.lerpDelta(core.x, core.y, 0.08f);`
+                Tile core = Vars.player.getClosestCore();
+                if(core != null && core.block() != null){
+                    //⚠ 偏离：本项目 Tile.worldx()/worldy() 是**左下角**（原版 TileEntity.x/y 即方块中心）
+                    //  → 用 block.centerX/centerY 取几何中心。
+                    //⚠ 偏离：原版死亡分支还有 `player.spawner == null` 的二选一（空投点实体存在时改跟随玩家位置）；
+                    //  本项目 Player 没有 spawner 字段（无空投点实体）→ 恒走"跟随核心"。
+                    Core.camera.position.lerp(Tmp.v31.set(
+                        core.block().centerX(core), core.block().centerY(core), 0f), 0.08f);
+                }
+            }else if(Vars.state != null && !Vars.state.isPaused() && Vars.control != null
+                && Vars.control.input instanceof com.phoenix.game.input.DesktopInput){
+                Core.camera.position.lerp(Tmp.v31.set(Vars.player.getX(), Vars.player.getY(), 0f), 0.08f);
+            }
         }
 
         applyScale();
