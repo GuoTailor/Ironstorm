@@ -58,7 +58,7 @@
 
 | 批次 | 主题 | 内容（来源项） | 状态 |
 | --- | --- | --- | --- |
-| G1 | 物流与库存记账 | Conveyor 卸载不扣 items（A4-D1，**高·复制漏洞**）+ Conveyor acceptStack/handleStack 覆写（A4-M3）+ Drill/GenericCrafter/UnitFactory shouldConsume（A4-M4，满仓不停料）+ Turret 基类 updateShooting 乘 baseReloadSpeed（A4-B2）+ Block.getReplacement/Conveyor 覆写（A6-B3 前半） | ☐ |
+| G1 | 物流与库存记账 | Conveyor 卸载不扣 items（A4-D1，**高·复制漏洞**）+ Conveyor acceptStack/handleStack 覆写（A4-M3）+ Drill/GenericCrafter/UnitFactory shouldConsume（A4-M4，满仓不停料）+ Turret 基类 updateShooting 乘 baseReloadSpeed（A4-B2）+ Block.getReplacement/Conveyor·Conduit 覆写（A6-B3 前半） | ☑（提交 0183242）；**实测：handleStack items=3/len=3 一致 → 3 个物品送达 container、带子库存归零**（修复前会残留 3 个幽灵计数）；交付后修 GenericCrafter 缺 Tile import；UnitFactory 用 aliveCount() 替代原版 spawned 字段（避免升存档版本，O(N) 可忽略，已批准） |
 | G2 | 状态与伤害链 | getSpeedMultiplier 接线（A5-1，**高**）+ BaseUnit.collision 用 damage() 并补 onHit/killed（A5-2）+ getDamageMultipler 接线/Bullet.damageMultiplier（A5-3）+ StatusEffect.update 的 /60 复核修正（A5-偏离）+ onHit(deflect)（A5-M2）+ countsAsEnemy 消费（A5-断裂） | ☐ |
 | G3 | 事件派发补齐 | ClientLoadEvent（A7-B1）+ Trigger.update（A7-B3）+ StateChangeEvent（A7-B4）+ PlayEvent/DisposeEvent（A7-B5）+ CoreItemDeliverEvent（A4-B1，教程卡住）+ MusicControl/LoopControl 实例化（A7-B2） | ☐ |
 | G4 | 规则与数值 | waveSpacing 7200（A7-D1）+ dropZoneRadius 300（A7-D2）+ addItem itemsDelivered（A7-D3）+ SpawnGroup items（A7-D4）+ GameState.isPaused gameOver 分支（A7-D5，结算不冻结）+ Team 占位颜色（A7-D6）+ Rules 默认值复核（A7-D7） | ☐ |
@@ -73,3 +73,4 @@
 
 - 2026-09-30 第二轮方案建立（上一轮 V1 已通过）；派发 A4~A7 四片并行审计
 - 2026-09-30 四片审计完成（合计 缺失16/偏离20/断裂16）；A6-S1 战役发射链裁决为缺口（注释是状态陈述非偏离声明）→ G7；建 G1~G9 + G-V 登记表；派发 G1
+- 2026-09-30 G1 完成：复制漏洞修复 + 实测闭环（提交 0183242）；顺带 gitignore 调试产物（3feb0c6，此前误提交 run-out/run-err）；派发 G2
