@@ -5,14 +5,32 @@ import com.phoenix.game.entities.type.Bullet;
 import com.phoenix.game.entities.type.BaseUnit;
 import com.phoenix.game.entities.Effects;
 import com.phoenix.game.entities.Units;
+import com.phoenix.game.content.Fx;
 import com.phoenix.game.game.EventType;
 import com.phoenix.game.game.Team;
+import com.phoenix.game.type.Item;
+import com.phoenix.game.world.Tile;
 
 /**
  * 最小实现：游戏逻辑主循环。参照 Mindustry mindustry.core.Logic 移植。
  * 相机操作已移到 input.DesktopInput（与 Mindustry 一致），暂停时不会调用本类。
  */
 public class Logic {
+
+    /**
+     * 发射收尾延时任务的剩余 tick（对应原版 {@code Logic.launchZone()} 里的
+     * {@code Time.runTask(30f, ...)}，mindustry/core/Logic.java:186）。
+     * <p>⚠ <b>刻意偏离（原因）</b>：arc 的 {@code Time.runTask} 走 {@code java.util.Timer}（按**真实秒**计，
+     * 不受暂停影响）；本项目的 {@code Time.run} 是 tick 队列、只在 {@code Time.update()} 内推进，
+     * 而 {@code Time.update()} 被 {@code !state.isPaused()} 守卫包住（见本类 {@code update()}）——
+     * 发射时 {@code state.gameOver} 已置 true（即"暂停"）→ 若直接用 {@code Time.run(30f, ...)}，
+     * 任务会**永不执行**（白闪后卡死、核心不消失、结算框不弹）。
+     * 故这里把延时改到 {@code update()} 的暂停守卫**之外**按 {@link Time#delta()} 递减，行为等价
+     * （30 tick ≈ 0.5s；原版 {@code runTask(30f)} 也是 30/60 = 0.5 秒）。
+     */
+    private static float launchTimer = -1f;
+    /** {@link #launchTimer} 到点后要执行的回调；{@code launchTimer < 0} 表示当前没有待执行任务。 */
+    private static Runnable launchTimerTask;
 
     //对应原版 Logic() 构造器里注册的 WaveEvent 监听器（mindustry/core/Logic.java:34-43）：
     //每波开始给每个玩家重置剩余重生次数；区域图（战役 Zone）推进 Zone 的波次进度（更新可解锁/发射波标记）。
@@ -149,6 +167,18 @@ public class Logic {
             }
         }
 
+        //发射收尾延时任务（见 launchTimer 的字段注释）：必须放在 isPaused 守卫**之外**——
+        //发射时 gameOver 已置 true，仿真被冻结，但发射序列仍须继续推进（原版靠 java.util.Timer 做到）。
+        if(launchTimer >= 0f){
+            launchTimer -= Time.delta();
+            if(launchTimer <= 0f){
+                launchTimer = -1f;
+                Runnable task = launchTimerTask;
+                launchTimerTask = null;
+                if(task != null) task.run();
+            }
+        }
+
         //规则可关闭胜负判定（对应原版 !net.client() && ... && state.rules.canGameOver）。
         //原版 checkGameOver 在暂停守卫**之外**（原版 Logic.java:262-264）→ 保持同样位置。
         if(!Vars.isClient() && Vars.state.rules.canGameOver){
@@ -250,21 +280,117 @@ public class Logic {
         }
 
         if(alive != null && !Vars.state.gameOver){
-            Vars.state.gameOver = true;
-            Vars.state.stats.wavesLasted = Vars.state.wave;
-            System.out.println("胜负判定：" + alive.name + " 获胜（其余队伍核心被摧毁）");
-
-            //原版：区域图里若玩家队获胜，等价于"发射成功"（Call.launchZone）；
-            //本项目区域发射/存档/解锁链未移植 → 统一按普通胜利弹结算框。
-            //F-LOW 批：同上，按原版先 fire GameOverEvent（原版 Logic.java:165）。
-            Events.fire(new EventType.GameOverEvent(alive));
-            if(Vars.ui != null && Vars.ui.restart != null){
-                Vars.ui.restart.show(alive);
+            //照原版 Logic.java:160-168 分两支：区域图 + 玩家队获胜 → 等价于"发射成功"（原版 Call.launchZone()）；
+            //否则普通胜利，fire GameOverEvent(alive)。state.gameOver = true 在**两支之后**统一置（原版 :167）。
+            //⚠ 本项目没有 Call（网络 RPC 层）→ 单机/主机直接调 Logic.launchZone()。
+            //⚠ 纯客机（Vars.isClient()）分支在本项目不可达：checkGameOver 只在 !isClient() 时被调用
+            //  （见 update() 末尾），且网络层没有任何"发射/gameOver"同步包（Packets 只有 WorldState，
+            //   只带 wave/enemies/wavetime）→ 客户端发射暂不支持，仅主机/单机（见 G7 报告）。
+            if(Vars.world != null && Vars.world.isZone() && alive == Vars.state.rules.defaultTeam){
+                //in attack maps, a victorious game over is equivalent to a launch
+                launchZone();
             }else{
-                Events.fire(new EventType.WinEvent());
-                Vars.control.menu();
+                Vars.state.stats.wavesLasted = Vars.state.wave;
+                System.out.println("胜负判定：" + alive.name + " 获胜（其余队伍核心被摧毁）");
+
+                //原版：Events.fire(new GameOverEvent(alive)) → Control 的监听器调 Logic.onGameOver
+                //      → ui.restart.show(winner)。F-LOW 批已补 GameOverEvent → 按原版先 fire；
+                //      本项目没有该监听器 → 与上面非 attack 分支一致，直接弹结算框。
+                Events.fire(new EventType.GameOverEvent(alive));
+                if(Vars.ui != null && Vars.ui.restart != null){
+                    Vars.ui.restart.show(alive);
+                }else{
+                    Events.fire(new EventType.WinEvent());
+                    Vars.control.menu();
+                }
             }
+
+            Vars.state.gameOver = true;
         }
+    }
+
+    /**
+     * 战役区域"发射到下一区域"（照抄原版 {@code Logic.launchZone()}，mindustry/core/Logic.java:172-200）。
+     * <p>流程：白闪提示 → 各玩家核心播放发射特效 → 标记该区域已发射 → 延时 30 tick 后把核心库存
+     * 并入全局物品（{@code data}）、逐个移除核心、置 {@code state.launched/gameOver}，并派发
+     * {@code LaunchEvent} / {@code GameOverEvent}。
+     * <p>⚠ <b>与原版的差异（均在此声明）</b>：
+     * <ul>
+     *   <li>原版是 {@code @Remote(called = Loc.both)} 的网络 RPC；本项目没有 {@code Call} 层 →
+     *       改为普通静态方法，仅主机/单机调用（纯客机见 {@link #checkGameOver} 的说明）。</li>
+     *   <li>原版 {@code if(!headless)}；本项目没有 headless 概念 → 用 {@code Vars.hud != null} 守卫。</li>
+     *   <li>原版延时用 {@code Time.runTask(30f, ...)}（走 java.util.Timer，不受暂停影响）；本项目
+     *       {@code Time.run} 依赖 {@code Time.update()}，发射时仿真已暂停 → 改用
+     *       {@link #launchTimer}/{@link #launchTimerTask} 在暂停守卫之外递减（见字段注释，行为等价）。</li>
+     *   <li>原版边遍历 {@code state.teams.playerCores()} 边 {@code tile.remove()}（arc 数组无 fail-fast
+     *       检查所以能跑）；libgdx 数组的迭代器会抛异常 → 先拷贝一份再遍历（语义等价：每个核心处理一次）。</li>
+     *   <li>原版 {@code GameOverEvent} 由 {@code Control} 的监听器消费（置 {@code stats.wavesLasted} +
+     *       弹结算框，原版 Control.java:103-114）；本项目没有该监听器 → 与 {@code Logic.update()} 里
+     *       既有写法一致，就地补 {@code stats.wavesLasted} 并直接调 {@code Vars.ui.restart.show(...)}。</li>
+     * </ul>
+     */
+    public static void launchZone(){
+        //原版：if(!headless) ui.hudfrag.showLaunch(); —— 全屏白闪（本项目 HudFragment.showLaunch）
+        if(Vars.hud != null){
+            Vars.hud.showLaunch();
+        }
+
+        //对每个玩家核心播放发射特效（原版 Effects.effect(Fx.launch, tile)，传的是 TileEntity）。
+        //⚠ 传参口径核对：原版 TileEntity.init 里 x/y = tile.drawx()/drawy()（= 方块中心），而本项目
+        //  Tile.getX()/getY() 就是 drawx()/drawy()（同样 = 方块中心）→ 直接传 Tile 等价，无需换算。
+        //  （playerCores() 存的都是锚点瓦片，drawx() 对锚点才等于中心；卫星瓦片不在此列。）
+        com.badlogic.gdx.utils.Array<Tile> cores = Vars.state.teams.playerCores();
+        for(int i = 0; i < cores.size; i++){
+            Effects.effect(Fx.launch, cores.get(i));
+        }
+
+        if(Vars.world.getZone() != null){
+            Vars.world.getZone().setLaunched();
+        }
+
+        //延时 30 tick 后的收尾（原版 Time.runTask(30f, ...)）；机制见 launchTimer 字段注释
+        launchTimer = 30f;
+        launchTimerTask = () -> {
+            //拷贝一份再遍历：tile.remove() → onProximityRemoved → unregisterCore 会从 cores 里摘掉自己
+            com.badlogic.gdx.utils.Array<Tile> coreList =
+                new com.badlogic.gdx.utils.Array<>(Vars.state.teams.playerCores());
+            for(int i = 0; i < coreList.size; i++){
+                Tile tile = coreList.get(i);
+                if(tile == null || tile.entity == null || tile.entity.items == null) continue;
+
+                //核心库存并入全局物品（原版 data.addItem + LaunchItemEvent，逐物品派发）
+                for(int j = 0; j < Vars.content.items().size; j++){
+                    Item item = Vars.content.items().get(j);
+                    int amount = tile.entity.items.get(item);
+                    if(Vars.data != null) Vars.data.addItem(item, amount);
+                    Events.fire(new EventType.LaunchItemEvent(item, amount));
+                }
+
+                tile.remove();
+            }
+
+            Vars.state.launched = true;
+            Vars.state.gameOver = true;
+            //原版由 Control 的 GameOverEvent 监听器置 state.stats.wavesLasted = state.wave（Control.java:104）；
+            //本项目没有该监听器 → 就地补上，否则结算框"存活波次"会显示 0
+            Vars.state.stats.wavesLasted = Vars.state.wave;
+            Events.fire(new EventType.LaunchEvent());
+            //manually fire game over event now
+            Events.fire(new EventType.GameOverEvent(Vars.state.rules.defaultTeam));
+            if(Vars.ui != null && Vars.ui.restart != null){
+                Vars.ui.restart.show(Vars.state.rules.defaultTeam);
+            }
+        };
+    }
+
+    /**
+     * 取消尚未执行的发射收尾任务（对应 {@code Time.clear()} 对延时任务队列的清理）。
+     * <p>由 {@code Control.menu()} 在 {@code Time.clear()} 旁调用，避免残留的发射任务被带进下一局
+     * （本项目的 {@code launchTimer} 不挂在 {@code Time.runs} 队列里，{@code Time.clear()} 清不到它）。
+     */
+    public static void cancelLaunchTimer(){
+        launchTimer = -1f;
+        launchTimerTask = null;
     }
 
     /** @return 该队伍是否还有存活核心（已接线 S3：直接查 {@code Teams} 的核心列表）。 */

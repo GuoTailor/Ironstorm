@@ -880,6 +880,9 @@ public class Control{
         //重置事件：停掉寻路后台线程
         Events.fire(new EventType.ResetEvent());
         Time.clear();
+        //发射收尾延时任务（Logic.launchTimer）不挂在 Time.runs 里，Time.clear() 清不到 → 单独取消，
+        //否则回菜单后残留的任务会被带进下一局（对应 Time.clear() 的语义）。
+        Logic.cancelLaunchTimer();
     }
 
     /** 在指定瓦片放置核心（带队营/旋转）。 */

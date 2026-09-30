@@ -80,3 +80,4 @@
 - 2026-09-30 G4 完成：waveSpacing/dropZoneRadius/itemsDelivered/SpawnGroup items/isPaused gameOver/Team 颜色/Rules 默认值（提交见下）；实测 gameOver 冻结与恢复、数值与统计全部符合；修 libgdx 无 HSVtoRGB 的编译错；派发 G5
 - 2026-09-30 G5 完成：武器特效/引擎尾焰/悬浮抖动/子弹尺寸/液体着色/电池电量/维修点旋转/MendProjector efficiency/shieldBuffer dispose（提交见下）；截图实测电池色块+顶盖、维修点 45° 炮塔、引擎尾焰；补 2 张贴图并重打图集；修 Battery 漏 super.draw；新发现 Fill.square 半径/边长错配 → 立 G10；派发 G6
 - 2026-09-30 G6 完成：effects/minimap/blockreplace 设置接线 + 右键拆除 + canSkipWave 门控 + 死亡相机跟随核心（提交见下）；实测 effects 开关与 minimap 显隐；⚠ 工作区存在**用户未提交的并行改动**（Player/InputHandler/SaveIO 的背包分裂修复 + ClientLauncher 的 MINEDBG 钩子），提交时用 hunk 级选择性暂存避开；派发 G7
+- 2026-09-30 G7 完成：战役发射链（Logic.launchZone + checkGameOver 发射分支 + HUD 发射按钮/确认框/白闪）（提交见下）；实测整链通过；发现并规避 `Time.run` 在 gameOver 后不推进的坑；派发 G8

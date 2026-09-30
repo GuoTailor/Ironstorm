@@ -37,6 +37,14 @@ public class HudFragment extends Fragment{
      */
     private Button waveButton;
     /**
+     * "发射"按钮（对应原版把**整张波次面板**做成可点击的发射入口：
+     * {@code table.setDisabled(() -> !canLaunch())} + {@code table.clicked(() -> { if(canLaunch()) showLaunchConfirm(); })}
+     * ，HudFragment.java:664-670）。只在 {@link #canLaunch()} 成立时显示，点击弹发射确认框。
+     * <p>⚠ <b>刻意偏离</b>：本项目波次面板里还混着"下一波/存档/读档/自动存"等按钮，整表可点会互相抢事件 →
+     * 改用一枚独立按钮承载同一入口（判据与点击结果照原版）。
+     */
+    private Button launchButton;
+    /**
      * 右上角小地图所在表（显隐每帧刷新；对应原版 HudFragment.java:257 的
      * {@code t.visible(() -> Core.settings.getBool("minimap") && !state.rules.tutorial)}）。
      */
@@ -116,15 +124,34 @@ public class HudFragment extends Fragment{
         waveButton.addListener(new ClickListener(){
             @Override
             public void clicked(com.badlogic.gdx.scenes.scene2d.InputEvent event, float x, float y){
-                //对应原版 addPlayButton 的点击分支：客户端管理员走 Call.onAdminRequest(AdminAction.wave)
-                //（由服务端置 wavetime = 0），否则直接 state.wavetime = 0f。
-                //本项目客户端路径不可用（见 canSkipWave 注释）→ 只有 canSkipWave() 成立才允许。
-                if(canSkipWave()){
+                //对应原版 addPlayButton 的点击分支（HudFragment.java:677-688）：
+                //  if(net.client() && player.isAdmin) Call.onAdminRequest(player, AdminAction.wave);
+                //  else if(inLaunchWave()) ui.showConfirm("$confirm", "$launch.skip.confirm", () -> !canSkipWave(), () -> state.wavetime = 0f);
+                //  else state.wavetime = 0f;
+                //本项目客户端路径不可用（见 canSkipWave 注释）→ 只有 canSkipWave() 成立才允许跳过。
+                if(inLaunchWave()){
+                    if(Vars.ui != null){
+                        Vars.ui.showConfirm("$confirm", "$launch.skip.confirm", () -> !canSkipWave(),
+                            () -> Vars.state.wavetime = 0f);
+                    }
+                }else if(canSkipWave()){
                     Vars.state.wavetime = 0f;
                 }
             }
         });
         waveTable.add(waveButton);
+
+        //发射入口（对应原版波次面板的 `setDisabled/clicked` 发射分支，HudFragment.java:664-670）——
+        //只在 canLaunch() 时显示（显隐在下面的 MenuFragment.Act 里每帧刷新）
+        launchButton = button(com.phoenix.game.world.meta.I18n.get("launch", "< LAUNCH >"));
+        launchButton.setVisible(false);
+        launchButton.addListener(new ClickListener(){
+            @Override
+            public void clicked(com.badlogic.gdx.scenes.scene2d.InputEvent event, float x, float y){
+                if(canLaunch()) showLaunchConfirm();
+            }
+        });
+        waveTable.add(launchButton).padLeft(Scl.scl(6f));
 
         //存档 / 读档 / 自动存档
         Button saveBtn = button("存档");
@@ -369,6 +396,10 @@ public class HudFragment extends Fragment{
             if(waveButton != null){
                 waveButton.setVisible(canSkipWave());
             }
+            //"发射"按钮显隐（对应原版波次面板的 `setDisabled(() -> !canLaunch())`：不可发射时禁用/隐藏）
+            if(launchButton != null){
+                launchButton.setVisible(canLaunch());
+            }
             //BOSS 血条显隐（对应原版 `.visible(() -> state.rules.waves && state.boss() != null)`）
             if(bossTable != null){
                 bossTable.setVisible(Vars.state != null && Vars.state.rules != null
@@ -485,6 +516,39 @@ public class HudFragment extends Fragment{
             && Vars.state.enemies == 0
             && Vars.spawner != null && !Vars.spawner.isSpawning()
             && !Vars.state.rules.tutorial;
+    }
+
+    /**
+     * 是否处于"可发射波次"（照抄原版 {@code HudFragment.inLaunchWave}，HudFragment.java:577-582）：
+     * {@code world.isZone() && world.getZone().metCondition() && !net.client() && state.wave % launchPeriod == 0
+     * && !spawner.isSpawning()}。
+     * <p>等价映射：{@code metCondition() && wave % launchPeriod == 0} 就是 {@link com.phoenix.game.type.Zone#isLaunchWave(int)}
+     * （Zone.java:106）→ 直接复用它，避免判据写两份；{@code net.client()} → {@link Vars#isClient()}。
+     */
+    private boolean inLaunchWave(){
+        return Vars.world != null && Vars.state != null && Vars.state.rules != null
+            && Vars.world.isZone()
+            && Vars.world.getZone().isLaunchWave(Vars.state.wave)
+            && !Vars.isClient()
+            && Vars.spawner != null && !Vars.spawner.isSpawning();
+    }
+
+    /** 是否可以发射（照抄原版 {@code HudFragment.canLaunch}，HudFragment.java:584-586）：{@code inLaunchWave() && state.enemies <= 0}。 */
+    private boolean canLaunch(){
+        return inLaunchWave() && Vars.state.enemies <= 0;
+    }
+
+    /**
+     * 发射确认框（对应原版 {@code HudFragment.showLaunchConfirm}，HudFragment.java:557-575）。
+     * <p>原版的结构（$launch 标题 / $launch.confirm 正文居中换行 / 200×54 的 $cancel+$ok 按钮 /
+     * ESC+BACK 关闭 / 每帧 {@code if(!inLaunchWave()) dialog.hide()}）与 {@code UI.showConfirm} 完全一致
+     * → 直接复用它；{@code $ok} 回调改调 {@code Logic.launchZone()}（原版是 {@code Call.launchZone()} 网络 RPC，
+     * 本项目没有 Call 层，单机/主机直接调用）。
+     */
+    private void showLaunchConfirm(){
+        if(Vars.ui == null) return;
+        Vars.ui.showConfirm("$launch", "$launch.confirm", () -> !inLaunchWave(),
+            () -> com.phoenix.game.core.Logic.launchZone());
     }
 
     /** @return 当前输入处理器 */
@@ -673,6 +737,57 @@ public class HudFragment extends Fragment{
         group.getStage().addActor(image);
     }
 
+    /**
+     * 发射成功时的全屏白闪（对应原版 {@code HudFragment.showLaunch}，HudFragment.java:529-540）：
+     * 往 stage 顶层塞一张铺满屏幕的白色 Image（alpha 0 → 1，{@code Actions.fadeIn(40f/60f)} 淡入），
+     * **不自动移除** —— 它一直盖着屏幕（原版即如此，30 tick 后弹出的发射结算框画在它之上），
+     * 直到回菜单时由 update 钩子移除。
+     * <p>⚠ <b>与 libgdx 的差异</b>（同 {@link #showLand()} 的处置）：
+     * <ul>
+     *   <li>原版 {@code new Image()} 用 arc 的默认白 drawable；libgdx 的 Image 没有默认 drawable
+     *       → 显式给 {@code white} 贴图区域（缺失时回退 {@code blank}）。</li>
+     *   <li>原版的 {@code image.update(() -> { if(state.is(State.menu)) image.remove(); })} 是 arc 的每帧回调，
+     *       libgdx 没有 → 用 {@code MenuFragment.Act} 每帧检查菜单态，并把"白闪 + 该 Act"整体移除。</li>
+     * </ul>
+     * ⚠ 刻意多设 {@code Touchable.disabled}：白闪覆盖全屏，禁掉触摸才不会抢结算框的点击
+     * （原版 showLand 也这么设，showLaunch 未设——本项目为安全起见统一禁用）。
+     */
+    public void showLaunch(){
+        com.badlogic.gdx.scenes.scene2d.Stage stage = group == null ? null : group.getStage();
+        if(stage == null) stage = FloatingDialog.scene;
+        if(stage == null) return;
+
+        com.badlogic.gdx.graphics.g2d.TextureRegion white = com.phoenix.game.core.Core.atlas == null
+            ? null : com.phoenix.game.core.Core.atlas.findRegion("white");
+        if(white == null && com.phoenix.game.core.Core.atlas != null){
+            white = com.phoenix.game.core.Core.atlas.findRegion("blank");
+        }
+        if(white == null) return;
+
+        //外层 fillParent 表只作为"每帧回调"的宿主（原版直接往 scene 里加裸 Image）
+        Table flash = new Table();
+        flash.setFillParent(true);
+        flash.setTouchable(com.badlogic.gdx.scenes.scene2d.Touchable.disabled);
+
+        com.badlogic.gdx.scenes.scene2d.ui.Image image = new com.badlogic.gdx.scenes.scene2d.ui.Image(
+            new com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable(white));
+        image.getColor().a = 0f;
+        image.setFillParent(true);
+        image.setTouchable(com.badlogic.gdx.scenes.scene2d.Touchable.disabled);
+        image.addAction(com.badlogic.gdx.scenes.scene2d.actions.Actions.fadeIn(40f / 60f,
+            com.badlogic.gdx.math.Interpolation.fade));
+        flash.addActor(image);
+
+        //菜单态自删（对应原版 image.update 里的 `if(state.is(State.menu)) image.remove()`）
+        flash.addActor(new MenuFragment.Act(() -> {
+            if(Vars.state != null && Vars.state.isMenu()){
+                flash.remove();
+            }
+        }));
+
+        stage.addActor(flash);
+    }
+
     /** 弹出读档对话框（HUD 用）：共用静态实现。 */
     private void showLoadDialog(){
         if(group != null) showLoadDialog(group.getStage(), null);
@@ -853,7 +968,7 @@ public class HudFragment extends Fragment{
         return card;
     }
 
-    /** 波次信息：第 N 波 · 下一波倒计时 · 场上敌军数。 */
+    /** 波次信息：第 N 波 · 发射提示 · 下一波倒计时 · 场上敌军数。 */
     private String waveStatus(){
         if(Vars.state == null || Vars.state.isMenu() || Vars.state.rules == null || !Vars.state.rules.waves){
             return "";
@@ -863,6 +978,29 @@ public class HudFragment extends Fragment{
         sb.append("[WHITE]第 ").append(Vars.state.wave).append(" 波[]");
         if(isBossWave()){
             sb.append("[GOLD]  ☠ BOSS[]");
+        }
+
+        //发射提示（对应原版 addWaveTable 的 labelWrap 里 `if(inLaunchWave())` 分支，HudFragment.java:630-644）：
+        //颜色在"白 ↔ 猩红"间脉动（敌人已清空时猩红 → 表示可以发射），不可发射时显示 launch.unable2，
+        //可发射时显示 launch + launch.next（下一次发射机会的波次）。
+        //⚠ 偏离：原版把 launch/launch.next 各占一行；本项目波次面板是单行横排，改用 " · " 连接（文案键与判据照原版）。
+        if(inLaunchWave()){
+            sb.append("  [#");
+            com.phoenix.game.core.Tmp.c1.set(Color.WHITE).lerp(
+                Vars.state.enemies > 0 ? Color.WHITE : Color.SCARLET,
+                com.phoenix.game.math.Mathf.absin(com.phoenix.game.core.Time.time(), 2f, 1f));
+            sb.append(com.phoenix.game.core.Tmp.c1.toString());
+            sb.append(']');
+            if(!canLaunch()){
+                sb.append(com.phoenix.game.world.meta.I18n.get("launch.unable2", "[scarlet]Unable to LAUNCH.[]"));
+            }else{
+                sb.append(com.phoenix.game.world.meta.I18n.get("launch", "< LAUNCH >"));
+                sb.append(" · ");
+                sb.append(com.phoenix.game.world.meta.I18n.format("launch.next",
+                    "[lightgray]next opportunity at wave {0}",
+                    Vars.state.wave + Vars.world.getZone().launchPeriod));
+            }
+            sb.append("[]");
         }
 
         if(Vars.state.rules.waveTimer){
