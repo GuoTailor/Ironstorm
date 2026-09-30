@@ -158,9 +158,11 @@ public class Bullet extends SolidEntity implements Pool.Poolable, VelocityTrait,
     }
 
     public float damageMultiplier(){
-        //玩家发射的子弹继承玩家等级加成
-        if(owner instanceof BaseUnit && ((BaseUnit)owner).isPlayer && Vars.player != null){
-            return Vars.player.damageMultiplier();
+        //照原版 Bullet.damageMultiplier（mindustry/entities/type/Bullet.java:124-130）：
+        //owner 是单位时返回 getDamageMultipler()（= status.damageMultiplier × rules.unitDamageMultiplier，
+        //玩家单位再乘玩家等级加成 —— 玩家分支已含在 BaseUnit.getDamageMultipler 内）。
+        if(owner instanceof BaseUnit){
+            return ((BaseUnit)owner).getDamageMultipler();
         }
         return 1f;
     }

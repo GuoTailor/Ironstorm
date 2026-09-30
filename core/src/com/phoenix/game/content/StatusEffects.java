@@ -67,7 +67,8 @@ public class StatusEffects implements com.phoenix.game.ctype.ContentList {
     // ---- F1e2：照原版补回缺失的 7 个状态效果 ----
     // 追加在**末尾**（原版顺序里它们本来就在 wet 之后）→ 前 4 个的 id 不变，
     // 但 StatusEffects 整体在 Liquids/Bullets/Mechs/UnitTypes/Blocks 之前注册，新增 7 个会让后面这些类型 id 整体 +7。
-    // 数值一律照抄原版（含 damage 的"每帧"口径；本项目 StatusEffect.update 里另做了 /60 折算，口径差异见类注释）。
+    // 数值一律照抄原版（含 damage 的"每帧"口径；本项目 StatusEffect.update 走 unit.damagePeriodic(damage)，
+    // 其内部 = damage(amount * Time.delta())，而本项目 Time.delta()≈1.0/帧 → 与原版同口径，无 /60 折算）。
 
     /** 熔化：被熔渣烫伤，减速 + 持续掉血（原版挂 Liquids.slag） */
     public static final StatusEffect melting = new StatusEffect("melting"){{

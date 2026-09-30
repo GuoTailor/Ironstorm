@@ -2,6 +2,7 @@ package com.phoenix.game.core;
 
 import com.phoenix.game.Vars;
 import com.phoenix.game.entities.type.Bullet;
+import com.phoenix.game.entities.type.BaseUnit;
 import com.phoenix.game.entities.Effects;
 import com.phoenix.game.entities.Units;
 import com.phoenix.game.game.EventType;
@@ -145,7 +146,10 @@ public class Logic {
         Team waveTeam = Vars.state.rules.waveTeam;
 
         for(int i = 0; i < Units.units.size; i++){
-            if(Units.units.get(i).getTeam() == waveTeam){
+            BaseUnit unit = Units.units.get(i);
+            //照原版 Logic.update（mindustry/core/Logic.java:215）：还要 countsAsEnemy()，
+            //否则敌方 Builder/Miner/Repair 无人机会被计入敌人数（HUD 偏高 + waitForWaveToEnd 卡波）。
+            if(unit.getTeam() == waveTeam && unit.countsAsEnemy()){
                 enemies++;
             }
         }

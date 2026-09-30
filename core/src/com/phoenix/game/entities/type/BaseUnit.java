@@ -1,5 +1,6 @@
 package com.phoenix.game.entities.type;
 
+import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.math.MathUtils;
@@ -39,6 +40,7 @@ import com.phoenix.game.type.UnitType;
 import com.phoenix.game.type.Weapon;
 import com.phoenix.game.world.Floor;
 import com.phoenix.game.world.Tile;
+import com.phoenix.game.world.blocks.defense.DeflectorWall;
 import com.phoenix.game.world.meta.BlockFlag;
 
 /**
@@ -296,6 +298,11 @@ public class BaseUnit extends SolidEntity implements TargetTrait, HealthTrait, M
         //原版 BaseUnit.java:214：return type.immunities.contains(effect);
         //⚠ 本项目 type 由 init() 赋值、对象池取出到 init 之间可能为 null，故判空
         return type != null && type.immunities.contains(effect);
+    }
+
+    /** @return 该单位是否计入波次 UI 的敌人数（照原版 {@code BaseUnit.countsAsEnemy}，mindustry/entities/type/BaseUnit.java:129-132）。 */
+    public boolean countsAsEnemy(){
+        return true;
     }
 
     public float getDamageMultipler(){
@@ -965,7 +972,38 @@ public class BaseUnit extends SolidEntity implements TargetTrait, HealthTrait, M
             commandAI.hit((com.phoenix.game.entities.type.Bullet)other);
         }
         if(other instanceof DamageTrait){
-            damage(((DamageTrait)other).getShieldDamage());
+            //照原版 DestructibleEntity.collision（mindustry/entities/type/DestructibleEntity.java:16-25）：
+            //直击伤害取 damage()（不是 getShieldDamage()，后者 = max(damage, splashDamage) 只给 ForceProjector 用，
+            //用在这里会把 Flak 等 splash>damage 的子弹直击伤害放大）；并补 onHit / killed 两个回调。
+            boolean wasDead = isDead();
+            onHit(other);
+            damage(((DamageTrait)other).damage());
+            if(!wasDead && isDead()){
+                ((DamageTrait)other).killed(this);
+            }
+        }
+    }
+
+    /**
+     * 受击回调（照原版 {@code BaseUnit.onHit}，mindustry/entities/type/BaseUnit.java:89-98）：
+     * 被 {@code DeflectorEntity} 所属子弹命中、且本方非玩家队时，延后一帧判定若已死则 fire
+     * {@code Trigger.phaseDeflectHit}（反射墙击杀玩家单位的成就/统计钩子）。
+     * <p>⚠ 本项目 {@code DeflectorWall} 有**刻意简化**：弹回子弹时不改换归属（原版 {@code resetOwner}），
+     * 故 {@code getOwner() instanceof DeflectorEntity} 当前恒为 false，本分支实际不会触发；
+     * 这里仍照原版结构保留（一旦将来补上 resetOwner 即生效）。
+     */
+    @Override
+    public void onHit(SolidTrait entity){
+        if(entity instanceof Bullet && ((Bullet)entity).getOwner() instanceof DeflectorWall.DeflectorEntity
+            && Vars.player != null && getTeam() != Vars.player.getTeam()){
+            //原版走 Core.app.post 延后一帧；本项目无 Core.app.post，用 Gdx.app.postRunnable（Events.fire 是同步的）
+            if(Gdx.app != null){
+                Gdx.app.postRunnable(() -> {
+                    if(isDead()){
+                        Events.fire(EventType.Trigger.phaseDeflectHit);
+                    }
+                });
+            }
         }
     }
 
@@ -1119,7 +1157,10 @@ public class BaseUnit extends SolidEntity implements TargetTrait, HealthTrait, M
         Floor floor = getFloorOn();
         Tile tile = tileOn();
 
-        velocity.limit(maxVelocity());
+        //状态速度倍率（照原版 Unit.updateVelocityStatus，mindustry/entities/type/Unit.java:256）：
+        //freezing(0.6)/wet(0.9)/tarred(0.6)/melting(0.8)/boss(1.1)/overdrive(1.15) 的倍率在这里生效。
+        //⚠ 本项目 Time.delta() 是方法（≈1.0/帧），不是 1/60。
+        velocity.limit(maxVelocity()).scl(1f + (status.getSpeedMultiplier() - 1f) * Time.delta());
 
         //出界即死（照原版 Unit.java:258-260；finalWorldBounds = worldBounds + 500 = 600）
         if(x < -Vars.finalWorldBounds || y < -Vars.finalWorldBounds

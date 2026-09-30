@@ -28,7 +28,7 @@ public class StatusEffect extends com.phoenix.game.ctype.UnlockableContent{
     public float healthMultiplier = 1f;
     /** 护甲倍率（百分比） */
     public float armorMultiplier = 1f;
-    /** 每秒伤害（负值表示回血，见 {@link #update}） */
+    /** 每帧伤害（原版 {@code Damage per frame}；负值表示每帧回血，见 {@link #update}） */
     public float damage = 0f;
     /** 状态期间随机叠加在单位身上的粒子特效（对应原版 {@code StatusEffect.effect}）。 */
     public Effect effect = Fx.none;
@@ -60,7 +60,9 @@ public class StatusEffect extends com.phoenix.game.ctype.UnlockableContent{
     /** 状态持续期间每帧调用。 */
     public void update(BaseUnit unit, float time){
         if(damage > 0.001f){
-            unit.damage(damage * Time.delta() / 60f);
+            //照原版 StatusEffect.update（mindustry/type/StatusEffect.java:47-52）：走 damagePeriodic，
+            //其内部 = damage(amount * Time.delta())。⚠ 本项目 Time.delta()≈1.0/帧 → 每帧扣 damage（不是 /60）。
+            unit.damagePeriodic(damage);
         }else if(damage < -0.001f){
             //负伤害 = 回血（对应原版 unit.healBy(damage * Time.delta())）
             unit.healBy(damage * Time.delta());
